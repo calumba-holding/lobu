@@ -36,15 +36,14 @@ RUN addgroup --gid 1001 claude && \
     adduser --system --uid 1001 --ingroup claude --home /home/claude claude && \
     echo 'claude ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
-# Install Claude Code CLI globally and make it accessible to all users
-RUN bun install -g @anthropic-ai/claude-code@1.0.59 && \
-    claude_path=$(find /root/.bun -name claude -type f 2>/dev/null | head -1) && \
-    if [ -z "$claude_path" ]; then claude_path=$(which claude 2>/dev/null || echo ""); fi && \
-    if [ -z "$claude_path" ]; then claude_path=$(find / -name claude -type f -executable 2>/dev/null | grep -v proc | head -1); fi && \
-    echo "Found claude at: $claude_path" && \
-    if [ -n "$claude_path" ]; then ln -sf "$claude_path" /usr/local/bin/claude; else echo "Warning: Claude binary not found, continuing without symlink"; fi && \
+# Install Claude Code CLI globally and make it accessible to all users - using npm instead
+RUN npm install -g @anthropic-ai/claude-code && \
+    echo "Npm global packages:" && \
+    npm list -g --depth=0 && \
+    echo "Looking for claude binary..." && \
+    which claude && \
     echo "Testing claude command..." && \
-    (/usr/local/bin/claude --version || which claude || echo "Claude installation completed but binary not accessible")
+    claude --version
 
 # Ensure the non-root user can also access bun and claude
 RUN echo 'export PATH="/home/bun/.bun/bin:$PATH"' >> /home/claude/.bashrc && \
