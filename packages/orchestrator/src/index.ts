@@ -9,13 +9,15 @@ import { config as dotenvConfig } from 'dotenv';
 import { join } from 'path';
 import { OrchestratorConfig, OrchestratorError, ErrorCode } from './types';
 import { DatabasePool } from './database-pool';
-import { DeploymentManager } from './deployment-manager';
+import { BaseDeploymentManager } from './base/BaseDeploymentManager';
+import { K8sDeploymentManager } from './k8s/K8sDeploymentManager';
+import { DockerDeploymentManager } from './docker/DockerDeploymentManager';
 import { QueueConsumer } from './queue-consumer';
 
 class PeerbotOrchestrator {
   private config: OrchestratorConfig;
   private dbPool: DatabasePool;
-  private deploymentManager: DeploymentManager;
+  private deploymentManager: BaseDeploymentManager;
   private queueConsumer: QueueConsumer;
   private isRunning = false;
   private cleanupInterval?: NodeJS.Timeout;
@@ -23,8 +25,64 @@ class PeerbotOrchestrator {
   constructor(config: OrchestratorConfig) {
     this.config = config;
     this.dbPool = new DatabasePool(config.database);
-    this.deploymentManager = new DeploymentManager(config, this.dbPool);
+    this.deploymentManager = this.createDeploymentManager(config);
     this.queueConsumer = new QueueConsumer(config, this.deploymentManager);
+  }
+
+  private createDeploymentManager(config: OrchestratorConfig): BaseDeploymentManager {
+    // Auto-detect deployment mode based on environment
+    if (this.isKubernetesAvailable()) {
+      console.log('🚀 Kubernetes detected, using K8sDeploymentManager');
+      return new K8sDeploymentManager(config, this.dbPool);
+    }
+    
+    if (this.isDockerAvailable()) {
+      console.log('🚀 Docker detected, using DockerDeploymentManager');
+      return new DockerDeploymentManager(config, this.dbPool);
+    }
+    
+    throw new Error('Neither Kubernetes nor Docker is available. Please ensure one is installed and accessible.');
+  }
+
+  private isKubernetesAvailable(): boolean {
+    try {
+      // Check if running in a Kubernetes cluster
+      if (process.env.KUBERNETES_SERVICE_HOST) {
+        return true;
+      }
+      
+      // Check if kubectl config is available
+      const fs = require('fs');
+      const os = require('os');
+      const path = require('path');
+      
+      // Check for kubeconfig in default locations
+      const kubeconfigPaths = [
+        process.env.KUBECONFIG,
+        path.join(os.homedir(), '.kube', 'config')
+      ].filter(Boolean);
+      
+      return kubeconfigPaths.some(configPath => {
+        try {
+          return fs.existsSync(configPath) && fs.statSync(configPath).isFile();
+        } catch {
+          return false;
+        }
+      });
+    } catch {
+      return false;
+    }
+  }
+
+  private isDockerAvailable(): boolean {
+    try {
+      // Try to connect to Docker daemon
+      const { execSync } = require('child_process');
+      execSync('docker version', { stdio: 'ignore', timeout: 5000 });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async start(): Promise<void> {
