@@ -45,7 +45,7 @@
       "onAutoForward": "notify"
     },
     "3001": {
-      "label": "Dispatcher (Skaffold)",
+      "label": "Dispatcher",
       "onAutoForward": "notify"
     },
     "3002": {

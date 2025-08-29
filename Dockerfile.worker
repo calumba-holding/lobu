@@ -97,13 +97,7 @@ RUN mkdir -p /home/claude/.claude/projects && \
     chmod -R 755 /home/claude/.claude && \
     echo 'export PATH="/home/claude/bin:$PATH"' >> /home/claude/.bashrc
 
-# Switch to non-root user
-USER claude
-
-# Set working directory to worker
-WORKDIR /app/packages/worker
-
-# Create an entrypoint script that handles both dev and prod modes
+# Create an entrypoint script that handles both dev and prod modes (before switching users)
 RUN echo '#!/bin/bash\n\
 set -e\n\
 \n\
@@ -126,6 +120,12 @@ cd /app/packages/worker\n\
 exec bun run dist/index.js' > /app/entrypoint.sh && \
     chmod +x /app/entrypoint.sh && \
     chown claude:claude /app/entrypoint.sh
+
+# Switch to non-root user
+USER claude
+
+# Set working directory to worker
+WORKDIR /app/packages/worker
 
 # Set the build mode as an environment variable
 ENV BUILD_MODE=${BUILD_MODE}

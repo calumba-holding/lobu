@@ -1,3 +1,4 @@
+-- migrate:up
 -- Consolidated PostgreSQL schema for queue system with RLS-based bot isolation
 -- This migration sets up pgboss, bot isolation, RLS policies, and all required functions
 
@@ -374,3 +375,20 @@ WHERE qj.status IN ('pending', 'active');
 INSERT INTO bots (bot_id, platform, platform_id, name, created_at) 
 VALUES ('default-slack-bot', 'slack', 'unknown', 'Default Slack Bot', NOW())
 ON CONFLICT (platform, bot_id) DO NOTHING;
+
+-- migrate:down
+-- Drop all tables and extensions created in the up migration
+DROP VIEW IF EXISTS active_jobs_with_payload;
+DROP TABLE IF EXISTS job_payloads CASCADE;
+DROP TABLE IF EXISTS queue_jobs CASCADE;
+DROP TABLE IF EXISTS conversation_threads CASCADE;
+DROP TABLE IF EXISTS user_configs CASCADE;
+DROP TABLE IF EXISTS users CASCADE;
+DROP TABLE IF EXISTS bots CASCADE;
+DROP FUNCTION IF EXISTS test_user_isolation(VARCHAR(100));
+DROP FUNCTION IF EXISTS ensure_job_user_context();
+DROP FUNCTION IF EXISTS update_job_status(UUID, VARCHAR(20), INTEGER);
+DROP FUNCTION IF EXISTS enqueue_job(VARCHAR(100), VARCHAR(100), VARCHAR(50), INTEGER, INTEGER, JSONB);
+DROP FUNCTION IF EXISTS create_isolated_pgboss_user(VARCHAR(100), VARCHAR(255));
+DROP FUNCTION IF EXISTS set_user_context(VARCHAR(100));
+DROP EXTENSION IF EXISTS pgcrypto;

@@ -4,7 +4,7 @@ A powerful [Claude Code](https://claude.ai/code) Slack application that brings A
 
 ## Installation
 
-- Install [Skaffold](https://skaffold.dev/)
+- Install [Docker](https://docker.com/)
 - Install [Kubernetes K3S](https://k3s.io/)
 - Run `make dev`
 - Create `.env` file as follows:

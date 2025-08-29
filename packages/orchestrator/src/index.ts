@@ -7,9 +7,9 @@ initSentry();
 
 import { config as dotenvConfig } from 'dotenv';
 import { join } from 'path';
+import { spawn } from 'child_process';
 import { OrchestratorConfig, OrchestratorError, ErrorCode } from './types';
 import { DatabasePool } from './database-pool';
-import { MigrationRunner } from './migrations';
 import { BaseDeploymentManager } from './base/BaseDeploymentManager';
 import { K8sDeploymentManager } from './k8s/K8sDeploymentManager';
 import { DockerDeploymentManager } from './docker/DockerDeploymentManager';
@@ -105,6 +105,54 @@ class PeerbotOrchestrator {
     }
   }
 
+  /**
+   * Run database migrations using dbmate
+   */
+  private async runDbmateMigrations(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      console.log('🔧 Starting database migrations with dbmate...');
+      
+      const dbmateProcess = spawn('./bin/dbmate', ['up'], {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          DATABASE_URL: `${this.config.database.connectionString}?sslmode=disable`
+        },
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
+
+      let stdout = '';
+      let stderr = '';
+
+      dbmateProcess.stdout?.on('data', (data) => {
+        stdout += data.toString();
+        console.log(`[dbmate] ${data.toString().trim()}`);
+      });
+
+      dbmateProcess.stderr?.on('data', (data) => {
+        stderr += data.toString();
+        console.error(`[dbmate] ${data.toString().trim()}`);
+      });
+
+      dbmateProcess.on('close', (code) => {
+        if (code === 0) {
+          console.log('✅ Database migrations completed successfully');
+          resolve();
+        } else {
+          console.error(`❌ Database migrations failed with exit code ${code}`);
+          console.error('stdout:', stdout);
+          console.error('stderr:', stderr);
+          reject(new Error(`dbmate failed with exit code ${code}`));
+        }
+      });
+
+      dbmateProcess.on('error', (error) => {
+        console.error('❌ Failed to start dbmate:', error);
+        reject(error);
+      });
+    });
+  }
+
   async start(): Promise<void> {
     try {
       console.log('🚀 Starting Peerbot Orchestrator with simplified deployment management...');
@@ -113,9 +161,8 @@ class PeerbotOrchestrator {
       await this.testDatabaseConnection();
       console.log('✅ Database connection verified');
 
-      // Run database migrations
-      const migrationRunner = new MigrationRunner(this.dbPool);
-      await migrationRunner.runMigrations();
+      // Run database migrations using dbmate
+      await this.runDbmateMigrations();
 
       // Start queue consumer
       await this.queueConsumer.start();

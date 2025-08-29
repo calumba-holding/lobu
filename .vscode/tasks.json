@@ -1,0 +1,31 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Make Dev",
+            "type": "shell",
+            "command": "trap 'rm -f peerbot.log' EXIT; make dev | tee peerbot.log",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "new",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": {}
+            },
+            "problemMatcher": [],
+            "isBackground": true,
+            "runOptions": {
+                "runOn": "default"
+            }
+        }
+    ]
+}

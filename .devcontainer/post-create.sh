@@ -34,10 +34,10 @@ alias kd="kubectl describe"
 alias ka="kubectl apply -f"
 alias kx="kubectl exec -it"
 
-# Skaffold aliases
-alias sk="skaffold"
-alias skd="skaffold dev"
-alias skb="skaffold build"
+# Docker aliases
+alias d="docker"
+alias dc="docker compose"
+alias dps="docker ps"
 EOF
 
 # Setup npm global directory as node user
@@ -89,7 +89,7 @@ This is a development environment for the Peerbot running in a VS Code DevContai
 
 ## Available Commands
 
-- `make dev` - Start Skaffold development mode with hot reload
+- `make dev` - Start Docker development mode with hot reload
 - `make k3s-setup` - Setup k3s cluster (if needed)
 - `make k3s-install` - Install the application to k3s
 - `./test-bot.js "message"` - Test the bot with a message
@@ -98,7 +98,7 @@ This is a development environment for the Peerbot running in a VS Code DevContai
 
 - Bun package manager installed
 - Claude Code CLI available globally
-- Kubernetes tools (kubectl, helm, skaffold) installed
+- Kubernetes tools (kubectl, helm) and Docker installed
 - PostgreSQL client available
 - MCP Process Manager server configured
 
@@ -121,7 +121,7 @@ echo "✨ DevContainer setup complete!"
 echo ""
 echo "📚 Quick Start Guide:"
 echo "  1. Configure your .env file with Slack and GitHub tokens"
-echo "  2. Run 'make dev' to start development with Skaffold"
+echo "  2. Run 'make dev' to start development with Docker"
 echo "  3. Use './test-bot.js \"your message\"' to test the bot"
 echo ""
 echo "🛠️ Available Tools:"
@@ -129,7 +129,7 @@ echo "  - Claude Code CLI: $(claude --version 2>/dev/null || echo 'Run: npm inst
 echo "  - Bun: $(bun --version)"
 echo "  - Node: $(node --version)"
 echo "  - Kubectl: $(kubectl version --client --short 2>/dev/null || echo 'Not available')"
-echo "  - Skaffold: $(skaffold version 2>/dev/null || echo 'Not available')"
+echo "  - Docker: $(docker --version 2>/dev/null || echo 'Not available')"
 echo ""
 echo "💡 Tips:"
 echo "  - The MCP process manager is configured for Claude Code"

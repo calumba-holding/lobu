@@ -8,7 +8,7 @@ dispatcher:
   image:
     repository: peerbot-dispatcher
     pullPolicy: IfNotPresent
-    tag: ""  # Skaffold will manage this
+    tag: "latest"
   
   service:
     type: ClusterIP

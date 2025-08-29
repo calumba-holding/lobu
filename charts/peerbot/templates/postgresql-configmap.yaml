@@ -7,10 +7,6 @@ metadata:
     {{- include "peerbot.labels" . | nindent 4 }}
     app.kubernetes.io/component: postgresql
 data:
-  02-init-schema.sql: |
-    -- Load the initial schema migration
-    \i /docker-entrypoint-initdb.d/schema-001_initial_schema.sql
-    
   03-setup-pgboss-post-init.sql: |
     -- This script sets up pgboss RLS after pgboss initializes its tables
     -- It will be automatically executed when pgboss tables are created
@@ -87,5 +83,3 @@ data:
     END;
     $$ LANGUAGE plpgsql;
     
-  schema-001_initial_schema.sql: |
-{{ .Files.Get "../../db/migrations/001_initial_schema.sql" | indent 4 }}

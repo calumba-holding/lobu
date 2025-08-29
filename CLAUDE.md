@@ -1,34 +1,26 @@
 # CLAUDE.md
 
-- You MUST only do what has been asked; nothing more, nothing less. You can check logs with k8s to understand the recent behavior the user is asking for.
-- Anytime you make changes in the code that should be tested, you MUST run ./test-bot.js "Relevant prompt" --timeout [based on complexity change by default 10] and make sure it works properly. If the script fails (including getting stuck at "Starting environment setup"), you MUST fix it.
+- You MUST only do what has been asked; nothing more, nothing less. 
+- You can check logs with docker to understand the recent behavior the user is asking for.
+- Anytime you make changes in the code, you MUST:
+1. Have the bot running via `make dev` running in the background for development that uses hot reload. If there is `peerbot.log` file in the project root, you can skip this step.
+2. Run ./test-bot.js "Relevant prompt" --timeout [based on complexity change by default 10] and make sure it works properly. If the script fails (including getting stuck at "Starting environment setup"), you MUST fix it.
+2. Read the logs from `peerbot.log` to make sure it works properly.
 - If you create ephemeral files, you MUST delete them when you're done with them.
-- Always use Skaffold to build and run the Slack bot.
+- Use Docker to build and run the Slack bot in development mode, K8S for production.
 - NEVER create files unless they're absolutely necessary for achieving your goal. Instead try to run the code on the fly for testing reasons.
 - NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User. If you need to remember something, add it to CLAUDE.md as a a single sentence.
-- After making core changes (like removing environment variables), restart pods with: `kubectl rollout restart deployment/peerbot-dispatcher -n peerbot` to ensure latest code is running.
-- Keep `make dev` running continuously - If Skaffold stops detecting changes, restart the `make dev` session.
 
 ## Deployment Instructions
 
-When making changes to the Slack bot with `make dev` running:
-
-1. **Dispatcher changes** (packages/dispatcher/): Skaffold will auto-rebuild and deploy
-2. **Worker changes** (packages/worker/): Skaffold will auto-rebuild and deploy
-3. **Core-runner changes** (packages/core-runner/): First build core-runner, then Skaffold will detect worker changes:
-   ```bash
-   cd packages/core-runner && bun run build
-   # Skaffold will detect the change and rebuild worker automatically
-   ```
-
-The bot updates automatically when running `make dev` - no manual steps needed!
+When making changes to the Slack bot:
+2. **Docker images**: Make sure dev command is running in the background. Hot reload is enabled.
+3. **Kubernetes deployment**: Apply changes with kubectl or restart deployments
 
 ## Development Configuration
 
-- Rate limiting is disabled in local development (dispatcher.disableRateLimit: true in values-local.yaml)
-- Dockerfile.worker supports both dev and prod modes via BUILD_MODE build arg
-- Production build (default): `docker build -f Dockerfile.worker -t claude-worker:latest .`
-- Development build: `docker build -f Dockerfile.worker --build-arg BUILD_MODE=dev -t claude-worker:dev .`
+- Rate limiting is disabled in local development
+- To manually rebuild worker image if needed: `docker build -f Dockerfile.worker -t claude-worker:latest .`
 
 ## k3s Setup
 

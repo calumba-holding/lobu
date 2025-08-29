@@ -71,7 +71,7 @@ check_prerequisites() {
     echo "📋 Checking prerequisites..."
     echo ""
     
-    local checks=("docker:Docker:true" "kubectl:kubectl:true" "skaffold:Skaffold:true")
+    local checks=("docker:Docker:true" "kubectl:kubectl:true")
     
     for check in "${checks[@]}"; do
         IFS=':' read -r command name required <<< "$check"
@@ -585,7 +585,7 @@ full_setup() {
     echo "To start the development environment, run:"
     echo "  make dev"
     echo ""
-    echo "Skaffold will automatically build and deploy Docker images."
+    echo "Docker will be used to build and deploy container images."
     echo "Happy coding! 🚀"
 }
 

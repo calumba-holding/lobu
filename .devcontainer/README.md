@@ -18,7 +18,7 @@ This DevContainer provides a complete development environment for the Peerbot wi
 ### ☸️ Kubernetes Stack
 - **kubectl**: Kubernetes command-line tool
 - **Helm**: Kubernetes package manager
-- **Skaffold**: Continuous development for Kubernetes applications
+- **Docker**: Container build and deployment tools
 - **k3s**: Lightweight Kubernetes (optional, for local testing)
 - **Docker-in-Docker**: Build and run containers within the devcontainer
 
@@ -61,8 +61,8 @@ CLAUDE_API_KEY=sk-ant-...
 # Start development with hot reload
 make dev
 
-# Or manually with Skaffold
-skaffold dev --port-forward
+# Or manually with Docker
+make dev
 ```
 
 ## Available Commands
@@ -74,9 +74,9 @@ skaffold dev --port-forward
 - `kd` → kubectl describe
 - `ka` → kubectl apply -f
 - `kx` → kubectl exec -it
-- `sk` → skaffold
-- `skd` → skaffold dev
-- `skb` → skaffold build
+- `d` → docker
+- `dc` → docker compose
+- `dps` → docker ps
 
 ### Testing
 ```bash
@@ -106,7 +106,7 @@ The following ports are automatically forwarded:
 | Port | Service | Description |
 |------|---------|-------------|
 | 3000 | Slack App | Main application endpoint |
-| 3001 | Dispatcher (Skaffold) | Development server |
+| 3001 | Dispatcher (Docker) | Development server |
 | 3002 | Dispatcher Service | Service endpoint |
 | 5432 | PostgreSQL Internal | Database internal port |
 | 5433 | PostgreSQL Forwarded | Database external access |
@@ -158,6 +158,6 @@ The following extensions are automatically installed:
 ## Resources
 
 - [Claude Code Documentation](https://docs.anthropic.com/claude-code)
-- [Skaffold Documentation](https://skaffold.dev/docs/)
+- [Docker Documentation](https://docs.docker.com/)
 - [Kubernetes Documentation](https://kubernetes.io/docs/)
 - [Bun Documentation](https://bun.sh/docs)

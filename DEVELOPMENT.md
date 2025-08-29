@@ -8,7 +8,7 @@ Before starting, ensure you have the following installed:
 
 1. **Kubernetes** - [Download for Mac](https://orbstack.dev/)
 2. **kubectl** - [Install Guide](https://kubernetes.io/docs/tasks/tools/)
-3. **Skaffold** - [Install Guide](https://skaffold.dev/docs/install/)
+3. **Docker** - [Install Guide](https://docs.docker.com/get-docker/)
 4. **Bun** - Install with: `curl -fsSL https://bun.sh/install | bash`
 5. **Node.js** (v18+) - [Download](https://nodejs.org/)
 
@@ -27,7 +27,7 @@ Or with a specific task:
 ## Development Workflow
 
 1. **Make code changes** in `packages/` directories
-2. **Skaffold auto-rebuilds** when files change (if `make dev` is running)
+2. **Docker rebuilds** may be needed for changes (use `make build-worker`)
 3. **Test changes** with the test bot script
 4. **Check logs** with:
    ```bash
@@ -68,11 +68,8 @@ kubectl get events -n peerbot --sort-by=.metadata.creationTimestamp
 
 To stop and clean up all resources:
 ```bash
-# Stop Skaffold (Ctrl+C in the terminal running make dev)
+# Stop development server (Ctrl+C in the terminal running make dev)
 
-# Delete all resources
-skaffold delete --namespace=peerbot
-
-# Or use make
-make destroy
+# Clean up Docker containers
+make clean
 ```

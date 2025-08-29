@@ -226,7 +226,7 @@ export class SlackDispatcher {
       }
       
       const mode = this.config.slack.socketMode ? "Socket Mode" : `HTTP on port ${this.config.slack.port}`;
-      logger.info(`🚀 Slack Dispatcher is running in ${mode}! (Local Dev with Skaffold)`);
+      logger.info(`🚀 Slack Dispatcher is running in ${mode}! (Local Development)`);
       
       // Log configuration
       logger.info("Configuration:");
