@@ -83,7 +83,6 @@
   // Mounts
   "mounts": [
     "source=${localWorkspaceFolder}/.env,target=/workspace/.env,type=bind,consistency=cached",
-    "source=${localWorkspaceFolder}/.env.qa,target=/workspace/.env.qa,type=bind,consistency=cached",
     "source=${localEnv:HOME}/.kube,target=/home/node/.kube,type=bind,consistency=cached",
     "source=claude-code-slack-node-modules,target=/workspace/node_modules,type=volume"
   ],

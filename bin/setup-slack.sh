@@ -529,7 +529,11 @@ POSTGRESQL_CONNECTION_STRING=${POSTGRESQL_CONNECTION_STRING:-}
 # Worker Configuration
 WORKER_IDLE_CLEANUP_MINUTES=${WORKER_IDLE_CLEANUP_MINUTES:-60}
 
-# Kubernetes Configuration
+# QA Testing Configuration (for QA testing the bot via test-bot.js)
+QA_SLACK_BOT_TOKEN=${QA_SLACK_BOT_TOKEN:-}
+QA_TARGET_BOT_USERNAME=${QA_TARGET_BOT_USERNAME:-}
+
+# Kubernetes Configuration (only active for kubernetes deployment.)
 KUBERNETES_NAMESPACE=${KUBERNETES_NAMESPACE:-peerbot}
 EOF
 }

@@ -93,7 +93,6 @@ export class QueueConsumer {
   async stop(): Promise<void> {
     this.isRunning = false;
     await this.pgBoss.stop();
-    console.log('✅ Queue consumer stopped');
   }
 
   /**
@@ -201,17 +200,9 @@ export class QueueConsumer {
       // Create thread-specific queue name: thread_message_[deploymentid]
       const threadQueueName = `thread_message_${deploymentName}`;
       
-      console.log(`🚀 [DEBUG] About to send message to thread queue: ${threadQueueName}`);
-      console.log(`🚀 [DEBUG] Message data:`, JSON.stringify({
-        userId: data.userId,
-        threadId: data.threadId,
-        messageText: data.messageText
-      }, null, 2));
       
       // Create the thread-specific queue if it doesn't exist
-      console.log(`🚀 [DEBUG] Creating/verifying thread queue: ${threadQueueName}`);
       await this.pgBoss.createQueue(threadQueueName);
-      console.log(`✅ [DEBUG] Thread queue created/verified: ${threadQueueName}`);
       
       // Send message to thread-specific queue
       const jobId = await this.pgBoss.send(threadQueueName, {
@@ -230,7 +221,6 @@ export class QueueConsumer {
         priority: 10 // Thread messages have high priority
       });
 
-      console.log(`🚀 [DEBUG] pgBoss.send() returned: ${JSON.stringify(jobId)} (type: ${typeof jobId})`);
       
       if (!jobId) {
         throw new Error(`pgBoss.send() returned null/undefined for queue: ${threadQueueName}`);

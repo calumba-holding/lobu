@@ -75,18 +75,34 @@ export class SlackEventHandlers {
         }
 
         const userRequest = this.extractUserRequest(context.text);
+        
+        // Log full user message details
+        console.log(`📨 FULL USER MESSAGE:`, {
+          userId: context.userId,
+          userDisplayName: context.userDisplayName,
+          channelId: context.channelId,
+          messageTs: context.messageTs,
+          threadTs: context.threadTs,
+          originalText: context.text,
+          extractedRequest: userRequest,
+          timestamp: new Date().toISOString()
+        });
+        
         await this.handleUserRequest(context, userRequest, client);
         
       } catch (error) {
         logger.error("Error handling app mention:", error);
         
         try {
+          console.log(`🔴 REACTION CHANGE: Adding error reaction 'x' to message ${event.ts} in channel ${event.channel}`);
           await client.reactions.add({
             channel: event.channel,
             timestamp: event.ts,
             name: "x",
           });
+          console.log(`✅ REACTION ADDED: 'x' successfully added to message ${event.ts}`);
         } catch (reactionError) {
+          console.log(`❌ REACTION FAILED: Could not add 'x' reaction to message ${event.ts}:`, reactionError);
           logger.error("Failed to add error reaction:", reactionError);
         }
         
@@ -147,6 +163,19 @@ export class SlackEventHandlers {
         }
 
         const userRequest = this.extractUserRequest(context.text);
+        
+        // Log full user message details
+        console.log(`📨 FULL USER MESSAGE:`, {
+          userId: context.userId,
+          userDisplayName: context.userDisplayName,
+          channelId: context.channelId,
+          messageTs: context.messageTs,
+          threadTs: context.threadTs,
+          originalText: context.text,
+          extractedRequest: userRequest,
+          timestamp: new Date().toISOString()
+        });
+        
         await this.handleUserRequest(context, userRequest, client);
         
       } catch (error) {
@@ -361,13 +390,16 @@ export class SlackEventHandlers {
 
       // Add immediate acknowledgment reaction
       try {
+        console.log(`👀 REACTION CHANGE: Adding acknowledgment reaction 'eyes' to message ${context.messageTs} in channel ${context.channelId} (user: ${context.userId})`);
         await client.reactions.add({
           channel: context.channelId,
           timestamp: context.messageTs,
           name: "eyes"
         });
+        console.log(`✅ REACTION ADDED: 'eyes' successfully added to message ${context.messageTs} - bot is processing request`);
         logger.info(`Added eyes reaction to message ${context.messageTs}`);
       } catch (reactionError) {
+        console.log(`❌ REACTION FAILED: Could not add 'eyes' reaction to message ${context.messageTs}:`, reactionError);
         logger.warn("Failed to add eyes reaction:", reactionError);
       }
 
@@ -454,17 +486,23 @@ export class SlackEventHandlers {
       
       // Try to update reaction to error
       try {
+        console.log(`🔄 REACTION CHANGE: Removing 'eyes' reaction from message ${context.messageTs} due to error`);
         await client.reactions.remove({
           channel: context.channelId,
           timestamp: context.messageTs,
           name: "eyes",
         });
+        console.log(`✅ REACTION REMOVED: 'eyes' removed from message ${context.messageTs}`);
+        
+        console.log(`🔴 REACTION CHANGE: Adding error reaction 'x' to message ${context.messageTs}`);
         await client.reactions.add({
           channel: context.channelId,
           timestamp: context.messageTs,
           name: "x",
         });
+        console.log(`✅ REACTION ADDED: 'x' successfully added to message ${context.messageTs} - indicating error`);
       } catch (reactionError) {
+        console.log(`❌ REACTION FAILED: Could not update reactions on message ${context.messageTs}:`, reactionError);
         logger.error("Failed to update error reaction:", reactionError);
       }
       

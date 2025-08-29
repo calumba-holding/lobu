@@ -193,6 +193,7 @@ export async function runClaudeWithProgress(
   }
 
   // Output to console
+  console.log(`🚀 CLAUDE EXECUTION: Starting Claude agent with prompt file ${config.promptPath} (${promptSize} bytes)`);
   logger.info(`Running Claude with prompt from file: ${config.promptPath}`);
 
   // Start sending prompt to pipe in background
@@ -246,6 +247,15 @@ export async function runClaudeWithProgress(
       try {
         // Check if this line is a JSON object
         const parsed = JSON.parse(line);
+        
+        // Log agent stream updates with useful context
+        if (parsed.type) {
+          console.log(`🤖 AGENT STREAM: ${parsed.type}${parsed.content ? ` - ${parsed.content.substring(0, 100)}${parsed.content.length > 100 ? '...' : ''}` : ''}`);
+        } else if (parsed.error) {
+          console.log(`❌ AGENT ERROR: ${parsed.error}`);
+        } else if (parsed.message) {
+          console.log(`💬 AGENT MESSAGE: ${parsed.message.substring(0, 100)}${parsed.message.length > 100 ? '...' : ''}`);
+        }
         
         // Call progress callback if provided
         if (onProgress) {
@@ -372,6 +382,7 @@ export async function runClaudeWithProgress(
 
   // Process the output and save execution metrics
   if (exitCode === 0) {
+    console.log(`✅ CLAUDE EXECUTION: Claude agent completed successfully (exit code: ${exitCode})`);
     try {
       await writeFile("output.txt", output);
 
@@ -401,6 +412,8 @@ export async function runClaudeWithProgress(
       executionFile,
     };
   } else {
+    console.log(`❌ CLAUDE EXECUTION: Claude agent failed (exit code: ${exitCode}${errorOutput ? `, stderr: ${errorOutput.substring(0, 100)}...` : ''})`);
+    
     // Still try to save execution file if we have output
     if (output) {
       try {

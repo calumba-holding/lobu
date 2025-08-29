@@ -75,7 +75,6 @@ echo "✅ Workspace directory ready: $WORKSPACE_DIR"
 # Log container information
 echo "📊 Container Information:"
 echo "  - Session Key: $SESSION_KEY"
-echo "  - Username: $USERNAME"
 echo "  - Repository: $REPOSITORY_URL"
 echo "  - Recovery Mode: ${RECOVERY_MODE:-false}"
 echo "  - Working Directory: $(pwd)"

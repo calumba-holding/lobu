@@ -32,13 +32,24 @@ dev: build-worker
 	@echo "   - Start orchestrator and dispatcher with hot reload"
 	@echo "   - Use Docker containers for workers"
 	@echo ""
-	@read -p "Do you want to setup Kubernetes configuration? (y/N): " setup_k8s; \
-	if [ "$$setup_k8s" = "y" ] || [ "$$setup_k8s" = "Y" ]; then \
-		echo "Setting up Kubernetes configuration..."; \
-		./bin/setup-slack.sh k8s-only; \
+	@if grep -q "DEPLOYMENT_MODE=" .env 2>/dev/null; then \
+		DEPLOYMENT_MODE=$$(grep "DEPLOYMENT_MODE=" .env | cut -d'=' -f2); \
+		if [ "$$DEPLOYMENT_MODE" = "k8s" ]; then \
+			echo "Using Kubernetes mode (from .env)..."; \
+			./bin/setup-slack.sh k8s-only; \
+		else \
+			echo "Using Docker mode (from .env)..."; \
+			./bin/setup-slack.sh docker-only; \
+		fi \
 	else \
-		echo "Using Docker mode..."; \
-		./bin/setup-slack.sh docker-only; \
+		read -p "Do you want to setup Kubernetes configuration? (y/N): " setup_k8s; \
+		if [ "$$setup_k8s" = "y" ] || [ "$$setup_k8s" = "Y" ]; then \
+			echo "Setting up Kubernetes configuration..."; \
+			./bin/setup-slack.sh k8s-only; \
+		else \
+			echo "Using Docker mode..."; \
+			./bin/setup-slack.sh docker-only; \
+		fi \
 	fi
 	@export NODE_ENV=development && \
 		bun --watch packages/orchestrator/src/index.ts & \

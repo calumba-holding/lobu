@@ -38,7 +38,6 @@ class PeerbotOrchestrator {
       if (!this.isDockerAvailable()) {
         throw new Error('DEPLOYMENT_MODE=docker but Docker is not available');
       }
-      console.log('🚀 Using DockerDeploymentManager (DEPLOYMENT_MODE=docker)');
       return new DockerDeploymentManager(config, this.dbPool);
     }
     
@@ -46,18 +45,15 @@ class PeerbotOrchestrator {
       if (!this.isKubernetesAvailable()) {
         throw new Error('DEPLOYMENT_MODE=kubernetes but Kubernetes is not available');
       }
-      console.log('🚀 Using K8sDeploymentManager (DEPLOYMENT_MODE=kubernetes)');
       return new K8sDeploymentManager(config, this.dbPool);
     }
     
     // Auto-detect deployment mode based on environment
     if (this.isKubernetesAvailable()) {
-      console.log('🚀 Kubernetes detected, using K8sDeploymentManager');
       return new K8sDeploymentManager(config, this.dbPool);
     }
     
     if (this.isDockerAvailable()) {
-      console.log('🚀 Docker detected, using DockerDeploymentManager');
       return new DockerDeploymentManager(config, this.dbPool);
     }
     
@@ -110,7 +106,6 @@ class PeerbotOrchestrator {
    */
   private async runDbmateMigrations(): Promise<void> {
     return new Promise((resolve, reject) => {
-      console.log('🔧 Starting database migrations with dbmate...');
       
       const dbmateProcess = spawn('./bin/dbmate', ['up'], {
         cwd: process.cwd(),
@@ -126,7 +121,6 @@ class PeerbotOrchestrator {
 
       dbmateProcess.stdout?.on('data', (data) => {
         stdout += data.toString();
-        console.log(`[dbmate] ${data.toString().trim()}`);
       });
 
       dbmateProcess.stderr?.on('data', (data) => {
@@ -136,7 +130,6 @@ class PeerbotOrchestrator {
 
       dbmateProcess.on('close', (code) => {
         if (code === 0) {
-          console.log('✅ Database migrations completed successfully');
           resolve();
         } else {
           console.error(`❌ Database migrations failed with exit code ${code}`);
@@ -155,18 +148,15 @@ class PeerbotOrchestrator {
 
   async start(): Promise<void> {
     try {
-      console.log('🚀 Starting Peerbot Orchestrator with simplified deployment management...');
 
       // Test database connection
       await this.testDatabaseConnection();
-      console.log('✅ Database connection verified');
 
       // Run database migrations using dbmate
       await this.runDbmateMigrations();
 
       // Start queue consumer
       await this.queueConsumer.start();
-      console.log('✅ Queue consumer started');
 
       // Setup health endpoints
       this.setupHealthEndpoints();
@@ -178,11 +168,6 @@ class PeerbotOrchestrator {
       this.setupIdleCleanup();
 
       this.isRunning = true;
-      console.log('🎉 Peerbot Orchestrator is running!');
-      console.log(`- Kubernetes namespace: ${this.config.kubernetes.namespace}`);
-      console.log('- Simple deployment scaling with 5-minute idle timeout');
-      console.log('- Deployments start with 1 replica and scale to 0 after idle');
-      console.log(`- Worker idle cleanup: ${this.config.worker.idleCleanupMinutes} minutes threshold`);
 
     } catch (error) {
       console.error('❌ Failed to start orchestrator:', error);
@@ -193,7 +178,6 @@ class PeerbotOrchestrator {
   async stop(): Promise<void> {
     if (!this.isRunning) return;
 
-    console.log('🛑 Stopping Peerbot Orchestrator...');
     this.isRunning = false;
 
     try {
@@ -201,12 +185,10 @@ class PeerbotOrchestrator {
       if (this.cleanupInterval) {
         clearInterval(this.cleanupInterval);
         this.cleanupInterval = undefined;
-        console.log('✅ Cleanup interval stopped');
       }
 
       await this.queueConsumer.stop();
       await this.dbPool.close();
-      console.log('✅ Orchestrator stopped gracefully');
     } catch (error) {
       console.error('❌ Error during shutdown:', error);
     }
@@ -300,7 +282,6 @@ class PeerbotOrchestrator {
             req.on('end', async () => {
               try {
                 const metadata = body ? JSON.parse(body) : {};
-                console.log(`Scaling deployment ${deploymentName} to ${replicas} replicas (requested by: ${metadata.requestedBy || 'unknown'})`);
                 
                 // Scale the deployment using deployment manager
                 await this.deploymentManager.scaleDeployment(deploymentName, replicas);
@@ -345,15 +326,10 @@ class PeerbotOrchestrator {
 
     const port = process.env.ORCHESTRATOR_PORT || 8080;
     server.listen(port, () => {
-      console.log(`📊 Health endpoints available on port ${port}`);
-      console.log(`  - Health: http://localhost:${port}/health`);
-      console.log(`  - Ready: http://localhost:${port}/ready`);
-      console.log(`  - Stats: http://localhost:${port}/stats`);
     });
   }
 
   private setupIdleCleanup(): void {
-    console.log(`🧹 Setting up worker cleanup (${this.config.worker.idleCleanupMinutes}min threshold, 1min interval)`);
     
     // Run initial deployment reconciliation
     this.deploymentManager.reconcileDeployments().catch(error => {
@@ -363,7 +339,6 @@ class PeerbotOrchestrator {
     // Set up periodic cleanup every minute for more responsive cleanup
     this.cleanupInterval = setInterval(async () => {
       try {
-        console.log('🔄 Running deployment reconciliation...');
         await this.deploymentManager.reconcileDeployments();
       } catch (error) {
         console.error('Error during deployment reconciliation - will retry on next interval:', error instanceof Error ? error.message : String(error));
@@ -374,7 +349,6 @@ class PeerbotOrchestrator {
 
   private setupGracefulShutdown(): void {
     const cleanup = async () => {
-      console.log('🔄 Received shutdown signal, gracefully shutting down...');
       await this.stop();
       process.exit(0);
     };
@@ -422,7 +396,6 @@ async function main() {
     const envPath = join(__dirname, '../../../.env');
     dotenvConfig({ path: envPath });
 
-    console.log('🔧 Loading orchestrator configuration...');
 
     // Load configuration from environment
     const config: OrchestratorConfig = {
@@ -470,7 +443,6 @@ async function main() {
     // Keep the process alive
     process.on('SIGUSR1', () => {
       const status = orchestrator.getStatus();
-      console.log('📊 Orchestrator status:', JSON.stringify(status, null, 2));
     });
 
   } catch (error) {

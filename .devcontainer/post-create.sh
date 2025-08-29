@@ -75,10 +75,6 @@ if [ ! -f ".env" ] && [ -f ".env.example" ]; then
     echo "✅ Created .env from .env.example"
 fi
 
-if [ ! -f ".env.qa" ] && [ -f ".env.qa.example" ]; then
-    cp .env.qa.example .env.qa
-    echo "✅ Created .env.qa from .env.qa.example"
-fi
 
 # Create CLAUDE.md if it doesn't exist
 if [ ! -f "CLAUDE.md" ]; then

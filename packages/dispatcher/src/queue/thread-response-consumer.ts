@@ -269,12 +269,6 @@ export class ThreadResponseConsumer {
     let data;
     
     try {
-      logger.info(`Received thread response job structure: ${JSON.stringify({
-        type: typeof job,
-        keys: Object.keys(job || {}),
-        hasNumericKeys: Object.keys(job || {}).some(k => !isNaN(Number(k)))
-      })}`);
-      
       // Handle PgBoss serialized format (similar to worker queue consumer)
       if (typeof job === 'object' && job !== null) {
         const keys = Object.keys(job);
@@ -288,7 +282,7 @@ export class ThreadResponseConsumer {
           if (typeof firstJob === 'object' && firstJob !== null && firstJob.data) {
             // This is the actual job object from PgBoss
             data = firstJob.data;
-            logger.info(`Successfully extracted thread response job data for job ${firstJob.id}`);
+            console.log(`📤 AGENT RESPONSE: Processing agent response for user ${data.userId}, thread ${data.threadId || 'unknown'}, jobId: ${firstJob.id}`);
           } else {
             throw new Error('Invalid job format: expected job object with data field');
           }
@@ -386,25 +380,32 @@ export class ThreadResponseConsumer {
    * Update reactions atomically (remove old, add new)
    */
   private async updateReaction(channel: string, timestamp: string, oldReaction: string, newReaction: string): Promise<void> {
+    console.log(`🔄 REACTION UPDATE: Changing ${oldReaction} → ${newReaction} on message ${timestamp} in channel ${channel}`);
+    
     try {
       // Remove old reaction
+      console.log(`🗑️  REACTION CHANGE: Removing '${oldReaction}' from message ${timestamp}`);
       await this.slackClient.reactions.remove({
         channel,
         timestamp,
         name: oldReaction
       });
+      console.log(`✅ REACTION REMOVED: '${oldReaction}' successfully removed from message ${timestamp}`);
     } catch (error) {
       // Ignore - reaction might not exist
+      console.log(`⚠️  REACTION REMOVE: '${oldReaction}' reaction might not exist on message ${timestamp}:`, error);
       logger.debug(`Failed to remove ${oldReaction} reaction (might not exist):`, error);
     }
     
     try {
       // Add new reaction
+      console.log(`➕ REACTION CHANGE: Adding '${newReaction}' to message ${timestamp}`);
       await this.slackClient.reactions.add({
         channel,
         timestamp,
         name: newReaction
       });
+      console.log(`✅ REACTION ADDED: '${newReaction}' successfully added to message ${timestamp}`);
       logger.info(`Updated reaction: ${oldReaction} → ${newReaction} on message ${timestamp}`);
     } catch (error) {
       // Ignore - reaction might already exist

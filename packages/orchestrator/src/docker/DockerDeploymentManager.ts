@@ -87,28 +87,13 @@ export class DockerDeploymentManager extends BaseDeploymentManager {
         }
       }
       
+      // Get common environment variables from base class
+      const commonEnvVars = this.generateEnvironmentVariables(username, userId, deploymentName, messageData);
+      
       const envVars = [
         `DATABASE_URL=${dbUrl.toString()}`,
-        'WORKER_MODE=queue',
-        `USER_ID=${userId}`,
-        `DEPLOYMENT_NAME=${deploymentName}`,
-        `SESSION_KEY=${messageData?.agentSessionId || `session-${userId}-${Date.now()}`}`,
-        `CHANNEL_ID=${messageData?.channelId || 'unknown-channel'}`,
-        `REPOSITORY_URL=${messageData?.platformMetadata?.repositoryUrl || process.env.GITHUB_REPOSITORY || 'https://github.com/anthropics/claude-code-examples'}`,
-        `ORIGINAL_MESSAGE_TS=${messageData?.platformMetadata?.originalMessageTs || messageData?.messageId || 'unknown'}`,
-        ...(messageData?.platformMetadata?.botResponseTs ? [`BOT_RESPONSE_TS=${messageData.platformMetadata.botResponseTs}`] : []),
-        `GITHUB_TOKEN=${process.env.GITHUB_TOKEN || ''}`,
-        `CLAUDE_CODE_OAUTH_TOKEN=${process.env.CLAUDE_CODE_OAUTH_TOKEN || ''}`,
-        'LOG_LEVEL=info',
-        'WORKSPACE_PATH=/workspace',
-        `SLACK_TEAM_ID=${messageData?.platformMetadata?.teamId || ''}`,
-        `SLACK_CHANNEL_ID=${messageData?.channelId || ''}`,
-        `SLACK_THREAD_TS=${messageData?.threadId || ''}`,
-        ...(process.env.CLAUDE_ALLOWED_TOOLS ? [`CLAUDE_ALLOWED_TOOLS=${process.env.CLAUDE_ALLOWED_TOOLS}`] : []),
-        ...(process.env.CLAUDE_DISALLOWED_TOOLS ? [`CLAUDE_DISALLOWED_TOOLS=${process.env.CLAUDE_DISALLOWED_TOOLS}`] : []),
-        ...(process.env.CLAUDE_TIMEOUT_MINUTES ? [`CLAUDE_TIMEOUT_MINUTES=${process.env.CLAUDE_TIMEOUT_MINUTES}`] : []),
-        // Worker environment variables from configuration
-        ...Object.entries(this.config.worker.env || {}).map(([key, value]) => `${key}=${String(value)}`)
+        // Convert common environment variables to Docker format
+        ...Object.entries(commonEnvVars).map(([key, value]) => `${key}=${value}`)
       ];
 
       const createOptions: Docker.ContainerCreateOptions = {

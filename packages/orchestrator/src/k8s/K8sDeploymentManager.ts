@@ -23,15 +23,11 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
       if (process.env.KUBERNETES_SERVICE_HOST) {
         try {
           kc.loadFromCluster();
-          console.log('✅ Loaded in-cluster Kubernetes config');
         } catch (clusterError) {
-          console.log('⚠️  In-cluster config failed, trying default config');
           kc.loadFromDefault();
-          console.log('✅ Loaded default Kubernetes config as fallback');
         }
       } else {
         kc.loadFromDefault();
-        console.log('✅ Loaded default Kubernetes config');
       }
       
       // For development environments, disable TLS verification to avoid certificate issues
@@ -41,7 +37,6 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
           process.env.KUBERNETES_SERVICE_HOST?.includes('localhost')) {
         const cluster = kc.getCurrentCluster();
         if (cluster && cluster.skipTLSVerify !== true) {
-          console.log('🔧 Development environment detected, disabling TLS verification');
           (cluster as any).skipTLSVerify = true;
         }
       }
@@ -121,7 +116,6 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
         pvcName,
         this.config.kubernetes.namespace
       );
-      console.log(`✅ PVC already exists: ${pvcName}`);
     } catch (error: any) {
       if (error.statusCode === 404) {
         // PVC doesn't exist, create it
@@ -151,7 +145,6 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
           this.config.kubernetes.namespace,
           pvc
         );
-        console.log(`✅ Created PVC: ${pvcName}`);
       } else {
         throw error;
       }
@@ -217,35 +210,12 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
                     }
                   }
                 },
-                // Worker configuration
-                {
-                  name: 'USER_ID',
-                  value: userId
-                },
-                {
-                  name: 'DEPLOYMENT_NAME',
-                  value: deploymentName
-                },
-                {
-                  name: 'SESSION_KEY', 
-                  value: messageData?.agentSessionId || `session-${userId}-${Date.now()}`
-                },
-                {
-                  name: 'CHANNEL_ID',
-                  value: messageData?.channelId || ''
-                },
-                {
-                  name: 'REPOSITORY_URL',
-                  value: messageData?.platformMetadata?.repositoryUrl || process.env.GITHUB_REPOSITORY || 'https://github.com/anthropics/claude-code-examples'
-                },
-                {
-                  name: 'ORIGINAL_MESSAGE_TS',
-                  value: messageData?.platformMetadata?.originalMessageTs || messageData?.messageId || ''
-                },
-                ...(messageData?.platformMetadata?.botResponseTs ? [{
-                  name: 'BOT_RESPONSE_TS',
-                  value: messageData.platformMetadata.botResponseTs
-                }] : []),
+                // Common environment variables from base class (excluding secrets)
+                ...Object.entries(this.generateEnvironmentVariables(username, userId, deploymentName, messageData, false)).map(([key, value]) => ({
+                  name: key,
+                  value: value
+                })),
+                // K8s-specific secrets that can't be handled in base class
                 {
                   name: 'GITHUB_TOKEN',
                   valueFrom: {
@@ -263,47 +233,7 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
                       key: 'claude-code-oauth-token'
                     }
                   }
-                },
-                {
-                  name: 'LOG_LEVEL',
-                  value: 'info'
-                },
-                // Workspace configuration
-                {
-                  name: 'WORKSPACE_PATH',
-                  value: '/workspace'
-                },
-                // Slack thread information for visibility and tooling
-                {
-                  name: 'SLACK_TEAM_ID',
-                  value: messageData?.platformMetadata?.teamId || ''
-                },
-                {
-                  name: 'SLACK_CHANNEL_ID', 
-                  value: messageData?.channelId || ''
-                },
-                {
-                  name: 'SLACK_THREAD_TS',
-                  value: messageData?.threadId || ''
-                },
-                // Security: Claude tool restrictions (only if env vars exist)
-                ...(process.env.CLAUDE_ALLOWED_TOOLS ? [{
-                  name: 'CLAUDE_ALLOWED_TOOLS',
-                  value: process.env.CLAUDE_ALLOWED_TOOLS
-                }] : []),
-                ...(process.env.CLAUDE_DISALLOWED_TOOLS ? [{
-                  name: 'CLAUDE_DISALLOWED_TOOLS',
-                  value: process.env.CLAUDE_DISALLOWED_TOOLS
-                }] : []),
-                ...(process.env.CLAUDE_TIMEOUT_MINUTES ? [{
-                  name: 'CLAUDE_TIMEOUT_MINUTES',
-                  value: process.env.CLAUDE_TIMEOUT_MINUTES
-                }] : []),
-                // Worker environment variables from configuration
-                ...Object.entries(this.config.worker.env || {}).map(([key, value]) => ({
-                  name: key,
-                  value: String(value)
-                }))
+                }
               ],
               resources: {
                 requests: this.config.worker.resources.requests,
@@ -342,7 +272,6 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
           this.config.kubernetes.namespace,
           deployment.body
         );
-        console.log(`Scaled deployment ${deploymentName} to ${replicas} replicas`);
       }
     } catch (error) {
       throw new OrchestratorError(
@@ -411,7 +340,6 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
         patch
       );
       
-      console.log(`✅ Updated activity timestamp for deployment: ${deploymentName}`);
     } catch (error) {
       console.error(`❌ Failed to update activity for deployment ${deploymentName}:`, error instanceof Error ? error.message : String(error));
       // Don't throw - activity tracking should not block message processing

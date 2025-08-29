@@ -4,18 +4,26 @@
 
 Peerbot is a Kubernetes-native Slack bot that provides AI-powered coding assistance. It uses a scalable dispatcher-orchestrator-worker pattern with persistent storage for conversation continuity.
 
+**Quick Links:**
+- [Setup Guide](README.md) - Installation and configuration
+- [Development Guide](DEVELOPMENT.md) - Development workflow and testing
+- [Design Decisions](DESIGN.md) - Architecture decisions and trade-offs
+- [Environment Configuration](.env.example) - Configuration variables
+- [Claude Instructions](CLAUDE.md) - Project-specific instructions
+
 ## Core Modules
 
 ### 🚀 Dispatcher ([`packages/dispatcher/`](packages/dispatcher/))
 **Responsibilities**: Slack integration, session management, job queuing
-- **Socker listener**: [`src/index.ts`](packages/dispatcher/src/index.ts) - Main Slack app server that connects to Slack via Socket Mode
+- **Socket listener**: [`src/index.ts`](packages/dispatcher/src/index.ts) - Main Slack app server that connects to Slack via Socket Mode
 - **Event Handling**: [`src/slack/event-handlers.ts`](packages/dispatcher/src/slack/event-handlers.ts) - Processes Slack messages/interactions and handles Markdown conversions 
 - **Repository Management**: [`src/github/repository-manager.ts`](packages/dispatcher/src/github/repository-manager.ts) - GitHub repository operations
 
 ### ⚡ Orchestrator ([`packages/orchestrator/`](packages/orchestrator/))
 **Responsibilities**: Queue processing, Kubernetes worker lifecycle, deployment cleanup
 - **Main Service**: [`src/index.ts`](packages/orchestrator/src/index.ts) - Queue consumer and service coordinator
-- **Deployment Manager**: [`src/deployment-manager.ts`](packages/orchestrator/src/deployment-manager.ts) - Kubernetes deployment operations
+- **K8s Deployment Manager**: [`src/k8s/K8sDeploymentManager.ts`](packages/orchestrator/src/k8s/K8sDeploymentManager.ts) - Kubernetes deployment operations
+- **Docker Deployment Manager**: [`src/docker/DockerDeploymentManager.ts`](packages/orchestrator/src/docker/DockerDeploymentManager.ts) - Docker deployment operations
 - **Queue Consumer**: [`src/queue-consumer.ts`](packages/orchestrator/src/queue-consumer.ts) - PostgreSQL/pgboss job processing
 
 ### 🔧 Worker ([`packages/worker/`](packages/worker/))
@@ -27,9 +35,9 @@ Peerbot is a Kubernetes-native Slack bot that provides AI-powered coding assista
 ## Queue System
 
 ### Database Structure
-- **Instance**: Single PostgreSQL StatefulSet (8Gi storage)
+- **Instance**: Single PostgreSQL StatefulSet (8Gi storage) - [Config](charts/peerbot/templates/postgresql-statefulset.yaml)
 - **Queue Library**: pgboss for reliable job queuing
-- **RLS**: Row Level Security to prevent cross-deployment access with separate user credentials in Postgresql.
+- **RLS**: Row Level Security to prevent cross-deployment access with separate user credentials in Postgresql - [Schema](db/migrations/001_initial_schema.sql)
 
 ### Queues
 1. **`thread_response`**: User messages in Slack threads/channels
@@ -123,21 +131,34 @@ Workers include a background process management MCP server.
 
 ### Directory Structure
 ```
-/workspace/                     # PVC mount point  
-├── user-john/                  # Per-user workspace
-│   ├── .git/                   # User's repository
-│   ├── .claude/                # Claude session data (persistent)
-│   │   ├── projects/           # Project context
-│   │   └── sessions/           # Conversation history
-│   └── [project files]         # User's code
-├── user-jane/                  # Another user's workspace
-│   ├── .git/
-│   ├── .claude/
-│   └── [project files]
-└── /tmp/                       # Background process management
-    ├── agent-processes/       # Process control files (.pid, .info)
-    └── claude-logs/           # Process output logs
+/workspace/                     # PVC mount point (K8s) or local workspaces dir (Docker)
+├── U095ZLHKP98/               # Per-userId directory
+│   ├── 1756492073.980799/     # Per-thread workspace (threadId/timestamp)
+│   │   ├── .git/              # Cloned repository
+│   │   ├── .claude/           # Claude session data (auto-resume support)
+│   │   │   ├── projects/      # Project context  
+│   │   │   └── sessions/      # Conversation history
+│   │   └── [project files]    # User's code from repository
+│   └── 1756491379.629309/     # Another thread workspace
+│       ├── .git/
+│       ├── .claude/
+│       └── [project files]
+└── U09513HH1N1/               # Another user's workspace
+    ├── 1756479858.121779/     # Thread-specific workspace
+    │   ├── .git/
+    │   ├── .claude/
+    │   └── [project files]
+    └── 1756491388.020389/     # Another thread workspace
+        ├── .git/
+        ├── .claude/
+        └── [project files]
 ```
+
+**Key Changes from Original Design:**
+- **Thread-based isolation**: Each Slack thread gets its own workspace directory to prevent conflicts between concurrent conversations from the same user
+- **Two-level hierarchy**: `/workspace/{userId}/{threadId}/` structure ensures proper isolation
+- **PVC per user**: In Kubernetes, each user gets a persistent volume claim (`peerbot-user-workspace-{userId}`) that persists across pod restarts
+- **Auto-resume capability**: Claude CLI's `--resume` flag automatically continues conversations within the same persistent workspace
 
 ## Deployment Management
 
@@ -145,7 +166,12 @@ Workers include a background process management MCP server.
 - **Creation**: Orchestrator creates Kubernetes deployment per conversation thread
 - **Scaling**: Deployments start with 1 replica, scale to 0 after 60 minutes idle
 - **Cleanup**: Idle worker cleanup runs every minute, removes deployments idle >60min
-- **Persistence**: User data remains in PVC even after pod deletion
+- **Persistence**: User data remains in PVC even after pod deletion - [Storage Config](charts/peerbot/templates/worker-pvc.yaml)
+
+**Container Images:**
+- **Dispatcher**: [`Dockerfile.dispatcher`](Dockerfile.dispatcher)
+- **Orchestrator**: [`Dockerfile.orchestrator`](Dockerfile.orchestrator) 
+- **Worker**: [`Dockerfile.worker`](Dockerfile.worker)
 
 ### Idle Worker Cleanup Process
 
@@ -194,9 +220,9 @@ SELECT set_config('app.current_user_id', $1, true);
 This ensures workers can only access their own thread messages and user data.
 
 ### Resource Limits
-- **Dispatcher**: 1 replica, 256Mi-1Gi memory, 100m-500m CPU
-- **Orchestrator**: 1 replica, 256Mi-2Gi memory, 100m-1000m CPU  
-- **Workers**: 0-N replicas, 256Mi-2Gi memory, 100m-1000m CPU (auto-scaled)
+- **Dispatcher**: 1 replica, 256Mi-1Gi memory, 100m-500m CPU - [Config](charts/peerbot/templates/dispatcher-deployment.yaml)
+- **Orchestrator**: 1 replica, 256Mi-2Gi memory, 100m-1000m CPU - [Config](charts/peerbot/templates/orchestrator-deployment.yaml)
+- **Workers**: 0-N replicas, 256Mi-2Gi memory, 100m-1000m CPU (auto-scaled) - [Config](charts/peerbot/templates/worker-deployment.yaml)
 
 ## Status Indicators
 
@@ -211,8 +237,15 @@ This ensures workers can only access their own thread messages and user data.
 
 - **Rate Limits**: 5 jobs per user per 15 minutes
 - **Pod Security**: Non-root containers, read-only filesystem except `/workspace`
-- **Network**: Workers access only GitHub and Claude API
-- **Secrets**: Kubernetes secrets for API tokens, mounted as volumes
+- **Network**: Workers access only GitHub and Claude API - [Network Policy](charts/peerbot/templates/network-policy.yaml)
+- **Secrets**: Kubernetes secrets for API tokens, mounted as volumes - [Secret Template](charts/peerbot/templates/secrets.yaml)
+
+## Development & Testing
+
+- **Local Setup**: [Setup Script](bin/setup-slack.sh) - Interactive configuration wizard
+- **Development Mode**: [`make dev`](Makefile) - Hot reload with Docker
+- **QA Testing**: [`test-bot.js`](test-bot.js) - Automated bot testing tool
+- **Kubernetes Deployment**: [`make k8s-install`](Makefile) - Deploy to K8s cluster
 
 # Error / Exception Tracking
 

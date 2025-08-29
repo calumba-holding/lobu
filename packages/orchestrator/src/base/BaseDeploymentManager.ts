@@ -44,7 +44,6 @@ export abstract class BaseDeploymentManager {
       // Always ensure user credentials exist first
       const username = this.databaseManager.generatePostgresUsername(userId);
       
-      console.log(`Ensuring PostgreSQL user and secret for ${username}...`);
       
       // Check if secret already exists and get existing password, or generate new one
       await this.secretManager.getOrCreateUserCredentials(username, 
@@ -55,14 +54,11 @@ export abstract class BaseDeploymentManager {
       const existingDeployment = deployments.find(d => d.deploymentName === deploymentName);
       
       if (existingDeployment) {
-        console.log(`Deployment ${deploymentName} already exists, scaling to 1`);
         await this.scaleDeployment(deploymentName, 1);
         return;
       }
 
-      console.log(`Creating deployment ${deploymentName}...`);
       await this.createDeployment(deploymentName, username, userId, messageData);
-      console.log(`✅ Successfully created deployment ${deploymentName}`);
       
     } catch (error) {
       throw new OrchestratorError(
@@ -75,12 +71,68 @@ export abstract class BaseDeploymentManager {
   }
 
   /**
+   * Generate environment variables common to all deployment types
+   */
+  protected generateEnvironmentVariables(username: string, userId: string, deploymentName: string, messageData?: any, includeSecrets: boolean = true): { [key: string]: string } {
+    const envVars: { [key: string]: string } = {
+      'WORKER_MODE': 'queue',
+      'USER_ID': userId,
+      'DEPLOYMENT_NAME': deploymentName,
+      'SESSION_KEY': messageData?.agentSessionId || `session-${userId}-${Date.now()}`,
+      'CHANNEL_ID': messageData?.channelId || '',
+      'REPOSITORY_URL': messageData?.platformMetadata?.repositoryUrl || process.env.GITHUB_REPOSITORY || 'https://github.com/anthropics/claude-code-examples',
+      'ORIGINAL_MESSAGE_TS': messageData?.platformMetadata?.originalMessageTs || messageData?.messageId || '',
+      'LOG_LEVEL': 'info',
+      'WORKSPACE_PATH': '/workspace',
+      'SLACK_TEAM_ID': messageData?.platformMetadata?.teamId || '',
+      'SLACK_CHANNEL_ID': messageData?.channelId || '',
+      'SLACK_THREAD_TS': messageData?.threadId || ''
+    };
+
+    // Add optional environment variables only if they exist
+    if (messageData?.platformMetadata?.botResponseTs) {
+      envVars['BOT_RESPONSE_TS'] = messageData.platformMetadata.botResponseTs;
+    }
+
+    // Include secrets from process.env for Docker deployments
+    if (includeSecrets) {
+      if (process.env.GITHUB_TOKEN) {
+        envVars['GITHUB_TOKEN'] = process.env.GITHUB_TOKEN;
+      }
+
+      if (process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+        envVars['CLAUDE_CODE_OAUTH_TOKEN'] = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+      }
+    }
+
+    if (process.env.CLAUDE_ALLOWED_TOOLS) {
+      envVars['CLAUDE_ALLOWED_TOOLS'] = process.env.CLAUDE_ALLOWED_TOOLS;
+    }
+
+    if (process.env.CLAUDE_DISALLOWED_TOOLS) {
+      envVars['CLAUDE_DISALLOWED_TOOLS'] = process.env.CLAUDE_DISALLOWED_TOOLS;
+    }
+
+    if (process.env.CLAUDE_TIMEOUT_MINUTES) {
+      envVars['CLAUDE_TIMEOUT_MINUTES'] = process.env.CLAUDE_TIMEOUT_MINUTES;
+    }
+
+    // Add worker environment variables from configuration
+    if (this.config.worker.env) {
+      Object.entries(this.config.worker.env).forEach(([key, value]) => {
+        envVars[key] = String(value);
+      });
+    }
+
+    return envVars;
+  }
+
+  /**
    * Delete a worker deployment and associated resources
    */
   async deleteWorkerDeployment(deploymentId: string): Promise<void> {
     try {
       const deploymentName = `peerbot-worker-${deploymentId}`;
-      console.log(`🧹 Cleaning up idle worker deployment: ${deploymentName}`);
       
       await this.deleteDeployment(deploymentId);
       
@@ -100,22 +152,17 @@ export abstract class BaseDeploymentManager {
    */
   async reconcileDeployments(): Promise<void> {
     try {
-      console.log('🔄 Starting deployment reconciliation...');
+      const maxDeployments = this.config.worker.maxDeployments;
+
+      console.log('🔄 Running deployment cleanup...');
       
       // Get all worker deployments from the backend
       const activeDeployments = await this.listDeployments();
 
-      console.log(`📊 Found ${activeDeployments.length} worker deployments to reconcile`);
-      
       if (activeDeployments.length === 0) {
-        console.log('✅ No deployments to reconcile');
         return;
       }
 
-      const now = Date.now();
-      const idleThresholdMinutes = this.config.worker.idleCleanupMinutes;
-      const maxDeployments = this.config.worker.maxDeployments || 20;
-      
       // Sort deployments by last activity (oldest first)
       const sortedDeployments = [...activeDeployments].sort((a, b) => a.lastActivity.getTime() - b.lastActivity.getTime());
       
@@ -127,21 +174,17 @@ export abstract class BaseDeploymentManager {
         
         if (isVeryOld) {
           // Delete very old deployments (>= 7 days)
-          console.log(`🗑️  Deleting very old deployment: ${deploymentName} (${daysSinceActivity.toFixed(1)} days old)`);
           try {
             await this.deleteWorkerDeployment(deploymentId);
             processedCount++;
-            console.log(`✅ Deleted old deployment: ${deploymentName}`);
           } catch (error) {
             console.error(`❌ Failed to delete deployment ${deploymentName}:`, error);
           }
         } else if (isIdle && replicas > 0) {
           // Scale down idle deployments
-          console.log(`⏸️  Scaling down idle deployment: ${deploymentName} (idle ${minutesIdle.toFixed(1)}min)`);
           try {
             await this.scaleDeployment(deploymentName, 0);
             processedCount++;
-            console.log(`✅ Scaled down deployment: ${deploymentName}`);
           } catch (error) {
             console.error(`❌ Failed to scale down deployment ${deploymentName}:`, error);
           }
@@ -152,22 +195,21 @@ export abstract class BaseDeploymentManager {
       const remainingDeployments = sortedDeployments.filter(d => !d.isVeryOld);
       if (remainingDeployments.length > maxDeployments) {
         const excessCount = remainingDeployments.length - maxDeployments;
-        console.log(`⚠️  Too many deployments (${remainingDeployments.length} > ${maxDeployments}), cleaning up ${excessCount} oldest`);
         
         const deploymentsToDelete = remainingDeployments.slice(0, excessCount);
         for (const { deploymentName, deploymentId } of deploymentsToDelete) {
-          console.log(`🧹 Removing excess deployment: ${deploymentName}`);
           try {
             await this.deleteWorkerDeployment(deploymentId);
             processedCount++;
-            console.log(`✅ Removed excess deployment: ${deploymentName}`);
           } catch (error) {
             console.error(`❌ Failed to remove deployment ${deploymentName}:`, error);
           }
         }
       }
       
-      console.log(`🔄 Deployment reconciliation completed. Processed ${processedCount} deployments.`);
+      if (processedCount > 0) {
+        console.log(`✅ Cleanup completed: processed ${processedCount} deployment(s)`);
+      }
       
     } catch (error) {
       console.error('Error during deployment reconciliation:', error instanceof Error ? error.message : String(error));

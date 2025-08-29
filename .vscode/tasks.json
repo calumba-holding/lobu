@@ -4,7 +4,7 @@
         {
             "label": "Make Dev",
             "type": "shell",
-            "command": "trap 'rm -f peerbot.log' EXIT; make dev | tee peerbot.log",
+            "command": "trap 'pkill -f \"bun --watch packages/orchestrator/src/index.ts\"; pkill -f \"bun --watch packages/dispatcher/src/index.ts\"; rm -f peerbot.log' EXIT; script -q peerbot.log make dev",
             "group": {
                 "kind": "build",
                 "isDefault": true

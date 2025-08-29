@@ -10,13 +10,11 @@ A powerful [Claude Code](https://claude.ai/code) Slack application that brings A
 - Run `make setup` to generate `.env` file
 - Run `mave dev`
 
--- If you need to run QA tests (`./test-bot.js`), create `.env.qa` as follows:
+-- If you need to run QA tests (`./test-bot.js`), add these variables to your `.env` file:
 
 ```
-SLACK_SIGNING_SECRET=
-SLACK_BOT_TOKEN=
-SLACK_APP_TOKEN=
-TARGET_BOT_USERNAME=peerqa
+QA_SLACK_BOT_TOKEN=your_qa_bot_token_here
+QA_TARGET_BOT_USERNAME=your_target_bot_username_here
 ```
 
 
@@ -74,3 +72,42 @@ Full-featured deployment with per-user isolation and persistence
 **Prerequisites:**
 - Kubernetes cluster (GKE, EKS, AKS, or local)
 - GitHub organization for user repositories
+
+### 🐳 **Option 2: Docker (Development)**
+Simplified deployment using Docker containers with local workspace persistence
+
+**Benefits:**
+- ✅ Quick local development setup
+- ✅ Thread-based conversation persistence via local volumes
+- ✅ Per-user containers with isolated workspaces
+- ✅ Hot reload support for development
+- ✅ Direct filesystem access for debugging
+
+**How Docker Deployment Works:**
+1. **Orchestrator** receives Slack events and creates Docker containers dynamically
+2. **Per-Thread Containers**: Each Slack conversation thread spawns a dedicated `peerbot-worker-{threadId}` container
+3. **Local Volume Mounting**: Host directory `./workspaces/{userId}/{threadId}/` is mounted to container's `/workspace`
+4. **Environment Variables**: Common configuration centralized in `BaseDeploymentManager.generateEnvironmentVariables()`
+5. **Resource Limits**: Docker containers respect CPU/memory limits similar to Kubernetes pods
+6. **Auto-Cleanup**: Idle containers are automatically stopped and removed after timeout
+
+**Container Lifecycle:**
+```bash
+# Container creation
+docker run --name peerbot-worker-1756492073.980799 \
+  -v ./workspaces/U095ZLHKP98/1756492073.980799:/workspace \
+  -e DATABASE_URL=postgresql://user:pass@host.docker.internal:5432/db \
+  -e USER_ID=U095ZLHKP98 \
+  -e SLACK_THREAD_TS=1756492073.980799 \
+  claude-worker:latest
+
+# Automatic scaling to 0 (stop)
+docker stop peerbot-worker-1756492073.980799
+
+# Cleanup (remove)
+docker rm peerbot-worker-1756492073.980799
+```
+
+**Prerequisites:**
+- Docker installed and running
+- PostgreSQL database accessible via `host.docker.internal` (macOS/Windows) or `localhost` (Linux)

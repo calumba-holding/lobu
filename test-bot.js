@@ -5,20 +5,20 @@ const path = require('path');
 
 // Load QA credentials to send as PeerQA
 console.log('🔧 Loading test configuration...');
-require('dotenv').config({ path: path.join(__dirname, '.env.qa') });
-const QA_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
-const TARGET_BOT_USERNAME = process.env.TARGET_BOT_USERNAME;
+require('dotenv').config({ path: path.join(__dirname, '.env') });
+const QA_BOT_TOKEN = process.env.QA_SLACK_BOT_TOKEN;
+const TARGET_BOT_USERNAME = process.env.QA_TARGET_BOT_USERNAME;
 
 // Validate required environment variables
 if (!TARGET_BOT_USERNAME) {
-  console.error('❌ TARGET_BOT_USERNAME environment variable is required');
-  console.error('Please set TARGET_BOT_USERNAME in your .env.qa file');
+  console.error('❌ QA_TARGET_BOT_USERNAME environment variable is required');
+  console.error('Please set QA_TARGET_BOT_USERNAME in your .env file');
   process.exit(1);
 }
 
 if (!QA_BOT_TOKEN) {
-  console.error('❌ SLACK_BOT_TOKEN environment variable is required');
-  console.error('Please set SLACK_BOT_TOKEN in your .env.qa file');
+  console.error('❌ QA_SLACK_BOT_TOKEN environment variable is required');
+  console.error('Please set QA_SLACK_BOT_TOKEN in your .env file');
   process.exit(1);
 }
 
