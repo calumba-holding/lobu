@@ -345,18 +345,11 @@ export class SlackEventHandlers {
       // Get user's GitHub username mapping
       const username = await this.getOrCreateUserMapping(context.userId, client);
       
-      // Generate or retrieve UUID-format Claude session ID for CLI compatibility
-      let existingClaudeSessionId = this.sessionMappings.get(sessionKey);
-      let isNewSession = false;
-      if (!existingClaudeSessionId) {
-        // Generate new UUID session ID for new threads
-        existingClaudeSessionId = randomUUID();
-        this.sessionMappings.set(sessionKey, existingClaudeSessionId);
-        isNewSession = true;
-        logger.info(`Generated new Claude session ID ${existingClaudeSessionId} for thread ${sessionKey}`);
-      } else {
-        logger.info(`Using existing Claude session ID ${existingClaudeSessionId} for thread ${sessionKey}`);
-      }
+      // Generate unique Claude session ID for each message to ensure each gets its own bot response
+      // Don't cache - each user message should create a new Claude session and bot message
+      const existingClaudeSessionId = randomUUID();
+      const isNewSession = true; // Always treat as new session
+      logger.info(`Generated new Claude session ID ${existingClaudeSessionId} for message ${context.messageTs} in thread ${sessionKey}`);
       
       // Check repository cache first
       let repository;
@@ -423,7 +416,7 @@ export class SlackEventHandlers {
             userDisplayName: context.userDisplayName,
             repositoryUrl: repository.repositoryUrl,
             slackResponseChannel: context.channelId,
-            slackResponseTs: threadTs, // Will be updated when bot posts first message
+            slackResponseTs: context.messageTs, // Use actual message timestamp for unique bot response
             originalMessageTs: context.messageTs,
             botResponseTs: threadSession.botResponseTs, // Track bot's response for updates
           },
@@ -431,8 +424,8 @@ export class SlackEventHandlers {
             allowedTools: this.config.claude.allowedTools,
             model: this.config.claude.model,
             timeoutMinutes: this.config.sessionTimeoutMinutes.toString(),
-            // Use sessionId for new conversations, resumeSessionId for continuation messages
-            ...(isNewConversation ? { sessionId: existingClaudeSessionId } : { resumeSessionId: existingClaudeSessionId }),
+            // Always use sessionId to create new sessions - disable resume functionality
+            sessionId: existingClaudeSessionId,
           },
         };
 
@@ -457,15 +450,15 @@ export class SlackEventHandlers {
             userDisplayName: context.userDisplayName,
             repositoryUrl: repository.repositoryUrl,
             slackResponseChannel: context.channelId,
-            slackResponseTs: threadSession.botResponseTs || threadTs, // Use bot's response or thread
+            slackResponseTs: context.messageTs, // Use actual message timestamp for unique bot response
             originalMessageTs: context.messageTs,
             botResponseTs: threadSession.botResponseTs, // Track bot's response for updates
           },
           claudeOptions: {
             ...this.config.claude,
             timeoutMinutes: this.config.sessionTimeoutMinutes.toString(),
-            // Use sessionId for new conversations, resumeSessionId for continuation messages
-            ...(isNewConversation ? { sessionId: existingClaudeSessionId } : { resumeSessionId: existingClaudeSessionId }),
+            // Always use sessionId to create new sessions - disable resume functionality
+            sessionId: existingClaudeSessionId,
           },
           // Add routing metadata for thread-specific processing
           routingMetadata: {

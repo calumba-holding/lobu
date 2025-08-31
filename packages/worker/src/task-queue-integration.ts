@@ -22,6 +22,7 @@ interface ThreadResponsePayload {
   originalMessageTs?: string; // User's original message timestamp for reactions
   gitBranch?: string; // Current git branch for Edit button URLs
   botResponseTs?: string; // Bot's response message timestamp for updates
+  claudeSessionId?: string; // Claude session ID for tracking bot messages per session
 }
 
 export class QueueIntegration {
@@ -41,6 +42,7 @@ export class QueueIntegration {
   private stopButtonVisible: boolean = false;
   private deploymentName?: string;
   private workspaceManager?: any; // WorkspaceManager dependency
+  private claudeSessionId?: string; // Claude session ID
 
   constructor(config: { 
     databaseUrl: string;
@@ -49,6 +51,7 @@ export class QueueIntegration {
     messageId?: string;
     botResponseTs?: string;
     workspaceManager?: any;
+    claudeSessionId?: string;
   }) {
     this.pgBoss = new PgBoss(config.databaseUrl);
     this.workspaceManager = config.workspaceManager;
@@ -58,6 +61,7 @@ export class QueueIntegration {
     this.responseTs = config.responseTs || process.env.INITIAL_SLACK_RESPONSE_TS || process.env.SLACK_RESPONSE_TS!;
     this.messageId = config.messageId || process.env.INITIAL_SLACK_MESSAGE_ID || process.env.SLACK_MESSAGE_ID!;
     this.botResponseTs = config.botResponseTs || process.env.BOT_RESPONSE_TS; // Bot's response message timestamp from config or env
+    this.claudeSessionId = config.claudeSessionId; // Claude session ID
     
     // Get deployment name from environment for stop button
     this.deploymentName = process.env.DEPLOYMENT_NAME;
@@ -71,7 +75,7 @@ export class QueueIntegration {
       throw error;
     }
     
-    logger.info(`QueueIntegration initialized - channel: ${this.responseChannel}, ts: ${this.responseTs}, messageId: ${this.messageId}`);
+    logger.info(`QueueIntegration initialized - channel: ${this.responseChannel}, ts: ${this.responseTs}, messageId: ${this.messageId}, claudeSessionId: ${this.claudeSessionId || 'undefined'}`);
   }
 
   /**
@@ -322,10 +326,13 @@ export class QueueIntegration {
         content: content,
         isDone: false, // Agent is still running
         timestamp: Date.now(),
-        originalMessageTs: process.env.ORIGINAL_MESSAGE_TS, // User's original message for reactions
+        originalMessageTs: this.messageId, // User's original message for reactions - no fallback to avoid stuck values
         gitBranch: await this.getCurrentGitBranch(), // Current git branch for Edit button URLs
-        botResponseTs: this.botResponseTs // Bot's response message for updates
+        botResponseTs: this.botResponseTs, // Bot's response message for updates
+        claudeSessionId: this.claudeSessionId // Claude session ID for tracking bot messages
       };
+      
+      logger.info(`Sending thread_response with claudeSessionId: ${payload.claudeSessionId || 'undefined'}`);
 
       // Send to thread_response queue
       const jobId = await this.pgBoss.send('thread_response', payload, {
@@ -335,7 +342,7 @@ export class QueueIntegration {
         expireInHours: 1,
       });
       
-      logger.info(`Sent progress update to queue with job id: ${jobId}`);
+      logger.info(`Sent progress update to queue with job id: ${jobId}, claudeSessionId: ${payload.claudeSessionId}`);
 
     } catch (error: any) {
       logger.error("Failed to send update to thread_response queue:", error);
@@ -380,9 +387,10 @@ export class QueueIntegration {
         content: finalMessage,
         isDone: true, // Agent is done
         timestamp: Date.now(),
-        originalMessageTs: process.env.ORIGINAL_MESSAGE_TS, // User's original message for reactions
+        originalMessageTs: this.messageId, // User's original message for reactions - no fallback to avoid stuck values
         gitBranch: await this.getCurrentGitBranch(), // Current git branch for Edit button URLs
-        botResponseTs: this.botResponseTs // Bot's response message for updates
+        botResponseTs: this.botResponseTs, // Bot's response message for updates
+        claudeSessionId: this.claudeSessionId // Claude session ID for tracking bot messages
       };
 
       const jobId = await this.pgBoss.send('thread_response', payload, {
@@ -443,9 +451,10 @@ export class QueueIntegration {
         error: detailedError,
         isDone: true, // Agent is done due to error
         timestamp: Date.now(),
-        originalMessageTs: process.env.ORIGINAL_MESSAGE_TS, // User's original message for reactions
+        originalMessageTs: this.messageId, // User's original message for reactions - no fallback to avoid stuck values
         gitBranch: await this.getCurrentGitBranch(), // Current git branch for Edit button URLs
-        botResponseTs: this.botResponseTs // Bot's response message for updates
+        botResponseTs: this.botResponseTs, // Bot's response message for updates
+        claudeSessionId: this.claudeSessionId // Claude session ID for tracking bot messages
       };
 
       const jobId = await this.pgBoss.send('thread_response', payload, {

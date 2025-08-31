@@ -475,26 +475,44 @@ server.tool(
     try {
       const info = await manager.startProcess(id, command, description, port);
       
-      // If port is specified, wait a bit for tunnel URL to be extracted
+      // If port is specified, wait for tunnel URL with retry logic
       if (port) {
-        await new Promise(resolve => setTimeout(resolve, 3000));
-        const updatedInfo = manager.getStatus(id) as ProcessInfo | null;
-        if (updatedInfo?.tunnelUrl) {
+        let tunnelUrl: string | undefined;
+        let attempts = 0;
+        const maxAttempts = 3;
+        const waitTime = 20000; // 20 seconds per attempt
+        
+        while (!tunnelUrl && attempts < maxAttempts) {
+          attempts++;
+          console.error(`[MCP Process Manager] Waiting for tunnel URL (attempt ${attempts}/${maxAttempts})...`);
+          
+          // Wait 20 seconds for tunnel establishment
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+          
+          const updatedInfo = manager.getStatus(id) as ProcessInfo | null;
+          tunnelUrl = updatedInfo?.tunnelUrl;
+          
+          if (!tunnelUrl && attempts < maxAttempts) {
+            console.error(`[MCP Process Manager] Tunnel URL not ready after ${waitTime/1000}s, retrying...`);
+          }
+        }
+        
+        if (tunnelUrl) {
           return {
             content: [
               {
                 type: "text",
-                text: `Started process ${id} (PID: ${info.pid})\nTunnel URL: ${updatedInfo.tunnelUrl}`,
+                text: `Started process ${id} (PID: ${info.pid})\nTunnel URL: ${tunnelUrl}`,
               },
             ],
           };
-        } else if (port) {
-          // Tunnel failed, suggest using ngrok
+        } else {
+          // All attempts failed
           return {
             content: [
               {
                 type: "text",
-                text: `Started process ${id} (PID: ${info.pid})\nWarning: Failed to establish cloudflared tunnel. Consider using ngrok as an alternative.`,
+                text: `Started process ${id} (PID: ${info.pid})\nWarning: Failed to establish cloudflared tunnel after ${maxAttempts} attempts (${waitTime/1000}s each). Consider using ngrok as an alternative.`,
               },
             ],
           };

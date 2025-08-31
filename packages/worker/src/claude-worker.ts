@@ -25,9 +25,9 @@ export class ClaudeWorker {
     this.workspaceManager = new WorkspaceManager(config.workspace);
     
     // Initialize queue integration with database URL
-    const databaseUrl = process.env.DATABASE_URL;
+    const databaseUrl = process.env.PEERBOT_DATABASE_URL;
     if (!databaseUrl) {
-      const error = new Error("DATABASE_URL environment variable is required");
+      const error = new Error("PEERBOT_DATABASE_URL environment variable is required");
       logger.error("Failed to initialize QueueIntegration:", error);
       throw error;
     }
@@ -36,9 +36,10 @@ export class ClaudeWorker {
       databaseUrl: databaseUrl,
       responseChannel: config.slackResponseChannel,
       responseTs: config.slackResponseTs,
-      messageId: process.env.INITIAL_SLACK_MESSAGE_ID || config.slackResponseTs,
+      messageId: config.slackResponseTs, // Always use the actual message timestamp from config
       botResponseTs: config.botResponseTs, // Pass bot response timestamp from config
-      workspaceManager: this.workspaceManager
+      workspaceManager: this.workspaceManager,
+      claudeSessionId: config.sessionId || config.sessionKey // Pass Claude session ID
     });
   }
 

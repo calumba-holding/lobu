@@ -31,7 +31,7 @@ export class K8sSecretManager extends BaseSecretManager {
     try {
       // Try to read existing secret first
       const existingSecret = await coreV1Api.readNamespacedSecret(secretName, this.config.kubernetes.namespace);
-      const existingPassword = Buffer.from(existingSecret.body.data?.['DB_PASSWORD'] || '', 'base64').toString();
+      const existingPassword = Buffer.from(existingSecret.body.data?.['PEERBOT_DATABASE_PASSWORD'] || '', 'base64').toString();
       
       if (existingPassword) {
         console.log(`Found existing secret for user ${username}, using existing credentials`);
@@ -66,9 +66,9 @@ export class K8sSecretManager extends BaseSecretManager {
       dbUrl.password = password;
       
       const secretData = {
-        'DATABASE_URL': Buffer.from(dbUrl.toString()).toString('base64'),
-        'DB_USERNAME': Buffer.from(username).toString('base64'),
-        'DB_PASSWORD': Buffer.from(password).toString('base64')
+        'PEERBOT_DATABASE_URL': Buffer.from(dbUrl.toString()).toString('base64'),
+        'PEERBOT_DATABASE_USERNAME': Buffer.from(username).toString('base64'),
+        'PEERBOT_DATABASE_PASSWORD': Buffer.from(password).toString('base64')
       };
 
       const secret = {

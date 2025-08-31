@@ -29,7 +29,7 @@ export class PostgresSecretManager extends BaseSecretManager {
 
       // Try to read existing credentials from database
       const result = await this.dbPool.query(
-        `SELECT environment_variables->'DB_PASSWORD' as password FROM user_configs WHERE user_id = $1`,
+        `SELECT environment_variables->'PEERBOT_DATABASE_PASSWORD' as password FROM user_configs WHERE user_id = $1`,
         [userId]
       );
       
@@ -76,7 +76,7 @@ export class PostgresSecretManager extends BaseSecretManager {
       dbUrl.password = password;
       
       // Convert to hstore format: key=>value pairs
-      const hstoreString = `DATABASE_URL=>"${dbUrl.toString()}",DB_USERNAME=>"${username}",DB_PASSWORD=>"${password}"`;
+      const hstoreString = `PEERBOT_DATABASE_URL=>"${dbUrl.toString()}",PEERBOT_DATABASE_USERNAME=>"${username}",PEERBOT_DATABASE_PASSWORD=>"${password}"`;
 
       // Insert or update user config with environment variables
       await this.dbPool.query(`

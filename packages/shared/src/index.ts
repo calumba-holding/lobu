@@ -7,3 +7,4 @@ export type {
 
 // Export utilities
 export { SessionUtils } from "./session-utils";
+export { initSentry } from "./sentry";

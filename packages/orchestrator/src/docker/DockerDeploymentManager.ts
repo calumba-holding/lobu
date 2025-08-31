@@ -78,7 +78,8 @@ export class DockerDeploymentManager extends BaseDeploymentManager {
       // Parse the DATABASE_URL to extract components and reconstruct with user credentials
       const dbUrl = new URL(this.config.database.connectionString);
       dbUrl.username = username;
-      dbUrl.password = await this.getPasswordForUser(username);
+      const password = await this.getPasswordForUser(username);
+      dbUrl.password = password;
       
       // On macOS/Windows, Docker containers need to use host.docker.internal instead of localhost
       if (process.platform === 'darwin' || process.platform === 'win32') {
@@ -91,7 +92,9 @@ export class DockerDeploymentManager extends BaseDeploymentManager {
       const commonEnvVars = this.generateEnvironmentVariables(username, userId, deploymentName, messageData);
       
       const envVars = [
-        `DATABASE_URL=${dbUrl.toString()}`,
+        `PEERBOT_DATABASE_URL=${dbUrl.toString()}`,
+        `PEERBOT_DATABASE_USERNAME=${username}`,
+        `PEERBOT_DATABASE_PASSWORD=${password}`,
         // Convert common environment variables to Docker format
         ...Object.entries(commonEnvVars).map(([key, value]) => `${key}=${value}`)
       ];

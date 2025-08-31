@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { initSentry } from "./sentry";
+import { initSentry } from "@claude-code-slack/shared";
 // Force rebuild to deploy MCP config fix - timestamp: 1756399400
 
 // Initialize Sentry monitoring
@@ -72,9 +72,9 @@ process.on("SIGINT", async () => {
  */
 async function appendTerminationMessage(signal: string): Promise<void> {
   try {
-    if (process.env.DATABASE_URL && process.env.SLACK_RESPONSE_CHANNEL && process.env.SLACK_RESPONSE_TS) {
+    if (process.env.PEERBOT_DATABASE_URL && process.env.SLACK_RESPONSE_CHANNEL && process.env.SLACK_RESPONSE_TS) {
       const queueIntegration = new QueueIntegration({
-        databaseUrl: process.env.DATABASE_URL,
+        databaseUrl: process.env.PEERBOT_DATABASE_URL,
         responseChannel: process.env.SLACK_RESPONSE_CHANNEL,
         responseTs: process.env.SLACK_RESPONSE_TS,
         messageId: process.env.SLACK_RESPONSE_TS
@@ -101,3 +101,4 @@ export type { WorkerConfig } from "./types";
 main();
 
 
+// Cache bust Sat Aug 30 18:38:05 BST 2025

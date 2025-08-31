@@ -13,6 +13,7 @@ charts/peerbot/values-local.yaml
 packages/dispatcher/dist/
 packages/worker/dist/
 packages/core-runner/dist/
+packages/shared/dist/*
 
 
 peerbot.log

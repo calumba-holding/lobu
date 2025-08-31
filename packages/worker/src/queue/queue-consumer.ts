@@ -44,7 +44,7 @@ export class WorkerQueueConsumer {
   private deploymentName: string;
   private targetThreadId?: string;
   private messageQueue: QueuedMessage[] = [];
-  private currentSessionId: string | null = null;
+  private lastSessionId: string | null = null; // Track last Claude session ID for resumption
 
   constructor(
     connectionString: string,
@@ -332,53 +332,91 @@ export class WorkerQueueConsumer {
   }
 
   /**
-   * Process a batch of messages using session resumption
+   * Process a batch of messages together
    */
   private async processBatchedMessages(messages: QueuedMessage[]): Promise<void> {
     if (messages.length === 0) return;
     
-    const firstMessage = messages[0]!; // We know it exists since length > 0
-    const isFirstSession = !this.currentSessionId;
+    // If only one message, process it normally
+    if (messages.length === 1) {
+      const singleMessage = messages[0];
+      if (singleMessage) {
+        await this.processSingleMessage(singleMessage);
+      }
+      return;
+    }
     
+    // Multiple messages - combine them into a single prompt
+    logger.info(`Batching ${messages.length} messages for combined processing`);
+    
+    // Use the first message as the base for the bot response
+    const firstMessage = messages[0];
+    if (!firstMessage) return; // Safety check
+    
+    // Combine all message texts
+    const combinedPrompt = messages
+      .map((msg, index) => `Message ${index + 1}: ${msg.payload.messageText}`)
+      .join('\n\n');
+    
+    // Create a modified payload with combined text
+    // Mark this as a batched message so it creates a new session (not resume)
+    const batchedMessage: QueuedMessage = {
+      timestamp: firstMessage.timestamp,
+      payload: {
+        ...firstMessage.payload,
+        messageText: combinedPrompt,
+        // Add a flag to indicate this is a batched message (new session)
+        claudeOptions: {
+          ...firstMessage.payload.claudeOptions,
+          sessionId: firstMessage.payload.agentSessionId // Use the UUID from agentSessionId for batch
+        }
+      }
+    };
+    
+    await this.processSingleMessage(batchedMessage);
+  }
+  
+  /**
+   * Process a single message
+   */
+  private async processSingleMessage(message: QueuedMessage): Promise<void> {
     try {
-      // Set environment variables from first message
+      // Set environment variables
       if (!process.env.USER_ID) {
-        logger.warn(`USER_ID not set in environment, using userId from payload: ${firstMessage.payload.userId}`);
-        process.env.USER_ID = firstMessage.payload.userId;
+        logger.warn(`USER_ID not set in environment, using userId from payload: ${message.payload.userId}`);
+        process.env.USER_ID = message.payload.userId;
       }
 
       // Convert to worker config
-      let workerConfig: WorkerConfig;
+      const workerConfig = this.payloadToWorkerConfig(message.payload);
       
-      if (isFirstSession) {
-        // First message in thread - create new session
-        workerConfig = this.payloadToWorkerConfig(firstMessage.payload);
-        this.currentSessionId = workerConfig.sessionId || workerConfig.resumeSessionId || `session-${firstMessage.payload.threadId}`;
-        logger.info(`Starting new Claude session: ${this.currentSessionId}`);
+      // Check if we should resume the last session or create a new one
+      // Priority: 1) Resume if we have lastSessionId, 2) Use agentSessionId for first message
+      if (this.lastSessionId) {
+        // We have a previous session - resume it
+        workerConfig.resumeSessionId = this.lastSessionId;
+        workerConfig.sessionId = undefined; // Let Claude generate a new session ID for the continuation
+        logger.info(`Resuming Claude session ${this.lastSessionId} for message ${message.payload.messageId}`);
       } else {
-        // Resume existing session with combined messages
-        const combinedText = messages.map(m => m.payload.messageText).join('\\n\\n');
-        const combinedPayload = {
-          ...firstMessage.payload,
-          messageText: combinedText
-        };
-        
-        workerConfig = this.payloadToWorkerConfig(combinedPayload);
-        // Override with resume session ID
-        workerConfig.resumeSessionId = this.currentSessionId!;
-        workerConfig.sessionId = undefined; // Don't create new session
-        
-        logger.info(`Resuming Claude session: ${this.currentSessionId} with ${messages.length} combined messages`);
+        // First message in this worker - create a new session using the agentSessionId
+        workerConfig.sessionId = message.payload.agentSessionId || workerConfig.sessionId || `session-${message.payload.messageId}`;
+        workerConfig.resumeSessionId = undefined;
+        logger.info(`Creating new Claude session ${workerConfig.sessionId} for message ${message.payload.messageId}`);
       }
 
       // Create and execute worker
       this.currentWorker = new ClaudeWorker(workerConfig);
       await this.currentWorker.execute();
       
-      logger.info(`✅ Successfully processed batch of ${messages.length} messages`);
+      // Update lastSessionId after successful execution - use the actual session ID that was used
+      // If we resumed, keep the same lastSessionId; if new session, update it
+      if (workerConfig.sessionId) {
+        this.lastSessionId = workerConfig.sessionId;
+      }
+      logger.info(`✅ Successfully processed message ${message.payload.messageId}, session ${this.lastSessionId || 'none'} saved for potential resume`);
 
     } catch (error) {
-      logger.error(`❌ Failed to process message batch:`, error);
+      logger.error(`❌ Failed to process message ${message.payload.messageId}:`, error);
       
       // Try to provide more detailed error context in the queue
       if (this.currentWorker?.queueIntegration) {

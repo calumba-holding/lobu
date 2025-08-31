@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { initSentry } from "./sentry";
+import { initSentry } from "@claude-code-slack/shared";
 
 // Initialize Sentry monitoring
 initSentry();
@@ -102,10 +102,28 @@ class PeerbotOrchestrator {
   }
 
   /**
+   * Reset all user environment variables at startup
+   */
+  private async resetAllUserEnvironmentVariables(): Promise<void> {
+    try {
+      console.log('🔄 Resetting all user environment variables...');
+      
+      // Delete all records from user_environment_variables table
+      await this.dbPool.query('DELETE FROM user_environment_variables');
+      
+      console.log('✅ All user environment variables have been reset');
+    } catch (error) {
+      console.warn('⚠️ Could not reset user environment variables:', error);
+      // Continue anyway - this is not critical for startup
+    }
+  }
+
+  /**
    * Run database migrations using dbmate
    */
   private async runDbmateMigrations(): Promise<void> {
     return new Promise((resolve, reject) => {
+      console.log('📦 Creating database and running migrations...');
       
       const dbmateProcess = spawn('./bin/dbmate', ['up'], {
         cwd: process.cwd(),
@@ -121,15 +139,17 @@ class PeerbotOrchestrator {
 
       dbmateProcess.stdout?.on('data', (data) => {
         stdout += data.toString();
+        console.log(`[dbmate up] ${data.toString().trim()}`);
       });
 
       dbmateProcess.stderr?.on('data', (data) => {
         stderr += data.toString();
-        console.error(`[dbmate] ${data.toString().trim()}`);
+        console.error(`[dbmate up] ${data.toString().trim()}`);
       });
 
       dbmateProcess.on('close', (code) => {
         if (code === 0) {
+          console.log('✅ Database created and migrations applied successfully');
           resolve();
         } else {
           console.error(`❌ Database migrations failed with exit code ${code}`);
@@ -149,11 +169,11 @@ class PeerbotOrchestrator {
   async start(): Promise<void> {
     try {
 
-      // Test database connection
-      await this.testDatabaseConnection();
-
-      // Run database migrations using dbmate
+      // Run database migrations using dbmate (this will create database and run migrations)
       await this.runDbmateMigrations();
+
+      // Reset all user environment variables at startup
+      await this.resetAllUserEnvironmentVariables();
 
       // Start queue consumer
       await this.queueConsumer.start();
@@ -191,19 +211,6 @@ class PeerbotOrchestrator {
       await this.dbPool.close();
     } catch (error) {
       console.error('❌ Error during shutdown:', error);
-    }
-  }
-
-  private async testDatabaseConnection(): Promise<void> {
-    try {
-      await this.dbPool.query('SELECT 1');
-    } catch (error) {
-      throw new OrchestratorError(
-        ErrorCode.DATABASE_CONNECTION_FAILED,
-        `Database connection failed: ${error instanceof Error ? error.message : String(error)}`,
-        { error },
-        false
-      );
     }
   }
 

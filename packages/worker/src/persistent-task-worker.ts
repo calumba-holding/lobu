@@ -54,10 +54,10 @@ export class QueuePersistentClaudeWorker {
   }
 
   private buildConnectionString(): string {
-    // Use DATABASE_URL from environment (required)
-    const connectionString = process.env.DATABASE_URL;
+    // Use PEERBOT_DATABASE_URL from environment (required)
+    const connectionString = process.env.PEERBOT_DATABASE_URL;
     if (!connectionString) {
-      throw new Error('DATABASE_URL environment variable is required');
+      throw new Error('PEERBOT_DATABASE_URL environment variable is required');
     }
     return connectionString;
   }

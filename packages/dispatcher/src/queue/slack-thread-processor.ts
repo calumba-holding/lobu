@@ -197,6 +197,7 @@ interface ThreadResponsePayload {
   originalMessageTs?: string; // User's original message timestamp for reactions
   gitBranch?: string; // Current git branch for Edit button URLs
   botResponseTs?: string; // Bot's response message timestamp for updates
+  claudeSessionId?: string; // Claude session ID for tracking bot messages per session
 }
 
 /**
@@ -298,14 +299,21 @@ export class ThreadResponseConsumer {
         throw new Error(`Invalid thread response data: ${JSON.stringify(data)}`);
       }
       
-      logger.info(`Processing thread response job for message ${data.messageId}`);
+      logger.info(`Processing thread response job for message ${data.messageId}, originalMessageTs: ${data.originalMessageTs}, claudeSessionId: ${data.claudeSessionId}`);
 
-      // Create a session key to track bot messages per thread
-      const sessionKey = `${data.userId}:${data.threadTs}`;
+      // Create a session key to track bot messages per conversation
+      // Use the claudeSessionId as the primary key when available
+      // This ensures all messages from the same worker session update the same bot message
+      const sessionKey = data.claudeSessionId 
+        ? `session:${data.claudeSessionId}` 
+        : `${data.userId}:${data.originalMessageTs || data.messageId}`;
       
-      // Check if we have a bot message for this session
+      logger.info(`Using session key: ${sessionKey}`);
+      
+      // Check if we have a bot message for this Claude session
       const existingBotMessageTs = this.sessionBotMessages.get(sessionKey);
       const isFirstResponse = !existingBotMessageTs && !data.botResponseTs;
+      // Use originalMessageTs for reactions (the actual user message timestamp)
       const reactionTimestamp = data.originalMessageTs || data.messageId;
       
       // Handle reaction transitions
@@ -331,6 +339,25 @@ export class ThreadResponseConsumer {
         
         // Store the bot response timestamp for future updates
         if (isFirstResponse && newBotResponseTs) {
+          // Validate that the bot message timestamp is reasonable
+          // Timestamps should be close to the current time (within 1 minute)
+          const currentTime = Date.now() / 1000; // Convert to seconds
+          const messageTime = parseFloat(newBotResponseTs);
+          
+          if (Math.abs(currentTime - messageTime) > 60) {
+            logger.warn(`Suspicious bot message timestamp: ${newBotResponseTs} (current: ${currentTime})`);
+          }
+          
+          // Also validate it's in the same thread family (same integer part)
+          const threadBase = Math.floor(parseFloat(data.threadTs));
+          const messageBase = Math.floor(messageTime);
+          
+          if (Math.abs(threadBase - messageBase) > 100) { // Allow some variance
+            logger.error(`Bot message ${newBotResponseTs} appears to be in wrong thread (expected near ${data.threadTs})`);
+            // Don't store this mapping as it's likely wrong
+            return;
+          }
+          
           logger.info(`Bot created first response with ts: ${newBotResponseTs}, storing for session ${sessionKey}`);
           this.sessionBotMessages.set(sessionKey, newBotResponseTs);
         }
@@ -340,9 +367,12 @@ export class ThreadResponseConsumer {
         await this.handleError(data, isFirstResponse, botMessageTs);
       }
 
-      // Log completion
+      // Log completion but DON'T clear session
+      // Keep the session active so any late-arriving messages still update the same bot message
       if (data.isDone) {
         logger.info(`Thread processing completed for message ${data.messageId}`);
+        // Don't clear the session here - it will be cleared when a new user message arrives
+        // This prevents duplicate bot messages if the worker sends more messages after isDone
       }
 
     } catch (error: any) {
@@ -458,7 +488,9 @@ export class ThreadResponseConsumer {
           thread_ts: threadTs,
           text: truncatedText,
           mrkdwn: true,
-          blocks: blocks
+          blocks: blocks,
+          unfurl_links: true,
+          unfurl_media: true
         });
         
         logger.info(`Bot message created: ${postResult.ok}, ts: ${postResult.ts}`);
@@ -468,7 +500,49 @@ export class ThreadResponseConsumer {
           return;
         }
         
-        return postResult.ts as string; // Return the new message timestamp
+        // CRITICAL: Validate that Slack created the message in the correct thread
+        const returnedTs = postResult.ts as string;
+        const returnedThreadTs = (postResult.message as any)?.thread_ts || returnedTs;
+        
+        // Check if the message was created in the intended thread
+        if (threadTs && returnedThreadTs !== threadTs) {
+          // Update monitoring metrics
+          threadMismatchCount++;
+          lastMismatchTime = new Date();        
+          
+          // Delete the wrongly placed message
+          try {
+            await this.slackClient.chat.delete({
+              channel: channelId,
+              ts: returnedTs
+            });
+            logger.info(`Deleted misplaced message ${returnedTs}`);
+          } catch (deleteError) {
+            logger.error(`Failed to delete misplaced message:`, deleteError);
+          }
+          
+          // Retry with explicit thread creation
+          await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+          
+          const retryResult = await this.slackClient.chat.postMessage({
+            channel: channelId,
+            thread_ts: threadTs,
+            text: truncatedText,
+            mrkdwn: true,
+            blocks: blocks,
+            unfurl_links: true,
+            unfurl_media: true,
+            reply_broadcast: false // Ensure it stays in thread
+          });
+          
+          if (!retryResult.ok) {
+            throw new Error(`Failed to create bot message after retry: ${retryResult.error}`);
+          }
+          
+          return retryResult.ts as string;
+        }
+        
+        return returnedTs; // Return the new message timestamp
       } else {
         // Update existing message - use the passed botMessageTs or fallback
         const botTs = botMessageTs || data.botResponseTs || threadTs;
@@ -478,7 +552,9 @@ export class ThreadResponseConsumer {
           channel: channelId,
           ts: botTs,
           text: truncatedText,
-          blocks: blocks
+          blocks: blocks,
+          unfurl_links: true,
+          unfurl_media: true
         });
         
         logger.info(`Slack update result: ${updateResult.ok}`);
@@ -581,7 +657,9 @@ export class ThreadResponseConsumer {
           thread_ts: threadTs,
           text: errorResult.text || errorContent,
           mrkdwn: true,
-          blocks: errorResult.blocks
+          blocks: errorResult.blocks,
+          unfurl_links: true,
+          unfurl_media: true
         });
         logger.info(`Error message created: ${postResult.ok}`);
       } else {
@@ -591,7 +669,9 @@ export class ThreadResponseConsumer {
           channel: channelId,
           ts: botTs,
           text: errorResult.text || errorContent,
-          blocks: errorResult.blocks
+          blocks: errorResult.blocks,
+          unfurl_links: true,
+          unfurl_media: true
         });
         logger.info(`Error message update result: ${updateResult.ok}`);
       }

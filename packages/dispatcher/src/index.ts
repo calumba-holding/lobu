@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { initSentry } from "./sentry";
+import { initSentry } from "@claude-code-slack/shared";
 
 // Initialize Sentry monitoring
 initSentry();
