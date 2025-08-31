@@ -432,7 +432,7 @@ async function main() {
           }
         },
         idleCleanupMinutes: parseInt(process.env.WORKER_IDLE_CLEANUP_MINUTES || '60'),
-        maxDeployments: parseInt(process.env.MAX_WORKER_DEPLOYMENTS || '20')
+        maxDeployments: parseInt(process.env.MAX_WORKER_DEPLOYMENTS || '')
       },
       kubernetes: {
         namespace: process.env.KUBERNETES_NAMESPACE || 'peerbot'

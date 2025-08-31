@@ -396,21 +396,21 @@ setup_postgresql() {
     echo "🐘 PostgreSQL Configuration"
     echo ""
     
-    if [[ -n "$POSTGRESQL_CONNECTION_STRING" ]]; then
-        echo "✅ PostgreSQL connection string already configured"
-        local reconfigure=$(ask "Do you want to generate a new PostgreSQL connection? (y/N): ")
+    if [[ -n "$DATABASE_URL" ]]; then
+        echo "✅ DATABASE_URL already configured"
+        local reconfigure=$(ask "Do you want to generate a new DATABASE_URL? (y/N): ")
         if [[ "$reconfigure" != "y" && "$reconfigure" != "Y" ]]; then
-            echo "   Using existing PostgreSQL configuration"
+            echo "   Using existing DATABASE_URL configuration"
             return 0
         fi
         echo ""
-        echo "🔄 Generating new PostgreSQL connection..."
+        echo "🔄 Generating new DATABASE_URL..."
     fi
     
     # Generate a random password
     local password=$(openssl rand -base64 12 | tr -d "=+/" | cut -c1-12)
-    export POSTGRESQL_CONNECTION_STRING="postgres://postgres:${password}@localhost:5432/peerbot"
-    echo "✅ Generated PostgreSQL connection string with password: $password"
+    export DATABASE_URL="postgres://postgres:${password}@localhost:5432/peerbot"
+    echo "✅ Generated DATABASE_URL with password: $password"
 }
 
 create_values_local() {
@@ -523,8 +523,8 @@ GITHUB_REPOSITORY=${GITHUB_REPOSITORY:-}
 # Claude Configuration
 CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
 
-# PostgreSQL Configuration
-POSTGRESQL_CONNECTION_STRING=${POSTGRESQL_CONNECTION_STRING:-}
+# Database Configuration
+DATABASE_URL=${DATABASE_URL:-}
 
 # Worker Configuration
 WORKER_IDLE_CLEANUP_MINUTES=${WORKER_IDLE_CLEANUP_MINUTES:-60}
