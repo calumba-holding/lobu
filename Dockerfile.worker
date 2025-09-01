@@ -82,9 +82,12 @@ WORKDIR /app
 
 # Create workspace directory and set permissions
 RUN mkdir -p /workspace && \
-    chown -R claude:claude /app && \
-    chown -R claude:claude /workspace && \
-    chmod 755 /workspace
+    chown claude:claude /workspace && \
+    chmod 755 /workspace && \
+    # Only chown specific directories that claude needs write access to
+    chown -R claude:claude /app/packages/worker/dist 2>/dev/null || true && \
+    chown -R claude:claude /app/packages/worker/scripts 2>/dev/null || true && \
+    chown claude:claude /app
 
 # Copy .claude/projects directory if it exists
 COPY --chown=claude:claude .claude/ /home/claude/.claude/

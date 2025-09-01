@@ -93,7 +93,7 @@ worker:
   enabled: false
   image:
     repository: peerbot-worker
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
     tag: latest
   resources:
     requests:
@@ -130,7 +130,7 @@ dispatcher:
   enabled: true
   image:
     repository: peerbot-dispatcher
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
     tag: latest
   resources:
     requests:
@@ -148,7 +148,7 @@ dispatcher:
     logLevel: "DEBUG"
 
 image:
-  pullPolicy: IfNotPresent
+  pullPolicy: Always
 
 
 # Resource quota configuration - DISABLED for development
@@ -180,7 +180,7 @@ orchestrator:
   image:
     repository: peerbot-orchestrator
     tag: latest
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
   resources:
     requests:
       memory: "256Mi"

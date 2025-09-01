@@ -7,7 +7,7 @@ dispatcher:
   replicaCount: 1
   image:
     repository: peerbot-dispatcher
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
     tag: "latest"
   
   service:
@@ -31,7 +31,7 @@ worker:
   image:
     repository: peerbot-worker
     tag: latest
-    pullPolicy: Never
+    pullPolicy: Always
   
   resources:
     requests:
