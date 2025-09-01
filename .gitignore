@@ -15,6 +15,12 @@ packages/worker/dist/
 packages/core-runner/dist/
 packages/shared/dist/*
 
+# TypeScript compilation artifacts in packages (but not scripts)
+packages/**/*.js
+packages/**/*.js.map
+packages/**/*.d.ts
+packages/**/*.d.ts.map
+
 
 peerbot.log
 workspaces/*

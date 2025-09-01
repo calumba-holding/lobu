@@ -129,6 +129,10 @@ export interface SimpleDeployment {
             claimName: string;
           };
           emptyDir?: {};
+          hostPath?: {
+            path: string;
+            type?: string;
+          };
         }>;
       };
     };

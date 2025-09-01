@@ -58,6 +58,19 @@ export abstract class BaseDeploymentManager {
         return;
       }
 
+      // Check if we would exceed max deployments limit
+      const maxDeployments = this.config.worker.maxDeployments;
+      if (maxDeployments > 0 && deployments.length >= maxDeployments) {
+        console.log(`⚠️  Maximum deployments limit reached (${deployments.length}/${maxDeployments}). Running cleanup before creating new deployment.`);
+        await this.reconcileDeployments();
+        
+        // Check again after cleanup
+        const deploymentsAfterCleanup = await this.listDeployments();
+        if (deploymentsAfterCleanup.length >= maxDeployments) {
+          throw new Error(`Cannot create new deployment: Maximum deployments limit (${maxDeployments}) reached. Current active deployments: ${deploymentsAfterCleanup.length}`);
+        }
+      }
+
       await this.createDeployment(deploymentName, username, userId, messageData);
       
     } catch (error) {

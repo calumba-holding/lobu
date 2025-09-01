@@ -85,7 +85,7 @@ slack:
   allowPrivateChannels: true
 
 claude:
-  model: "claude-3-5-sonnet-20241022"
+  model: "claude-sonnet-4-20250514"
   timeoutMinutes: "5"  # Default timeout
 
 # Disable static worker deployment - workers are created dynamically by orchestrator
@@ -188,6 +188,7 @@ orchestrator:
     limits:
       memory: "512Mi"
       cpu: "500m"
+  maxWorkerDeployments: 5
 
 # Dispatcher configuration moved to line 56
 

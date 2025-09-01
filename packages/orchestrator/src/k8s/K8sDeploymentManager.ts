@@ -107,8 +107,9 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
     }
   }
 
-  private async ensurePersistentVolume(userId: string): Promise<void> {
-    const pvcName = `peerbot-user-workspace-${userId.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}`;
+  private async ensurePersistentVolume(deploymentName: string, userId: string): Promise<void> {
+    const threadId = deploymentName.replace('peerbot-worker-', '').replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+    const pvcName = `peerbot-thread-workspace-${threadId}`;
     
     try {
       // Check if PVC already exists
@@ -127,8 +128,9 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
             namespace: this.config.kubernetes.namespace,
             labels: {
               'app.kubernetes.io/name': 'peerbot',
-              'app.kubernetes.io/component': 'user-workspace',
-              'peerbot.io/user-id': userId
+              'app.kubernetes.io/component': 'thread-workspace',
+              'peerbot.io/user-id': userId,
+              'peerbot.io/thread-id': threadId
             }
           },
           spec: {
@@ -152,8 +154,8 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
   }
 
   async createDeployment(deploymentName: string, username: string, userId: string, messageData?: any): Promise<void> {
-    // Ensure the user has a persistent volume for data persistence across pod restarts
-    await this.ensurePersistentVolume(userId);
+    // Ensure the thread has a persistent volume for data persistence across pod restarts
+    await this.ensurePersistentVolume(deploymentName, userId);
     
     const deployment: SimpleDeployment = {
       apiVersion: 'apps/v1',
@@ -215,6 +217,11 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
                   name: key,
                   value: value
                 })),
+                // Set BUILD_MODE=dev in development mode for hot reload
+                ...(process.env.NODE_ENV === 'development' ? [{
+                  name: 'BUILD_MODE',
+                  value: 'dev'
+                }] : []),
                 // K8s-specific secrets that can't be handled in base class
                 {
                   name: 'GITHUB_TOKEN',
@@ -239,17 +246,34 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
                 requests: this.config.worker.resources.requests,
                 limits: this.config.worker.resources.limits
               },
-              volumeMounts: [{
-                name: 'workspace',
-                mountPath: '/workspace'
-              }]
+              volumeMounts: [
+                {
+                  name: 'workspace',
+                  mountPath: '/workspace'
+                },
+                // Mount source code in development mode for hot reload
+                ...(process.env.NODE_ENV === 'development' ? [{
+                  name: 'source-code',
+                  mountPath: '/app/packages'
+                }] : [])
+              ]
             }],
-            volumes: [{
-              name: 'workspace',
-              persistentVolumeClaim: {
-                claimName: `peerbot-user-workspace-${userId.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}`
-              }
-            }]
+            volumes: [
+              {
+                name: 'workspace',
+                persistentVolumeClaim: {
+                  claimName: `peerbot-thread-workspace-${deploymentName.replace('peerbot-worker-', '').replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}`
+                }
+              },
+              // Mount host source code in development mode for hot reload
+              ...(process.env.NODE_ENV === 'development' ? [{
+                name: 'source-code',
+                hostPath: {
+                  path: '/Users/burakemre/Code/ai-experiments/peerbot/packages',
+                  type: 'Directory'
+                }
+              }] : [])
+            ]
           }
         }
       }

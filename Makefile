@@ -5,12 +5,13 @@
 # Default target
 help:
 	@echo "Available commands:"
-	@echo "  make setup       - Interactive setup for Slack bot development"
-	@echo "  make dev         - Start local development with Docker workers"
-	@echo "  make build-worker - Build worker Docker image"
-	@echo "  make deploy      - Build images and deploy to Kubernetes"
-	@echo "  make test        - Run test bot"
-	@echo "  make clean       - Stop services and clean up resources"
+	@echo "  make setup                       - Interactive setup for Slack bot development"
+	@echo "  make dev                         - Start local development with Docker workers"
+	@echo "  make build-worker                - Build worker Docker image"
+	@echo "  make deploy                      - Deploy using values-local.yaml if exists, else sync .env to values.yaml"
+	@echo "  make deploy --target=production  - Deploy using values-production.yaml"
+	@echo "  make test                        - Run test bot"
+	@echo "  make clean                       - Stop services and clean up resources"
 
 # Interactive setup for development
 setup:
@@ -77,6 +78,7 @@ test:
 	@echo "🧪 Running test bot..."
 	@source .env && node slack-qa-bot.js --qa
 # Deploy to Kubernetes
+# Usage: make deploy [--target=environment]
 deploy:
 	@if [ ! -f .env ]; then \
 		echo "❌ .env file not found!"; \
@@ -86,6 +88,29 @@ deploy:
 		echo ""; \
 		exit 1; \
 	fi
+	@# Parse target argument
+	@TARGET_ENV=""; \
+	for arg in $(MAKECMDGOALS); do \
+		case $$arg in \
+			--target=*) TARGET_ENV=$${arg#--target=} ;; \
+		esac; \
+	done; \
+	if [ -n "$$TARGET_ENV" ]; then \
+		VALUES_FILE="charts/peerbot/values-$$TARGET_ENV.yaml"; \
+		if [ ! -f "$$VALUES_FILE" ]; then \
+			echo "❌ Values file not found: $$VALUES_FILE"; \
+			exit 1; \
+		fi; \
+		echo "📋 Using existing $$VALUES_FILE"; \
+	elif [ -f "charts/peerbot/values-local.yaml" ]; then \
+		VALUES_FILE="charts/peerbot/values-local.yaml"; \
+		echo "📋 Using existing $$VALUES_FILE"; \
+	else \
+		VALUES_FILE="charts/peerbot/values.yaml"; \
+		echo "🔄 Syncing .env to $$VALUES_FILE..."; \
+		./bin/sync-env-to-values.sh; \
+	fi; \
+	echo "🎯 Deploying using $$VALUES_FILE"
 	@echo "🚀 Building and deploying to K8s..."
 	@echo "📦 Building Docker images..."
 	@docker build -f Dockerfile.dispatcher -t peerbot-dispatcher:latest .
@@ -99,10 +124,24 @@ deploy:
 	fi
 	@echo "🔧 Deploying with Helm..."
 	@set -a; source .env; set +a; \
+	TARGET_ENV=""; \
+	for arg in $(MAKECMDGOALS); do \
+		case $$arg in \
+			--target=*) TARGET_ENV=$${arg#--target=} ;; \
+		esac; \
+	done; \
+	if [ -n "$$TARGET_ENV" ]; then \
+		VALUES_FILE="charts/peerbot/values-$$TARGET_ENV.yaml"; \
+	elif [ -f "charts/peerbot/values-local.yaml" ]; then \
+		VALUES_FILE="charts/peerbot/values-local.yaml"; \
+	else \
+		VALUES_FILE="charts/peerbot/values.yaml"; \
+	fi; \
+	echo "📋 Using values file: $$VALUES_FILE"; \
 	helm upgrade --install peerbot charts/peerbot/ \
 		--create-namespace \
 		--namespace peerbot \
-		-f charts/peerbot/values-dev.yaml \
+		-f "$$VALUES_FILE" \
 		--set dispatcher.image.tag=latest \
 		--set orchestrator.image.tag=latest \
 		--set worker.image.tag=latest \

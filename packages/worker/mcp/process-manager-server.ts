@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { z } from "zod";
 import { spawn, ChildProcess } from "child_process";
-import { mkdir, writeFile, readFile, unlink, readdir } from "fs/promises";
+import { mkdir, writeFile, readFile, readdir } from "fs/promises";
 import { existsSync } from "fs";
 import path from "path";
 
@@ -127,7 +127,7 @@ class ProcessManager {
       process.stderr.write(`[Process ${id}] ${data}`);
     });
 
-    child.on("exit", async (code, signal) => {
+    child.on("exit", async (code, _signal) => {
       info.status = code === 0 ? "completed" : "failed";
       info.exitCode = code || undefined;
       info.completedAt = new Date().toISOString();
@@ -729,14 +729,79 @@ server.resource(
   }
 );
 
-// Start server
+// Start HTTP server
 async function main() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  console.error("[Process Manager MCP] Server started");
+  const port = parseInt(process.env.MCP_PROCESS_MANAGER_PORT || '3001');
+  
+  const express = await import('express');
+  const cors = await import('cors');
+  
+  const app = express.default();
+  
+  // Add CORS middleware
+  app.use(cors.default({
+    origin: '*',
+    methods: ['GET', 'POST'],
+    allowedHeaders: ['Content-Type'],
+    exposedHeaders: ['Mcp-Session-Id'],
+  }));
+  
+  app.use(express.default.json());
+  
+  // Store transports for SSE sessions
+  const transports: Record<string, SSEServerTransport> = {};
+  
+  // SSE endpoint for establishing connections
+  app.get('/sse', async (_req, res) => {
+    const transport = new SSEServerTransport('/messages', res);
+    transports[transport.sessionId] = transport;
+    
+    res.on("close", () => {
+      delete transports[transport.sessionId];
+    });
+    
+    await server.connect(transport);
+  });
+  
+  // Message endpoint for client requests
+  app.post('/messages', async (req, res) => {
+    const sessionId = req.query.sessionId as string;
+    const transport = transports[sessionId];
+    if (transport) {
+      await transport.handlePostMessage(req, res, req.body);
+    } else {
+      res.status(400).send('No transport found for sessionId');
+    }
+  });
+  
+  const httpServer = app.listen(port, () => {
+    console.error(`[Process Manager MCP] HTTP server started on port ${port}`);
+  });
+  
+  return { 
+    port, 
+    server,
+    httpServer,
+    close: async () => {
+      httpServer.close();
+      Object.values(transports).forEach(transport => {
+        try {
+          transport.close?.();
+        } catch (e) {
+          // Ignore close errors
+        }
+      });
+    }
+  };
 }
 
-main().catch((error) => {
-  console.error("[Process Manager MCP] Fatal error:", error);
-  process.exit(1);
-});
+// Export the main function so it can be started from worker process
+export { main as startProcessManagerServer };
+
+// Only run directly if this file is executed directly
+if (typeof process !== 'undefined' && process.argv[1] && process.argv[1].endsWith('process-manager-server.ts')) {
+  main().catch((error) => {
+    console.error("[Process Manager MCP] Fatal error:", error);
+    process.exit(1);
+  });
+}

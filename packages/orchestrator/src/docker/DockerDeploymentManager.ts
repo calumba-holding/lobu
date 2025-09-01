@@ -72,8 +72,10 @@ export class DockerDeploymentManager extends BaseDeploymentManager {
 
   async createDeployment(deploymentName: string, username: string, userId: string, messageData?: any): Promise<void> {
     try {
-      // Create workspace directory for this user (use absolute path)
-      const workspaceDir = `${process.cwd()}/workspaces/${userId}`;
+      // Extract thread ID from deployment name for per-thread workspace isolation
+      const threadId = deploymentName.replace('peerbot-worker-', '');
+      // Create workspace directory for this specific thread (use absolute path)
+      const workspaceDir = `${process.cwd()}/workspaces/${threadId}`;
       
       // Environment variables
       // Parse the DATABASE_URL to extract components and reconstruct with user credentials

@@ -170,4 +170,4 @@ fi
 # Start the worker process
 echo "🚀 Executing Claude Worker..."
 cd /app/packages/worker
-exec bun run dist/index.js
+exec bun run dist/src/index.js

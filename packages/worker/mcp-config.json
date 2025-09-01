@@ -1,9 +1,9 @@
 {
   "mcpServers": {
     "process-manager": {
-      "command": "node",
-      "args": ["/app/packages/worker/dist/mcp/process-manager-server.mjs"],
-      "description": "Process management MCP server for background tasks with cloudflared tunnel support"
+      "type": "sse",
+      "url": "http://localhost:3001/sse",
+      "description": "Process management MCP server for background tasks with cloudflared tunnel support (HTTP streaming)"
     }
   }
 }

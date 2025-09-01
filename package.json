@@ -39,6 +39,9 @@
     "@sentry/node": "^10.6.0",
     "@slack/bolt": "^3.19.0",
     "@slack/web-api": "^7.6.0",
+    "@types/cors": "^2.8.19",
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
     "node-fetch": "^3.3.2",
     "zod": "^3.24.4"
   },

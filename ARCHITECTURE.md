@@ -23,6 +23,63 @@ Peerbot is a Kubernetes-native Slack bot that provides AI-powered coding assista
 - **Claude Integration**: [`src/claude-worker.ts`](packages/worker/src/claude-worker.ts) - Claude CLI execution and streaming
 - **Queue Integration**: [`src/task-queue-integration.ts`](packages/worker/src/task-queue-integration.ts) - Job processing and status updates
 - **MCP Process Server**: [`mcp/process-manager-server.ts`](packages/worker/mcp/process-manager-server.ts) - MCP-based process lifecycle management
+- **Process Manager Integration**: [`src/process-manager-integration.ts`](packages/worker/src/process-manager-integration.ts) - HTTP streaming process manager startup and lifecycle
+
+## Process Hierarchy
+
+The worker process employs a hierarchical architecture to manage background processes and provide Claude with MCP (Model Context Protocol) tools for process management.
+
+### Process Layers
+
+```
+Kubernetes Pod
+├── Worker Main Process (Node.js)
+│   ├── Queue Consumer (pgboss)
+│   ├── MCP Process Manager HTTP Server (Express + SSE)
+│   │   ├── Background Process 1 (e.g., dev server)
+│   │   ├── Background Process 2 (e.g., build process)
+│   │   └── Background Process N (with optional cloudflared tunnels)
+│   └── Claude CLI Process
+│       └── MCP Client Connection (HTTP/SSE to Process Manager)
+```
+
+### Process Manager Architecture
+
+**HTTP Streaming Design**: The process manager runs as an integrated HTTP server within the worker process, using Server-Sent Events (SSE) for MCP communication.
+
+- **Transport**: HTTP with SSE instead of stdio for better reliability and debugging
+- **Port**: Configurable via `MCP_PROCESS_MANAGER_PORT` (default: 3001)
+- **Endpoints**:
+  - `GET /sse` - Establishes SSE connection for MCP clients
+  - `POST /messages` - Handles MCP method calls and responses
+
+**Process Management Features**:
+- **Lifecycle Tracking**: Monitors process status (starting, running, completed, failed, killed)
+- **Auto-restart**: Automatically restarts failed processes up to 5 times
+- **Log Management**: Centralized logging to `/tmp/claude-logs/{process-id}.log`
+- **Tunnel Integration**: Optional cloudflared tunnel support for web services
+- **Persistent State**: Process information saved to `/tmp/agent-processes/{process-id}.json`
+
+**Development Server with Tunnel**:
+```
+Claude → MCP → Process Manager → npm run dev (port 3000)
+                                 ├── cloudflared tunnel → https://random.peerbot.ai
+                                 └── Logs → /tmp/claude-logs/dev-server.log
+```
+
+**Build Process**:
+```
+Claude → MCP → Process Manager → npm run build
+                                 └── Logs → /tmp/claude-logs/build.log
+```
+
+**Multi-Process Development**:
+```
+Claude → MCP → Process Manager → frontend (port 3000) + backend (port 8000)
+                                 ├── frontend tunnel → https://app.peerbot.ai
+                                 ├── backend tunnel → https://api.peerbot.ai  
+                                 └── Centralized log monitoring
+```
 
 ## Queue System
 

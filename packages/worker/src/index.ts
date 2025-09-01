@@ -8,6 +8,7 @@ initSentry();
 
 import { QueuePersistentClaudeWorker } from "./persistent-task-worker";
 import { QueueIntegration } from "./task-queue-integration";
+import { startProcessManager, stopProcessManager } from "./process-manager-integration";
 import logger from "./logger";
 
 // Re-export ClaudeWorker for backward compatibility
@@ -29,19 +30,25 @@ async function main() {
     }
     
     try {
+      // Start the integrated process manager HTTP server
+      const processManager = await startProcessManager();
+      logger.info(`🔧 Process manager started on port ${processManager.port}`);
+      
       const queueWorker = new QueuePersistentClaudeWorker(userId, targetThreadId);
       await queueWorker.start();
       
       // Keep the process running for persistent queue consumption
       process.on("SIGTERM", async () => {
-        logger.info("Received SIGTERM, shutting down queue worker...");
+        logger.info("Received SIGTERM, shutting down queue worker and process manager...");
         await queueWorker.stop();
+        await stopProcessManager();
         process.exit(0);
       });
       
       process.on("SIGINT", async () => {
-        logger.info("Received SIGINT, shutting down queue worker...");
+        logger.info("Received SIGINT, shutting down queue worker and process manager...");
         await queueWorker.stop();
+        await stopProcessManager();
         process.exit(0);
       });
       
