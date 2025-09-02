@@ -1,0 +1,10 @@
+#!/usr/bin/env node
+
+console.log("PeerBot CLI v1.0.0");
+console.log("Usage: peerbot [command] [options]");
+console.log("");
+console.log("Commands:");
+console.log("  help     Show this help message");
+console.log("  version  Show version information");
+console.log("");
+console.log("For more information, visit: https://github.com/buremba/peerbot");
