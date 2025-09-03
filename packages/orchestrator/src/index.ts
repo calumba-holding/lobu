@@ -459,7 +459,7 @@ async function main() {
 
     // Keep the process alive
     process.on("SIGUSR1", () => {
-      const _status = orchestrator.getStatus();
+      // const _status = orchestrator.getStatus();
     });
   } catch (error) {
     console.error("💥 Failed to start Peerbot Orchestrator:", error);

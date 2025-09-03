@@ -44,9 +44,9 @@ export abstract class BaseDeploymentManager {
     try {
       const platformUserId = userId.toUpperCase();
       const result = await this.dbPool.query(
-        `SELECT name, value FROM user_environ 
+        `SELECT name, value FROM user_environ
          WHERE user_id = (
-           SELECT id FROM users 
+           SELECT id FROM users
            WHERE platform = 'slack' AND platform_user_id = $1
          )
          ORDER BY type DESC, name`, // System vars first, then user vars
@@ -287,7 +287,7 @@ export abstract class BaseDeploymentManager {
    */
   async deleteWorkerDeployment(deploymentId: string): Promise<void> {
     try {
-      const _deploymentName = `peerbot-worker-${deploymentId}`;
+      // const _deploymentName = `peerbot-worker-${deploymentId}`;
 
       await this.deleteDeployment(deploymentId);
     } catch (error) {
@@ -329,8 +329,8 @@ export abstract class BaseDeploymentManager {
         const {
           deploymentName,
           deploymentId,
-          minutesIdle,
-          daysSinceActivity,
+          // minutesIdle,
+          // daysSinceActivity,
           replicas,
           isIdle,
           isVeryOld,

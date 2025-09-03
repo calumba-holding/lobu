@@ -241,7 +241,7 @@ export class DockerDeploymentManager extends BaseDeploymentManager {
 
   async updateDeploymentActivity(deploymentName: string): Promise<void> {
     try {
-      const _container = this.docker.getContainer(deploymentName);
+      // const _container = this.docker.getContainer(deploymentName);
       const timestamp = new Date().toISOString();
 
       // Update container labels (Docker doesn't support runtime label updates, so we log for now)
