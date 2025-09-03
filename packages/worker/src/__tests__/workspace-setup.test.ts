@@ -1,18 +1,20 @@
 #!/usr/bin/env bun
 
 import {
-  describe,
-  it,
-  expect,
-  beforeEach,
   afterEach,
-  mock,
+  beforeEach,
+  describe,
+  expect,
+  it,
   jest,
+  mock,
 } from "bun:test";
+
 jest.mock = mock.module;
-import { spawn } from "child_process";
-import { promises as fs } from "fs";
-import { join } from "path";
+
+import { spawn } from "node:child_process";
+import { promises as fs } from "node:fs";
+import { join } from "node:path";
 
 // Mock dependencies
 jest.mock("child_process", () => ({
@@ -136,7 +138,7 @@ describe("Workspace Setup", () => {
       });
 
       // Simulate git clone
-      const gitProcess = spawn("git", cloneArgs, {
+      const _gitProcess = spawn("git", cloneArgs, {
         cwd: mockWorkspaceDir,
         env: {
           ...process.env,
@@ -155,7 +157,7 @@ describe("Workspace Setup", () => {
             GIT_USERNAME: "token",
             GIT_PASSWORD: mockGitHubToken,
           }),
-        }),
+        })
       );
     });
 
@@ -227,7 +229,7 @@ describe("Workspace Setup", () => {
 
       expect(mockFs.writeFile).toHaveBeenCalledWith(
         join(mockWorkspaceDir, ".env"),
-        envContent,
+        envContent
       );
     });
 
@@ -254,7 +256,7 @@ describe("Workspace Setup", () => {
             return [key, value.replace(/<script.*?<\/script>/gi, "")];
           }
           return [key, value];
-        }),
+        })
       );
 
       expect(sanitizedEnv.CLAUDE_API_KEY).toBe("[REDACTED]");
@@ -485,7 +487,7 @@ describe("Workspace Setup", () => {
       for (const path of requiredPaths) {
         try {
           await mockFs.access(path);
-        } catch (error) {
+        } catch (_error) {
           throw new Error(`Setup incomplete: ${path} not found`);
         }
       }

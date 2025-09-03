@@ -62,7 +62,7 @@ export function parseClaudeOutput(rawOutput: string): string {
         messages.push(
           typeof parsed.message === "string"
             ? parsed.message
-            : JSON.stringify(parsed.message),
+            : JSON.stringify(parsed.message)
         );
         hasContent = true;
       } else if (parsed.type === "tool_use" && parsed.name) {
@@ -74,11 +74,11 @@ export function parseClaudeOutput(rawOutput: string): string {
         }
       } else if (parsed.type === "error" && parsed.message) {
         messages.push(
-          `⚠️ **Error:** ${typeof parsed.message === "string" ? parsed.message : JSON.stringify(parsed.message)}`,
+          `⚠️ **Error:** ${typeof parsed.message === "string" ? parsed.message : JSON.stringify(parsed.message)}`
         );
         hasContent = true;
       }
-    } catch (e) {
+    } catch (_e) {
       // If it's not JSON, it might be plain text output
       if (line.trim() && !line.startsWith("{")) {
         messages.push(line);
@@ -194,7 +194,7 @@ export function extractFinalResponse(rawOutput: string | undefined): string {
         // Track text messages as potential last response
         lastAssistantMessage = parsed.content;
       }
-    } catch (e) {
+    } catch (_e) {
       // If it's not JSON but looks like meaningful text, consider it
       if (line.trim() && !line.startsWith("{") && line.length > 10) {
         lastAssistantMessage = line;

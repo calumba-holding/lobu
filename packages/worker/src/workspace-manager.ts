@@ -1,14 +1,14 @@
 #!/usr/bin/env bun
 
-import { exec } from "child_process";
-import { promisify } from "util";
-import { mkdir, stat, rm } from "fs/promises";
-import { join } from "path";
+import { exec } from "node:child_process";
+import { mkdir, rm, stat } from "node:fs/promises";
+import { join } from "node:path";
+import { promisify } from "node:util";
 import logger from "./logger";
 import type {
-  WorkspaceSetupConfig,
-  WorkspaceInfo,
   GitRepository,
+  WorkspaceInfo,
+  WorkspaceSetupConfig,
 } from "./types";
 import { WorkspaceError } from "./types";
 
@@ -28,7 +28,7 @@ export class WorkspaceManager {
   async setupWorkspace(
     repositoryUrl: string,
     username: string,
-    sessionKey?: string,
+    sessionKey?: string
   ): Promise<WorkspaceInfo> {
     try {
       // Use thread-specific directory instead of user-specific to avoid conflicts
@@ -39,11 +39,11 @@ export class WorkspaceManager {
         sessionKey ||
         username;
       logger.info(
-        `Setting up thread-specific workspace for ${username}, thread: ${threadId}...`,
+        `Setting up thread-specific workspace for ${username}, thread: ${threadId}...`
       );
       const userDirectory = join(
         this.config.baseDirectory,
-        threadId.replace(/[^a-zA-Z0-9.-]/g, "_"),
+        threadId.replace(/[^a-zA-Z0-9.-]/g, "_")
       );
 
       // Ensure base directory exists
@@ -54,7 +54,7 @@ export class WorkspaceManager {
 
       if (userDirExists) {
         logger.info(
-          `User directory ${userDirectory} already exists, checking if it's a git repository...`,
+          `User directory ${userDirectory} already exists, checking if it's a git repository...`
         );
 
         // Check if it's a git repository
@@ -65,7 +65,7 @@ export class WorkspaceManager {
           await this.updateRepository(userDirectory, sessionKey);
         } else {
           logger.info(
-            "Directory exists but is not a git repository, removing and re-cloning...",
+            "Directory exists but is not a git repository, removing and re-cloning..."
           );
           await rm(userDirectory, { recursive: true, force: true });
           await this.cloneRepository(repositoryUrl, userDirectory);
@@ -81,7 +81,7 @@ export class WorkspaceManager {
       // Get repository info
       const repository = await this.getRepositoryInfo(
         userDirectory,
-        repositoryUrl,
+        repositoryUrl
       );
 
       // Create workspace info
@@ -93,14 +93,14 @@ export class WorkspaceManager {
       };
 
       logger.info(
-        `Thread-specific workspace setup completed for ${username} (thread: ${threadId}) at ${userDirectory}`,
+        `Thread-specific workspace setup completed for ${username} (thread: ${threadId}) at ${userDirectory}`
       );
       return this.workspaceInfo;
     } catch (error) {
       throw new WorkspaceError(
         "setupWorkspace",
         `Failed to setup workspace for ${username}`,
-        error as Error,
+        error as Error
       );
     }
   }
@@ -110,11 +110,11 @@ export class WorkspaceManager {
    */
   private async cloneRepository(
     repositoryUrl: string,
-    targetDirectory: string,
+    targetDirectory: string
   ): Promise<void> {
     try {
       logger.info(
-        `Cloning repository ${repositoryUrl} to ${targetDirectory}...`,
+        `Cloning repository ${repositoryUrl} to ${targetDirectory}...`
       );
 
       // Use GitHub token for authentication
@@ -122,7 +122,7 @@ export class WorkspaceManager {
 
       const { stderr } = await execAsync(
         `git clone "${authenticatedUrl}" "${targetDirectory}"`,
-        { timeout: 180000 }, // 3 minute timeout for slow repositories
+        { timeout: 180000 } // 3 minute timeout for slow repositories
       );
 
       if (stderr && !stderr.includes("Cloning into")) {
@@ -153,7 +153,7 @@ export class WorkspaceManager {
       throw new WorkspaceError(
         "cloneRepository",
         userFriendlyMessage,
-        error as Error,
+        error as Error
       );
     }
   }
@@ -163,7 +163,7 @@ export class WorkspaceManager {
    */
   private async updateRepository(
     repositoryDirectory: string,
-    sessionKey?: string,
+    sessionKey?: string
   ): Promise<void> {
     try {
       logger.info(`Updating repository at ${repositoryDirectory}...`);
@@ -183,12 +183,12 @@ export class WorkspaceManager {
           // Check if the branch exists on remote
           const { stdout } = await execAsync(
             `git ls-remote --heads origin ${branchName}`,
-            { cwd: repositoryDirectory, timeout: 10000 },
+            { cwd: repositoryDirectory, timeout: 10000 }
           );
 
           if (stdout.trim()) {
             logger.info(
-              `Session branch ${branchName} exists on remote, checking it out...`,
+              `Session branch ${branchName} exists on remote, checking it out...`
             );
 
             // Branch exists on remote, check it out
@@ -203,25 +203,25 @@ export class WorkspaceManager {
                 cwd: repositoryDirectory,
                 timeout: 30000,
               });
-            } catch (checkoutError) {
+            } catch (_checkoutError) {
               // Local branch doesn't exist, create it from remote
               await execAsync(
                 `git checkout -b "${branchName}" "origin/${branchName}"`,
                 {
                   cwd: repositoryDirectory,
                   timeout: 10000,
-                },
+                }
               );
             }
 
             logger.info(
-              `Successfully checked out session branch ${branchName}`,
+              `Successfully checked out session branch ${branchName}`
             );
             return;
           }
-        } catch (error) {
+        } catch (_error) {
           logger.info(
-            `Session branch not found on remote, will use main/master`,
+            `Session branch not found on remote, will use main/master`
           );
         }
       }
@@ -232,7 +232,7 @@ export class WorkspaceManager {
           cwd: repositoryDirectory,
           timeout: 10000,
         });
-      } catch (error) {
+      } catch (_error) {
         // Try master if main doesn't exist
         await execAsync("git reset --hard origin/master", {
           cwd: repositoryDirectory,
@@ -245,7 +245,7 @@ export class WorkspaceManager {
       throw new WorkspaceError(
         "updateRepository",
         `Failed to update repository at ${repositoryDirectory}`,
-        error as Error,
+        error as Error
       );
     }
   }
@@ -255,7 +255,7 @@ export class WorkspaceManager {
    */
   private async setupGitConfig(
     repositoryDirectory: string,
-    username: string,
+    username: string
   ): Promise<void> {
     try {
       logger.info(`Setting up git configuration for ${username}...`);
@@ -269,7 +269,7 @@ export class WorkspaceManager {
         `git config user.email "claude-code-bot+${username}@noreply.github.com"`,
         {
           cwd: repositoryDirectory,
-        },
+        }
       );
 
       // Set push default
@@ -282,7 +282,7 @@ export class WorkspaceManager {
       throw new WorkspaceError(
         "setupGitConfig",
         `Failed to setup git configuration for ${username}`,
-        error as Error,
+        error as Error
       );
     }
   }
@@ -292,7 +292,7 @@ export class WorkspaceManager {
    */
   private async getRepositoryInfo(
     repositoryDirectory: string,
-    repositoryUrl: string,
+    repositoryUrl: string
   ): Promise<GitRepository> {
     try {
       // Get current branch
@@ -300,7 +300,7 @@ export class WorkspaceManager {
         "git branch --show-current",
         {
           cwd: repositoryDirectory,
-        },
+        }
       );
       const branch = branchOutput.trim();
 
@@ -320,7 +320,7 @@ export class WorkspaceManager {
       throw new WorkspaceError(
         "getRepositoryInfo",
         `Failed to get repository information`,
-        error as Error,
+        error as Error
       );
     }
   }
@@ -353,7 +353,7 @@ export class WorkspaceManager {
     try {
       const stats = await stat(path);
       return stats.isDirectory();
-    } catch (error) {
+    } catch (_error) {
       return false;
     }
   }
@@ -365,7 +365,7 @@ export class WorkspaceManager {
     try {
       await execAsync("git status", { cwd: path, timeout: 5000 });
       return true;
-    } catch (error) {
+    } catch (_error) {
       return false;
     }
   }
@@ -412,7 +412,7 @@ export class WorkspaceManager {
           cwd: this.workspaceInfo.userDirectory,
         });
         logger.info(
-          `Session branch ${branchName} already exists locally, checked out`,
+          `Session branch ${branchName} already exists locally, checked out`
         );
 
         // Pull latest changes from remote to preserve previous work
@@ -426,15 +426,15 @@ export class WorkspaceManager {
           // If pull fails, branch might not exist on remote yet - that's okay for new branches
           logger.warn(
             `Failed to pull latest changes for ${branchName} (branch might be new):`,
-            pullError,
+            pullError
           );
         }
-      } catch (checkoutError) {
+      } catch (_checkoutError) {
         // Branch doesn't exist locally, check remote
         try {
           const { stdout } = await execAsync(
             `git ls-remote --heads origin ${branchName}`,
-            { cwd: this.workspaceInfo.userDirectory, timeout: 10000 },
+            { cwd: this.workspaceInfo.userDirectory, timeout: 10000 }
           );
 
           if (stdout.trim()) {
@@ -443,10 +443,10 @@ export class WorkspaceManager {
               `git checkout -b "${branchName}" "origin/${branchName}"`,
               {
                 cwd: this.workspaceInfo.userDirectory,
-              },
+              }
             );
             logger.info(
-              `Session branch ${branchName} exists on remote, checked out with latest changes`,
+              `Session branch ${branchName} exists on remote, checked out with latest changes`
             );
           } else {
             // Branch doesn't exist anywhere, create new
@@ -466,7 +466,7 @@ export class WorkspaceManager {
               logger.warn(`Failed to push new branch to GitHub:`, pushError);
             }
           }
-        } catch (error) {
+        } catch (_error) {
           // Error checking remote, create new branch
           await execAsync(`git checkout -b "${branchName}"`, {
             cwd: this.workspaceInfo.userDirectory,
@@ -493,7 +493,7 @@ export class WorkspaceManager {
       throw new WorkspaceError(
         "createSessionBranch",
         `Failed to create session branch for ${sessionKey}`,
-        error as Error,
+        error as Error
       );
     }
   }
@@ -517,9 +517,9 @@ export class WorkspaceManager {
       try {
         await execAsync("git diff --cached --exit-code", { cwd: repoDir });
         logger.info(
-          "No staged changes to commit - checking for unpushed commits",
+          "No staged changes to commit - checking for unpushed commits"
         );
-      } catch (error) {
+      } catch (_error) {
         // Staged changes exist, proceed with commit
         hasUnstagedChanges = true;
       }
@@ -532,7 +532,7 @@ export class WorkspaceManager {
           cwd: repoDir,
         });
         logger.info("No unpushed commits");
-      } catch (error) {
+      } catch (_error) {
         // Unpushed commits exist
         hasUnpushedCommits = true;
         logger.info("Found unpushed commits");
@@ -563,7 +563,7 @@ export class WorkspaceManager {
       throw new WorkspaceError(
         "commitAndPush",
         `Failed to commit and push changes`,
-        error as Error,
+        error as Error
       );
     }
   }
@@ -579,7 +579,7 @@ export class WorkspaceManager {
         // Commit any final changes
         try {
           await this.commitAndPush(
-            "Final session cleanup by Claude Code Worker",
+            "Final session cleanup by Claude Code Worker"
           );
         } catch (error) {
           logger.warn("Failed to commit final changes:", error);
@@ -612,7 +612,7 @@ export class WorkspaceManager {
         "git branch --show-current",
         {
           cwd: repoDir,
-        },
+        }
       );
       const branch = branchOutput.trim();
 
@@ -621,7 +621,7 @@ export class WorkspaceManager {
         "git status --porcelain",
         {
           cwd: repoDir,
-        },
+        }
       );
 
       const changedFiles = statusOutput
@@ -638,7 +638,7 @@ export class WorkspaceManager {
       throw new WorkspaceError(
         "getRepositoryStatus",
         "Failed to get repository status",
-        error as Error,
+        error as Error
       );
     }
   }

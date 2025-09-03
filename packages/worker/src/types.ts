@@ -43,7 +43,7 @@ export class WorkerError extends Error {
   constructor(
     public operation: string,
     message: string,
-    public cause?: Error,
+    public cause?: Error
   ) {
     super(message);
     this.name = "WorkerError";
@@ -54,7 +54,7 @@ export class WorkspaceError extends Error {
   constructor(
     public operation: string,
     message: string,
-    public cause?: Error,
+    public cause?: Error
   ) {
     super(message);
     this.name = "WorkspaceError";
@@ -65,7 +65,7 @@ export class SlackError extends Error {
   constructor(
     public operation: string,
     message: string,
-    public cause?: Error,
+    public cause?: Error
   ) {
     super(message);
     this.name = "SlackError";

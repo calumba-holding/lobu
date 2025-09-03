@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
+import { execSync } from "node:child_process";
 import PgBoss from "pg-boss";
-import { execSync } from "child_process";
 import logger from "./logger";
 
 interface TodoItem {
@@ -37,9 +37,6 @@ export class QueueIntegration {
   private isProcessingQueue = false;
   private currentTodos: TodoItem[] = [];
   private currentToolExecution: string = "";
-  // private lastToolUpdate: number = 0;
-  // @ts-ignore - Used in showStopButton() and hideStopButton() methods
-  private stopButtonVisible: boolean = false;
   private deploymentName?: string;
   private workspaceManager?: any; // WorkspaceManager dependency
   private claudeSessionId?: string; // Claude session ID
@@ -76,14 +73,14 @@ export class QueueIntegration {
     // Validate required values
     if (!this.responseChannel || !this.responseTs || !this.messageId) {
       const error = new Error(
-        `Missing required response location - channel: "${this.responseChannel}", ts: "${this.responseTs}", messageId: "${this.messageId}"`,
+        `Missing required response location - channel: "${this.responseChannel}", ts: "${this.responseTs}", messageId: "${this.messageId}"`
       );
       logger.error(`QueueIntegration initialization failed: ${error.message}`);
       throw error;
     }
 
     logger.info(
-      `QueueIntegration initialized - channel: ${this.responseChannel}, ts: ${this.responseTs}, messageId: ${this.messageId}, claudeSessionId: ${this.claudeSessionId || "undefined"}`,
+      `QueueIntegration initialized - channel: ${this.responseChannel}, ts: ${this.responseTs}, messageId: ${this.messageId}, claudeSessionId: ${this.claudeSessionId || "undefined"}`
     );
   }
 
@@ -126,7 +123,7 @@ export class QueueIntegration {
       // Ensure we always have content to update with
       if (!content || content.trim() === "") {
         logger.warn(
-          "updateProgress called with empty content, using default message",
+          "updateProgress called with empty content, using default message"
         );
         content = "✅ Task completed";
       }
@@ -161,7 +158,7 @@ export class QueueIntegration {
       } else if (typeof data === "object") {
         dataToCheck = JSON.stringify(data);
         logger.info(
-          `📊 StreamProgress received object data: ${dataToCheck.substring(0, 200)}...`,
+          `📊 StreamProgress received object data: ${dataToCheck.substring(0, 200)}...`
         );
       } else {
         return;
@@ -188,7 +185,7 @@ export class QueueIntegration {
           await this.updateProgressWithTodos();
         } else {
           logger.info(
-            `🔧 Showing tool execution without todos: ${toolExecution}`,
+            `🔧 Showing tool execution without todos: ${toolExecution}`
           );
           await this.updateProgress(toolExecution);
         }
@@ -252,21 +249,20 @@ export class QueueIntegration {
       // Show Edit button if either:
       // 1. There are pending changes, OR
       // 2. We're on a session branch (claude/*) which means work was done
-      const isSessionBranch =
-        status.branch && status.branch.startsWith("claude/");
+      const isSessionBranch = status.branch?.startsWith("claude/");
 
       if (status.hasChanges || isSessionBranch) {
         return status.branch;
       } else {
         logger.debug(
-          `Git branch ${status.branch} has no changes and is not a session branch, skipping Edit button`,
+          `Git branch ${status.branch} has no changes and is not a session branch, skipping Edit button`
         );
         return undefined;
       }
     } catch (error) {
       logger.warn(
         "Could not get git branch status from workspace manager:",
-        error,
+        error
       );
       return this.getFallbackGitBranch();
     }
@@ -305,16 +301,16 @@ export class QueueIntegration {
 
         // Branch has commits
         logger.info(
-          `Git branch: ${branch} (hasCommits: true, isSessionBranch: ${isSessionBranch})`,
+          `Git branch: ${branch} (hasCommits: true, isSessionBranch: ${isSessionBranch})`
         );
         return branch;
-      } catch (logError) {
+      } catch (_logError) {
         // No commits yet, but still show Edit button for session branches
         if (isSessionBranch) {
           return branch;
         } else {
           logger.debug(
-            `Git branch ${branch} has no commits and is not a session branch, skipping Edit button`,
+            `Git branch ${branch} has no commits and is not a session branch, skipping Edit button`
           );
           return undefined;
         }
@@ -356,7 +352,7 @@ export class QueueIntegration {
       };
 
       logger.info(
-        `Sending thread_response with claudeSessionId: ${payload.claudeSessionId || "undefined"}`,
+        `Sending thread_response with claudeSessionId: ${payload.claudeSessionId || "undefined"}`
       );
 
       // Send to thread_response queue
@@ -368,7 +364,7 @@ export class QueueIntegration {
       });
 
       logger.info(
-        `Sent progress update to queue with job id: ${jobId}, claudeSessionId: ${payload.claudeSessionId}`,
+        `Sent progress update to queue with job id: ${jobId}, claudeSessionId: ${payload.claudeSessionId}`
       );
     } catch (error: any) {
       logger.error("Failed to send update to thread_response queue:", error);
@@ -533,7 +529,7 @@ export class QueueIntegration {
               if (
                 content.type === "tool_result" &&
                 content.content?.includes(
-                  "Todos have been modified successfully",
+                  "Todos have been modified successfully"
                 )
               ) {
                 // Try to extract todos from previous context
@@ -543,7 +539,7 @@ export class QueueIntegration {
           }
         }
       }
-    } catch (error) {
+    } catch (_error) {
       // Not JSON or parsing failed
     }
     return null;
@@ -569,7 +565,7 @@ export class QueueIntegration {
           }
         }
       }
-    } catch (e) {
+    } catch (_e) {
       // Silently continue - not all lines are valid JSON
     }
     return null;
@@ -587,9 +583,10 @@ export class QueueIntegration {
         return `✏️ **Writing file:** \`${params.file_path}\``;
       case "Edit":
         return `✏️ **Editing file:** \`${params.file_path}\``;
-      case "Bash":
+      case "Bash": {
         const command = params.command || params.description || "command";
-        return `🔧 **Running:** \`${command.length > 50 ? command.substring(0, 50) + "..." : command}\``;
+        return `🔧 **Running:** \`${command.length > 50 ? `${command.substring(0, 50)}...` : command}\``;
+      }
       case "Read":
         return `📖 **Reading file:** \`${params.file_path}\``;
       case "Grep":

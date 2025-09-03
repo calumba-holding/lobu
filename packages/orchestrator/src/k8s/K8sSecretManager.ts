@@ -1,13 +1,9 @@
-import * as k8s from "@kubernetes/client-node";
+import type * as k8s from "@kubernetes/client-node";
 import { BaseSecretManager } from "../base/BaseSecretManager";
-import { OrchestratorConfig, OrchestratorError, ErrorCode } from "../types";
+import { ErrorCode, OrchestratorError } from "../types";
 
 export class K8sSecretManager extends BaseSecretManager {
   private coreV1Api?: k8s.CoreV1Api;
-
-  constructor(config: OrchestratorConfig) {
-    super(config);
-  }
 
   // Method to set the CoreV1Api after construction
   setCoreV1Api(coreV1Api: k8s.CoreV1Api): void {
@@ -26,7 +22,7 @@ export class K8sSecretManager extends BaseSecretManager {
    */
   async getOrCreateUserCredentials(
     username: string,
-    createPostgresUser: (username: string, password: string) => Promise<void>,
+    createPostgresUser: (username: string, password: string) => Promise<void>
   ): Promise<string> {
     const secretName = `peerbot-user-secret-${username.replace(/[^a-zA-Z0-9]/g, "-").toLowerCase()}`;
     const coreV1Api = this.ensureCoreV1Api();
@@ -35,23 +31,23 @@ export class K8sSecretManager extends BaseSecretManager {
       // Try to read existing secret first
       const existingSecret = await coreV1Api.readNamespacedSecret(
         secretName,
-        this.config.kubernetes.namespace,
+        this.config.kubernetes.namespace
       );
       const existingPassword = Buffer.from(
-        existingSecret.body.data?.["PEERBOT_DATABASE_PASSWORD"] || "",
-        "base64",
+        existingSecret.body.data?.PEERBOT_DATABASE_PASSWORD || "",
+        "base64"
       ).toString();
 
       if (existingPassword) {
         console.log(
-          `Found existing secret for user ${username}, using existing credentials`,
+          `Found existing secret for user ${username}, using existing credentials`
         );
         return existingPassword;
       }
-    } catch (error) {
+    } catch (_error) {
       // Secret doesn't exist, will create new credentials
       console.log(
-        `Secret ${secretName} does not exist, creating new credentials`,
+        `Secret ${secretName} does not exist, creating new credentials`
       );
     }
 
@@ -70,7 +66,7 @@ export class K8sSecretManager extends BaseSecretManager {
    */
   async storeUserCredentials(
     username: string,
-    password: string,
+    password: string
   ): Promise<void> {
     const secretName = `peerbot-user-secret-${username.replace(/[^a-zA-Z0-9]/g, "-").toLowerCase()}`;
     const coreV1Api = this.ensureCoreV1Api();
@@ -106,7 +102,7 @@ export class K8sSecretManager extends BaseSecretManager {
 
       await coreV1Api.createNamespacedSecret(
         this.config.kubernetes.namespace,
-        secret,
+        secret
       );
       console.log(`✅ Created permanent secret: ${secretName}`);
     } catch (error) {
@@ -114,7 +110,7 @@ export class K8sSecretManager extends BaseSecretManager {
         ErrorCode.DEPLOYMENT_CREATE_FAILED,
         `Failed to create user secret: ${error instanceof Error ? error.message : String(error)}`,
         { username, secretName, error },
-        true,
+        true
       );
     }
   }

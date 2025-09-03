@@ -1,16 +1,16 @@
 import * as k8s from "@kubernetes/client-node";
 import {
   BaseDeploymentManager,
-  DeploymentInfo,
+  type DeploymentInfo,
 } from "../base/BaseDeploymentManager";
-import { K8sSecretManager } from "./K8sSecretManager";
+import type { DatabasePool } from "../db-connection-pool";
 import {
-  OrchestratorConfig,
-  SimpleDeployment,
-  OrchestratorError,
   ErrorCode,
+  type OrchestratorConfig,
+  OrchestratorError,
+  type SimpleDeployment,
 } from "../types";
-import { DatabasePool } from "../db-connection-pool";
+import { K8sSecretManager } from "./K8sSecretManager";
 
 export class K8sDeploymentManager extends BaseDeploymentManager {
   private appsV1Api: k8s.AppsV1Api;
@@ -26,7 +26,7 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
       if (process.env.KUBERNETES_SERVICE_HOST) {
         try {
           kc.loadFromCluster();
-        } catch (clusterError) {
+        } catch (_clusterError) {
           kc.loadFromDefault();
         }
       } else {
@@ -51,7 +51,7 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
         ErrorCode.DEPLOYMENT_CREATE_FAILED,
         `Failed to initialize Kubernetes client: ${error instanceof Error ? error.message : String(error)}`,
         { error },
-        true,
+        true
       );
     }
 
@@ -70,7 +70,7 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
         undefined,
         undefined,
         undefined,
-        "app.kubernetes.io/component=worker",
+        "app.kubernetes.io/component=worker"
       );
 
       const now = Date.now();
@@ -109,14 +109,14 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
         ErrorCode.DEPLOYMENT_CREATE_FAILED,
         `Failed to list deployments: ${error instanceof Error ? error.message : String(error)}`,
         { error },
-        true,
+        true
       );
     }
   }
 
   private async ensurePersistentVolume(
     deploymentName: string,
-    userId: string,
+    userId: string
   ): Promise<void> {
     const threadId = deploymentName
       .replace("peerbot-worker-", "")
@@ -128,7 +128,7 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
       // Check if PVC already exists
       await this.coreV1Api.readNamespacedPersistentVolumeClaim(
         pvcName,
-        this.config.kubernetes.namespace,
+        this.config.kubernetes.namespace
       );
     } catch (error: any) {
       if (error.statusCode === 404) {
@@ -158,7 +158,7 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
 
         await this.coreV1Api.createNamespacedPersistentVolumeClaim(
           this.config.kubernetes.namespace,
-          pvc,
+          pvc
         );
       } else {
         throw error;
@@ -171,7 +171,7 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
     username: string,
     userId: string,
     messageData?: any,
-    userEnvVars: Record<string, string> = {},
+    userEnvVars: Record<string, string> = {}
   ): Promise<void> {
     // Ensure the thread has a persistent volume for data persistence across pod restarts
     await this.ensurePersistentVolume(deploymentName, userId);
@@ -183,7 +183,7 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
       deploymentName,
       messageData,
       false,
-      userEnvVars,
+      userEnvVars
     );
 
     const deployment: SimpleDeployment = {
@@ -312,18 +312,18 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
 
     await this.appsV1Api.createNamespacedDeployment(
       this.config.kubernetes.namespace,
-      deployment,
+      deployment
     );
   }
 
   async scaleDeployment(
     deploymentName: string,
-    replicas: number,
+    replicas: number
   ): Promise<void> {
     try {
       const deployment = await this.appsV1Api.readNamespacedDeployment(
         deploymentName,
-        this.config.kubernetes.namespace,
+        this.config.kubernetes.namespace
       );
 
       if (deployment.body.spec?.replicas !== replicas) {
@@ -331,7 +331,7 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
         await this.appsV1Api.patchNamespacedDeployment(
           deploymentName,
           this.config.kubernetes.namespace,
-          deployment.body,
+          deployment.body
         );
       }
     } catch (error) {
@@ -339,7 +339,7 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
         ErrorCode.DEPLOYMENT_SCALE_FAILED,
         `Failed to scale deployment ${deploymentName}: ${error instanceof Error ? error.message : String(error)}`,
         { deploymentName, replicas, error },
-        true,
+        true
       );
     }
   }
@@ -351,13 +351,13 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
     try {
       await this.appsV1Api.deleteNamespacedDeployment(
         deploymentName,
-        this.config.kubernetes.namespace,
+        this.config.kubernetes.namespace
       );
       console.log(`✅ Deleted deployment: ${deploymentName}`);
     } catch (error: any) {
       if (error.statusCode === 404) {
         console.log(
-          `⚠️  Deployment ${deploymentName} not found (already deleted)`,
+          `⚠️  Deployment ${deploymentName} not found (already deleted)`
         );
       } else {
         throw error;
@@ -368,7 +368,7 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
     // as they contain user data across multiple threads - they should only be deleted manually)
     // const pvcName = `peerbot-user-workspace-${deploymentId.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}`;
     console.log(
-      `ℹ️  User PVC preserved for future threads (not auto-deleted): peerbot-user-workspace-${deploymentId.replace(/[^a-zA-Z0-9]/g, "-").toLowerCase()}`,
+      `ℹ️  User PVC preserved for future threads (not auto-deleted): peerbot-user-workspace-${deploymentId.replace(/[^a-zA-Z0-9]/g, "-").toLowerCase()}`
     );
 
     // Delete associated secret if it exists
@@ -376,18 +376,18 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
       const secretName = `peerbot-user-secret-${deploymentId.replace(/[^a-zA-Z0-9]/g, "-").toLowerCase()}`;
       await this.coreV1Api.deleteNamespacedSecret(
         secretName,
-        this.config.kubernetes.namespace,
+        this.config.kubernetes.namespace
       );
       console.log(`✅ Deleted secret: ${secretName}`);
     } catch (error: any) {
       if (error.statusCode === 404) {
         console.log(
-          `⚠️  Secret for ${deploymentName} not found (already deleted)`,
+          `⚠️  Secret for ${deploymentName} not found (already deleted)`
         );
       } else {
         console.log(
           `⚠️  Failed to delete secret for ${deploymentName}:`,
-          error.message,
+          error.message
         );
       }
     }
@@ -407,12 +407,12 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
       await this.appsV1Api.patchNamespacedDeployment(
         deploymentName,
         this.config.kubernetes.namespace,
-        patch,
+        patch
       );
     } catch (error) {
       console.error(
         `❌ Failed to update activity for deployment ${deploymentName}:`,
-        error instanceof Error ? error.message : String(error),
+        error instanceof Error ? error.message : String(error)
       );
       // Don't throw - activity tracking should not block message processing
     }

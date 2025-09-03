@@ -1,15 +1,15 @@
 #!/usr/bin/env bun
 
-import * as Sentry from "@sentry/node";
-import { ClaudeSessionRunner } from "./core";
-import { WorkspaceManager } from "./workspace-manager";
-import { QueueIntegration } from "./task-queue-integration";
-import { parseClaudeOutput } from "./claude-response-parser";
-import type { WorkerConfig } from "./types";
-import logger from "./logger";
 // import { execSync } from "node:child_process";
 import fs from "node:fs";
 import { join } from "node:path";
+import * as Sentry from "@sentry/node";
+import { parseClaudeOutput } from "./claude-response-parser";
+import { ClaudeSessionRunner } from "./core";
+import logger from "./logger";
+import { QueueIntegration } from "./task-queue-integration";
+import type { WorkerConfig } from "./types";
+import { WorkspaceManager } from "./workspace-manager";
 
 export class ClaudeWorker {
   private sessionRunner: ClaudeSessionRunner;
@@ -28,7 +28,7 @@ export class ClaudeWorker {
     const databaseUrl = process.env.PEERBOT_DATABASE_URL;
     if (!databaseUrl) {
       const error = new Error(
-        "PEERBOT_DATABASE_URL environment variable is required",
+        "PEERBOT_DATABASE_URL environment variable is required"
       );
       logger.error("Failed to initialize QueueIntegration:", error);
       throw error;
@@ -82,7 +82,7 @@ export class ClaudeWorker {
 
       // Check if current directory has any build config files
       const hasConfigFile = entries.some(
-        (entry) => entry.isFile() && buildConfigFiles.has(entry.name),
+        (entry) => entry.isFile() && buildConfigFiles.has(entry.name)
       );
 
       if (hasConfigFile) {
@@ -124,10 +124,10 @@ export class ClaudeWorker {
 
     try {
       logger.info(
-        `🚀 Starting Claude worker for session: ${this.config.sessionKey} [test-change]`,
+        `🚀 Starting Claude worker for session: ${this.config.sessionKey} [test-change]`
       );
       logger.info(
-        `[TIMING] Worker execute() started at: ${new Date(executeStartTime).toISOString()}`,
+        `[TIMING] Worker execute() started at: ${new Date(executeStartTime).toISOString()}`
       );
 
       // Start queue integration
@@ -140,7 +140,7 @@ export class ClaudeWorker {
 
       // Decode user prompt first
       const userPrompt = Buffer.from(this.config.userPrompt, "base64").toString(
-        "utf-8",
+        "utf-8"
       );
       logger.info(`User prompt: ${userPrompt.substring(0, 100)}...`);
 
@@ -155,7 +155,7 @@ export class ClaudeWorker {
 
       // Setup workspace
       logger.info(
-        isResumedSession ? "Resuming workspace..." : "Setting up workspace...",
+        isResumedSession ? "Resuming workspace..." : "Setting up workspace..."
       );
       await Sentry.startSpan(
         {
@@ -171,15 +171,15 @@ export class ClaudeWorker {
           await this.workspaceManager.setupWorkspace(
             this.config.repositoryUrl,
             this.config.userId,
-            this.config.sessionKey,
+            this.config.sessionKey
           );
 
           // Create or checkout session branch
           logger.info("Setting up session branch...");
           await this.workspaceManager.createSessionBranch(
-            this.config.sessionKey,
+            this.config.sessionKey
           );
-        },
+        }
       );
       // Prepare session context
       const sessionContext = {
@@ -196,11 +196,11 @@ export class ClaudeWorker {
 
       // Execute Claude session with conversation history
       logger.info(
-        `[TIMING] Starting Claude session at: ${new Date().toISOString()}`,
+        `[TIMING] Starting Claude session at: ${new Date().toISOString()}`
       );
       const claudeStartTime = Date.now();
       logger.info(
-        `[TIMING] Total worker startup time: ${claudeStartTime - executeStartTime}ms`,
+        `[TIMING] Total worker startup time: ${claudeStartTime - executeStartTime}ms`
       );
 
       let firstOutputLogged = false;
@@ -235,7 +235,7 @@ export class ClaudeWorker {
               // Log timing for first output
               if (!firstOutputLogged && update.type === "output") {
                 logger.info(
-                  `[TIMING] First Claude output at: ${new Date().toISOString()} (${Date.now() - claudeStartTime}ms after Claude start)`,
+                  `[TIMING] First Claude output at: ${new Date().toISOString()} (${Date.now() - claudeStartTime}ms after Claude start)`
                 );
                 firstOutputLogged = true;
                 // Update progress to show Claude is now actively working
@@ -247,7 +247,7 @@ export class ClaudeWorker {
               }
             },
           });
-        },
+        }
       );
 
       // Handle final result
@@ -265,7 +265,7 @@ export class ClaudeWorker {
         if (status.hasChanges) {
           logger.info("Final push: Committing remaining changes...");
           await this.workspaceManager.commitAndPush(
-            `Session complete: ${status.changedFiles.length} file(s) modified`,
+            `Session complete: ${status.changedFiles.length} file(s) modified`
           );
         }
       } catch (pushError) {
@@ -278,10 +278,9 @@ export class ClaudeWorker {
 
         // IMPORTANT: Always update with a message, even if Claude didn't provide final text
         // This ensures the "thinking" message is replaced
-        const finalMessage =
-          claudeResponse && claudeResponse.trim()
-            ? claudeResponse
-            : "✅ Task completed successfully";
+        const finalMessage = claudeResponse?.trim()
+          ? claudeResponse
+          : "✅ Task completed successfully";
 
         logger.info(`Sending final message via queue: ${finalMessage}...`);
         await this.queueIntegration.updateProgress(finalMessage);
@@ -297,7 +296,7 @@ export class ClaudeWorker {
 
         const errorMsg = result.error || "Unknown error";
         await this.queueIntegration.updateProgress(
-          `❌ Session failed: ${errorMsg}`,
+          `❌ Session failed: ${errorMsg}`
         );
         await this.queueIntegration.signalError(new Error(errorMsg));
 
@@ -305,7 +304,7 @@ export class ClaudeWorker {
       }
 
       logger.info(
-        `Worker completed with ${result.success ? "success" : "failure"}`,
+        `Worker completed with ${result.success ? "success" : "failure"}`
       );
     } catch (error) {
       logger.error("Worker execution failed:", error);
@@ -315,7 +314,7 @@ export class ClaudeWorker {
         const status = await this.workspaceManager.getRepositoryStatus();
         if (status?.hasChanges) {
           await this.workspaceManager.commitAndPush(
-            `Session error: Saving ${status.changedFiles.length} file(s) before exit`,
+            `Session error: Saving ${status.changedFiles.length} file(s) before exit`
           );
         }
       } catch (pushError) {
@@ -341,7 +340,7 @@ export class ClaudeWorker {
 
         await this.queueIntegration.updateProgress(errorMessage);
         await this.queueIntegration.signalError(
-          error instanceof Error ? error : new Error(String(error)),
+          error instanceof Error ? error : new Error(String(error))
         );
 
         // Reactions are now handled by dispatcher based on error status
@@ -371,7 +370,7 @@ export class ClaudeWorker {
         .replace(/{{sessionKey}}/g, this.config.sessionKey)
         .replace(
           /{{sessionKeyFormatted}}/g,
-          this.config.sessionKey.replace(/\./g, "-"),
+          this.config.sessionKey.replace(/\./g, "-")
         )
         .replace(/{{makeTargetsSummary}}/g, this.getMakeTargetsSummary());
 
@@ -381,7 +380,7 @@ export class ClaudeWorker {
     } catch (error) {
       logger.error("Failed to read custom instructions template:", error);
       logger.error(
-        `Template path attempted: ${join(__dirname, "custom-instructions.md")}`,
+        `Template path attempted: ${join(__dirname, "custom-instructions.md")}`
       );
       // Fallback to basic instructions
       const fallback = `You are a helpful Claude Code agent for user ${this.config.userId}.`;

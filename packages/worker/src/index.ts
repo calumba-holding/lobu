@@ -1,18 +1,19 @@
 #!/usr/bin/env bun
 
 import { initSentry } from "@peerbot/shared";
+
 // Force rebuild to deploy MCP config fix - timestamp: 1756399400
 
 // Initialize Sentry monitoring
 initSentry();
 
+import logger from "./logger";
 import { QueuePersistentClaudeWorker } from "./persistent-task-worker";
-import { QueueIntegration } from "./task-queue-integration";
 import {
   startProcessManager,
   stopProcessManager,
 } from "./process-manager-integration";
-import logger from "./logger";
+import { QueueIntegration } from "./task-queue-integration";
 
 // Re-export ClaudeWorker for backward compatibility
 export { ClaudeWorker } from "./claude-worker";
@@ -22,7 +23,7 @@ export { ClaudeWorker } from "./claude-worker";
  */
 async function main() {
   logger.info(
-    "🔄 Starting in queue mode (dynamic deployment-based persistent worker)",
+    "🔄 Starting in queue mode (dynamic deployment-based persistent worker)"
   );
 
   // Get user ID and optional target thread from environment
@@ -44,7 +45,7 @@ async function main() {
         const workspaceDir = `/workspace/${threadMatch[1]}`;
         process.env.WORKSPACE_DIR = workspaceDir;
         logger.info(
-          `📁 Set WORKSPACE_DIR for process manager: ${workspaceDir}`,
+          `📁 Set WORKSPACE_DIR for process manager: ${workspaceDir}`
         );
       }
     }
@@ -59,7 +60,7 @@ async function main() {
     // Keep the process running for persistent queue consumption
     process.on("SIGTERM", async () => {
       logger.info(
-        "Received SIGTERM, shutting down queue worker and process manager...",
+        "Received SIGTERM, shutting down queue worker and process manager..."
       );
       await queueWorker.stop();
       await stopProcessManager();
@@ -68,7 +69,7 @@ async function main() {
 
     process.on("SIGINT", async () => {
       logger.info(
-        "Received SIGINT, shutting down queue worker and process manager...",
+        "Received SIGINT, shutting down queue worker and process manager..."
       );
       await queueWorker.stop();
       await stopProcessManager();
@@ -76,7 +77,9 @@ async function main() {
     });
 
     // Keep process alive
-    await new Promise(() => {}); // Wait forever
+    await new Promise(() => {
+      // Keep process running indefinitely
+    }); // Wait forever
   } catch (error) {
     logger.error("❌ Queue worker failed:", error);
     process.exit(1);
@@ -115,7 +118,7 @@ async function appendTerminationMessage(signal: string): Promise<void> {
 
       await queueIntegration.start();
       await queueIntegration.updateProgress(
-        `🛑 **Worker terminated (${signal})** - The host is terminated and not processing further requests.`,
+        `🛑 **Worker terminated (${signal})** - The host is terminated and not processing further requests.`
       );
       await queueIntegration.signalDone();
 
@@ -127,7 +130,7 @@ async function appendTerminationMessage(signal: string): Promise<void> {
   } catch (error) {
     logger.error(
       `Failed to send ${signal} termination message via queue:`,
-      error,
+      error
     );
   }
 }

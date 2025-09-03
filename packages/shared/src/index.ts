@@ -1,10 +1,11 @@
 // Export shared types
-export type {
-  ClaudeExecutionOptions,
-  SessionContext,
-  ConversationMessage,
-} from "./types";
+
+export { initSentry } from "./sentry";
 
 // Export utilities
 export { SessionUtils } from "./session-utils";
-export { initSentry } from "./sentry";
+export type {
+  ClaudeExecutionOptions,
+  ConversationMessage,
+  SessionContext,
+} from "./types";

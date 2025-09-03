@@ -2,10 +2,10 @@
 
 import logger from "./logger";
 import type {
-  SessionState,
-  SessionContext,
   ConversationMessage,
   ProgressUpdate,
+  SessionContext,
+  SessionState,
 } from "./types";
 
 /**
@@ -14,7 +14,7 @@ import type {
 export class SessionManager {
   constructor(_config: { timeoutMinutes?: number }) {
     logger.info(
-      "SessionManager initialized (stateless - using Slack as source of truth)",
+      "SessionManager initialized (stateless - using Slack as source of truth)"
     );
   }
 
@@ -23,7 +23,7 @@ export class SessionManager {
    */
   async createSession(
     sessionKey: string,
-    context: SessionContext,
+    context: SessionContext
   ): Promise<SessionState> {
     const now = Date.now();
 
@@ -54,10 +54,10 @@ export class SessionManager {
    */
   async addMessage(
     sessionKey: string,
-    message: ConversationMessage,
+    message: ConversationMessage
   ): Promise<void> {
     logger.info(
-      `Would add ${message.role} message to session ${sessionKey} (no-op in stateless mode)`,
+      `Would add ${message.role} message to session ${sessionKey} (no-op in stateless mode)`
     );
   }
 
@@ -66,7 +66,7 @@ export class SessionManager {
    */
   async updateProgress(
     sessionKey: string,
-    update: ProgressUpdate,
+    update: ProgressUpdate
   ): Promise<void> {
     logger.info(`Progress update for ${sessionKey}: ${update.type}`);
   }
@@ -76,7 +76,7 @@ export class SessionManager {
    */
   startTimeoutMonitoring(sessionKey: string): Promise<void> {
     logger.info(
-      `Timeout monitoring for ${sessionKey} (no-op in stateless mode)`,
+      `Timeout monitoring for ${sessionKey} (no-op in stateless mode)`
     );
     return Promise.resolve();
   }

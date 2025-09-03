@@ -11,7 +11,7 @@ import type { WorkerJobRequest } from "../types";
  * Factory for creating mock worker job requests
  */
 export function createMockWorkerJobRequest(
-  overrides: Partial<WorkerJobRequest> = {},
+  overrides: Partial<WorkerJobRequest> = {}
 ): WorkerJobRequest {
   return {
     sessionKey: "test-session-123",
@@ -181,7 +181,7 @@ export const rateLimitTestHelpers = {
       createMockWorkerJobRequest({
         userId,
         sessionKey: `rate-limit-test-${i}`,
-      }),
+      })
     );
   },
 
@@ -217,7 +217,7 @@ export const securityTestCases = {
       nested: { very: { deep: { object: "value" } } },
     }),
     manyFields: Object.fromEntries(
-      Array.from({ length: 1000 }, (_, i) => [`field${i}`, `value${i}`]),
+      Array.from({ length: 1000 }, (_, i) => [`field${i}`, `value${i}`])
     ),
   },
 };
@@ -235,7 +235,7 @@ export class PerformanceTracker {
       if (!this.metrics.has(name)) {
         this.metrics.set(name, []);
       }
-      this.metrics.get(name)!.push(duration);
+      this.metrics.get(name)?.push(duration);
       return duration;
     };
   }
@@ -271,7 +271,7 @@ export const asyncTestUtils = {
   async waitFor(
     condition: () => boolean | Promise<boolean>,
     timeout: number = 5000,
-    interval: number = 100,
+    interval: number = 100
   ): Promise<void> {
     const start = Date.now();
     while (Date.now() - start < timeout) {
@@ -295,21 +295,21 @@ export const asyncTestUtils = {
    */
   async testConcurrency<T>(
     tasks: (() => Promise<T>)[],
-    expectedResults?: T[],
+    expectedResults?: T[]
   ): Promise<T[]> {
     const results = await Promise.allSettled(tasks.map((task) => task()));
 
     const fulfilled = results
       .filter(
         (result): result is PromiseFulfilledResult<T> =>
-          result.status === "fulfilled",
+          result.status === "fulfilled"
       )
       .map((result) => result.value);
 
     const rejected = results
       .filter(
         (result): result is PromiseRejectedResult =>
-          result.status === "rejected",
+          result.status === "rejected"
       )
       .map((result) => result.reason);
 

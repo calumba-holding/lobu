@@ -1,15 +1,15 @@
 #!/usr/bin/env bun
 
-import PgBoss from "pg-boss";
+import { createHash } from "node:crypto";
 import { WebClient } from "@slack/web-api";
-import { createHash } from "crypto";
 import { marked } from "marked";
+import PgBoss from "pg-boss";
 import type { GitHubRepositoryManager } from "../github/repository-manager";
 
 // Generate deterministic action IDs based on content to prevent conflicts during rapid message updates - fixed
 function generateDeterministicActionId(
   content: string,
-  prefix: string = "action",
+  prefix: string = "action"
 ): string {
   const hash = createHash("sha256")
     .update(content)
@@ -29,6 +29,7 @@ function processMarkdownAndBlockkit(content: string): {
   let blockIndex = 0; // Track position to ensure unique action_ids
 
   let match;
+  // biome-ignore lint/suspicious/noAssignInExpressions: Required for regex matching pattern
   while ((match = codeBlockRegex.exec(content)) !== null) {
     const [fullMatch, language, metadataStr, codeContent] = match;
 
@@ -48,7 +49,7 @@ function processMarkdownAndBlockkit(content: string): {
       if (metadata.action) {
         if (metadata.show === false) {
           console.log(
-            `[DEBUG] Skipping blockkit with show:false - action: ${metadata.action}`,
+            `[DEBUG] Skipping blockkit with show:false - action: ${metadata.action}`
           );
           processedContent = processedContent.replace(fullMatch, "");
           continue;
@@ -60,7 +61,7 @@ function processMarkdownAndBlockkit(content: string): {
             : { blocks: [] };
           const actionId = generateDeterministicActionId(
             codeContent + metadata.action + blockIndex,
-            "blockkit_form",
+            "blockkit_form"
           );
           actionButtons.push({
             type: "button",
@@ -73,7 +74,7 @@ function processMarkdownAndBlockkit(content: string): {
           if (codeContent && codeContent.length <= 2000) {
             const actionId = generateDeterministicActionId(
               codeContent + metadata.action + blockIndex,
-              language,
+              language
             );
             actionButtons.push({
               type: "button",
@@ -125,7 +126,7 @@ function processMarkdownAndBlockkit(content: string): {
  * Custom renderer for converting markdown to Slack's mrkdwn format
  */
 class SlackRenderer extends marked.Renderer {
-  heading(text: string, level: number): string {
+  heading(text: string, _level: number): string {
     // Convert all headings to bold text with extra spacing
     return `*${text}*\n\n`;
   }
@@ -157,19 +158,19 @@ class SlackRenderer extends marked.Renderer {
   blockquote(quote: string): string {
     // Convert blockquote to italic with quote prefix
     const lines = quote.trim().split("\n");
-    return lines.map((line) => `_> ${line.trim()}_`).join("\n") + "\n\n";
+    return `${lines.map((line) => `_> ${line.trim()}_`).join("\n")}\n\n`;
   }
 
-  list(body: string, ordered: boolean, start: number | ""): string {
-    return body + "\n";
+  list(body: string, _ordered: boolean, _start: number | ""): string {
+    return `${body}\n`;
   }
 
-  listitem(text: string, task?: boolean, checked?: boolean): string {
+  listitem(text: string, _task?: boolean, _checked?: boolean): string {
     // Slack supports bullet points and numbered lists
     return `• ${text.trim()}\n`;
   }
 
-  link(href: string, title: string | null | undefined, text: string): string {
+  link(href: string, _title: string | null | undefined, text: string): string {
     // Slack link format is <url|text>
     return `<${href}|${text}>`;
   }
@@ -207,7 +208,7 @@ export function convertMarkdownToSlack(content: string): string {
     // Handle code blocks specially - marked converts them to HTML, we need to convert back to Slack format
     processed = processed.replace(
       /<pre><code(?:\s+class="language-(\w+)")?>([\s\S]*?)<\/code><\/pre>/g,
-      (match, language, code) => {
+      (_match, _language, code) => {
         // Decode HTML entities in code blocks
         const decodedCode = code
           .replace(/&lt;/g, "<")
@@ -217,7 +218,7 @@ export function convertMarkdownToSlack(content: string): string {
           .replace(/&#39;/g, "'");
 
         return `\`\`\`\n${decodedCode.trim()}\n\`\`\``;
-      },
+      }
     );
 
     // Clean up any remaining HTML entities that might have been introduced
@@ -244,11 +245,11 @@ async function generateGitHubActionButtons(
   gitBranch: string | undefined,
   userMappings: Map<string, string>,
   repoManager: GitHubRepositoryManager,
-  slackClient?: any,
+  slackClient?: any
 ): Promise<any[] | undefined> {
   try {
     logger.debug(
-      `Generating GitHub action buttons for user ${userId}, gitBranch: ${gitBranch}`,
+      `Generating GitHub action buttons for user ${userId}, gitBranch: ${gitBranch}`
     );
 
     // If no git branch provided, don't show Edit button
@@ -311,7 +312,7 @@ async function generateGitHubActionButtons(
       `<https://github.com/${repoPath}/compare/main...${gitBranch}?quick_pull=1&labels=peerbot|🔀 Pull Request>`,
       `<https://github.dev/${repoPath}/tree/${gitBranch}|Code>`,
     ];
-  } catch (error) {
+  } catch (_error) {
     // Return undefined on error - this will result in no action buttons being added
     return undefined;
   }
@@ -351,7 +352,7 @@ export class ThreadResponseConsumer {
     connectionString: string,
     slackToken: string,
     repoManager: GitHubRepositoryManager,
-    userMappings: Map<string, string>,
+    userMappings: Map<string, string>
   ) {
     this.pgBoss = new PgBoss(connectionString);
     this.slackClient = new WebClient(slackToken);
@@ -372,7 +373,7 @@ export class ThreadResponseConsumer {
       // Register job handler for thread response messages
       await this.pgBoss.work(
         "thread_response",
-        this.handleThreadResponse.bind(this),
+        this.handleThreadResponse.bind(this)
       );
 
       this.isRunning = true;
@@ -407,7 +408,7 @@ export class ThreadResponseConsumer {
       // Handle PgBoss serialized format (similar to worker queue consumer)
       if (typeof job === "object" && job !== null) {
         const keys = Object.keys(job);
-        const numericKeys = keys.filter((key) => !isNaN(Number(key)));
+        const numericKeys = keys.filter((key) => !Number.isNaN(Number(key)));
 
         if (numericKeys.length > 0) {
           // PgBoss passes jobs as an array, get the first element
@@ -422,11 +423,11 @@ export class ThreadResponseConsumer {
             // This is the actual job object from PgBoss
             data = firstJob.data;
             console.log(
-              `📤 AGENT RESPONSE: Processing agent response for user ${data.userId}, thread ${data.threadId || "unknown"}, jobId: ${firstJob.id}`,
+              `📤 AGENT RESPONSE: Processing agent response for user ${data.userId}, thread ${data.threadId || "unknown"}, jobId: ${firstJob.id}`
             );
           } else {
             throw new Error(
-              "Invalid job format: expected job object with data field",
+              "Invalid job format: expected job object with data field"
             );
           }
         } else {
@@ -439,12 +440,12 @@ export class ThreadResponseConsumer {
 
       if (!data || !data.messageId) {
         throw new Error(
-          `Invalid thread response data: ${JSON.stringify(data)}`,
+          `Invalid thread response data: ${JSON.stringify(data)}`
         );
       }
 
       logger.info(
-        `Processing thread response job for message ${data.messageId}, originalMessageTs: ${data.originalMessageTs}, claudeSessionId: ${data.claudeSessionId}`,
+        `Processing thread response job for message ${data.messageId}, originalMessageTs: ${data.originalMessageTs}, claudeSessionId: ${data.claudeSessionId}`
       );
 
       // Create a session key to track bot messages per conversation
@@ -470,7 +471,7 @@ export class ThreadResponseConsumer {
             data.channelId,
             reactionTimestamp,
             "eyes",
-            "gear",
+            "gear"
           );
         } else if (data.isDone) {
           // Processing completed: Replace gear with checkmark
@@ -478,7 +479,7 @@ export class ThreadResponseConsumer {
             data.channelId,
             reactionTimestamp,
             "gear",
-            "white_check_mark",
+            "white_check_mark"
           );
         } else if (data.error) {
           // Error occurred: Replace current reaction with error
@@ -486,13 +487,13 @@ export class ThreadResponseConsumer {
             data.channelId,
             reactionTimestamp,
             "gear",
-            "x",
+            "x"
           );
           await this.updateReaction(
             data.channelId,
             reactionTimestamp,
             "eyes",
-            "x",
+            "x"
           );
         }
       }
@@ -504,7 +505,7 @@ export class ThreadResponseConsumer {
         const newBotResponseTs = await this.handleMessageUpdate(
           data,
           isFirstResponse,
-          botMessageTs,
+          botMessageTs
         );
 
         // Store the bot response timestamp for future updates
@@ -516,7 +517,7 @@ export class ThreadResponseConsumer {
 
           if (Math.abs(currentTime - messageTime) > 60) {
             logger.warn(
-              `Suspicious bot message timestamp: ${newBotResponseTs} (current: ${currentTime})`,
+              `Suspicious bot message timestamp: ${newBotResponseTs} (current: ${currentTime})`
             );
           }
 
@@ -527,14 +528,14 @@ export class ThreadResponseConsumer {
           if (Math.abs(threadBase - messageBase) > 100) {
             // Allow some variance
             logger.error(
-              `Bot message ${newBotResponseTs} appears to be in wrong thread (expected near ${data.threadTs})`,
+              `Bot message ${newBotResponseTs} appears to be in wrong thread (expected near ${data.threadTs})`
             );
             // Don't store this mapping as it's likely wrong
             return;
           }
 
           logger.info(
-            `Bot created first response with ts: ${newBotResponseTs}, storing for session ${sessionKey}`,
+            `Bot created first response with ts: ${newBotResponseTs}, storing for session ${sessionKey}`
           );
           this.sessionBotMessages.set(sessionKey, newBotResponseTs);
         }
@@ -548,7 +549,7 @@ export class ThreadResponseConsumer {
       // Keep the session active so any late-arriving messages still update the same bot message
       if (data.isDone) {
         logger.info(
-          `Thread processing completed for message ${data.messageId}`,
+          `Thread processing completed for message ${data.messageId}`
         );
         // Don't clear the session here - it will be cleared when a new user message arrives
         // This prevents duplicate bot messages if the worker sends more messages after isDone
@@ -561,11 +562,11 @@ export class ThreadResponseConsumer {
         error?.code === "slack_webapi_platform_error"
       ) {
         logger.error(
-          `Slack validation error in job ${job.id}: ${error?.data?.error || error.message}`,
+          `Slack validation error in job ${job.id}: ${error?.data?.error || error.message}`
         );
 
         // Try to inform the user about the validation error
-        if (data && data.channelId && data.messageId) {
+        if (data?.channelId && data.messageId) {
           try {
             await this.slackClient.chat.update({
               channel: data.channelId,
@@ -573,11 +574,11 @@ export class ThreadResponseConsumer {
               text: `❌ **Message update failed**\n\n**Error:** ${error?.data?.error || error.message}\n\nThe response may contain invalid formatting or be too long for Slack.`,
             });
             logger.info(
-              `Notified user about validation error in job ${job.id}`,
+              `Notified user about validation error in job ${job.id}`
             );
           } catch (notifyError) {
             logger.error(
-              `Failed to notify user about validation error: ${notifyError}`,
+              `Failed to notify user about validation error: ${notifyError}`
             );
           }
         }
@@ -598,16 +599,16 @@ export class ThreadResponseConsumer {
     channel: string,
     timestamp: string,
     oldReaction: string,
-    newReaction: string,
+    newReaction: string
   ): Promise<void> {
     console.log(
-      `🔄 REACTION UPDATE: Changing ${oldReaction} → ${newReaction} on message ${timestamp} in channel ${channel}`,
+      `🔄 REACTION UPDATE: Changing ${oldReaction} → ${newReaction} on message ${timestamp} in channel ${channel}`
     );
 
     try {
       // Remove old reaction
       console.log(
-        `🗑️  REACTION CHANGE: Removing '${oldReaction}' from message ${timestamp}`,
+        `🗑️  REACTION CHANGE: Removing '${oldReaction}' from message ${timestamp}`
       );
       await this.slackClient.reactions.remove({
         channel,
@@ -615,24 +616,24 @@ export class ThreadResponseConsumer {
         name: oldReaction,
       });
       console.log(
-        `✅ REACTION REMOVED: '${oldReaction}' successfully removed from message ${timestamp}`,
+        `✅ REACTION REMOVED: '${oldReaction}' successfully removed from message ${timestamp}`
       );
     } catch (error) {
       // Ignore - reaction might not exist
       console.log(
         `⚠️  REACTION REMOVE: '${oldReaction}' reaction might not exist on message ${timestamp}:`,
-        error,
+        error
       );
       logger.debug(
         `Failed to remove ${oldReaction} reaction (might not exist):`,
-        error,
+        error
       );
     }
 
     try {
       // Add new reaction
       console.log(
-        `➕ REACTION CHANGE: Adding '${newReaction}' to message ${timestamp}`,
+        `➕ REACTION CHANGE: Adding '${newReaction}' to message ${timestamp}`
       );
       await this.slackClient.reactions.add({
         channel,
@@ -640,16 +641,16 @@ export class ThreadResponseConsumer {
         name: newReaction,
       });
       console.log(
-        `✅ REACTION ADDED: '${newReaction}' successfully added to message ${timestamp}`,
+        `✅ REACTION ADDED: '${newReaction}' successfully added to message ${timestamp}`
       );
       logger.info(
-        `Updated reaction: ${oldReaction} → ${newReaction} on message ${timestamp}`,
+        `Updated reaction: ${oldReaction} → ${newReaction} on message ${timestamp}`
       );
     } catch (error) {
       // Ignore - reaction might already exist
       logger.debug(
         `Failed to add ${newReaction} reaction (might already exist):`,
-        error,
+        error
       );
     }
   }
@@ -660,8 +661,8 @@ export class ThreadResponseConsumer {
   private async handleMessageUpdate(
     data: ThreadResponsePayload,
     isFirstResponse: boolean,
-    botMessageTs?: string,
-  ): Promise<string | void> {
+    botMessageTs?: string
+  ): Promise<string | undefined> {
     const { content, channelId, threadTs, userId } = data;
 
     if (!content) return;
@@ -676,7 +677,7 @@ export class ThreadResponseConsumer {
         data.gitBranch,
         this.userMappings,
         this.repoManager,
-        this.slackClient,
+        this.slackClient
       );
 
       // Add GitHub action links to the content
@@ -689,8 +690,7 @@ export class ThreadResponseConsumer {
           .slice()
           .reverse()
           .find(
-            (block) =>
-              block.type === "section" && block.text?.type === "mrkdwn",
+            (block) => block.type === "section" && block.text?.type === "mrkdwn"
           );
         if (lastSectionBlock) {
           lastSectionBlock.text.text += linksText;
@@ -712,7 +712,7 @@ export class ThreadResponseConsumer {
       if (isFirstResponse) {
         // Create new message for first response
         logger.info(
-          `Creating new bot message in channel ${channelId}, thread ${threadTs}`,
+          `Creating new bot message in channel ${channelId}, thread ${threadTs}`
         );
         const postResult = await this.slackClient.chat.postMessage({
           channel: channelId,
@@ -725,7 +725,7 @@ export class ThreadResponseConsumer {
         });
 
         logger.info(
-          `Bot message created: ${postResult.ok}, ts: ${postResult.ts}`,
+          `Bot message created: ${postResult.ok}, ts: ${postResult.ts}`
         );
 
         if (!postResult.ok) {
@@ -767,7 +767,7 @@ export class ThreadResponseConsumer {
 
           if (!retryResult.ok) {
             throw new Error(
-              `Failed to create bot message after retry: ${retryResult.error}`,
+              `Failed to create bot message after retry: ${retryResult.error}`
             );
           }
 
@@ -779,7 +779,7 @@ export class ThreadResponseConsumer {
         // Update existing message - use the passed botMessageTs or fallback
         const botTs = botMessageTs || data.botResponseTs || threadTs;
         logger.info(
-          `Updating bot message in channel ${channelId}, ts ${botTs}`,
+          `Updating bot message in channel ${channelId}, ts ${botTs}`
         );
 
         const updateResult = await this.slackClient.chat.update({
@@ -816,7 +816,7 @@ export class ThreadResponseConsumer {
           const maxContentLength = 2500; // Conservative limit
           const truncatedContent =
             content.length > maxContentLength
-              ? content.substring(0, maxContentLength) + "\n...[truncated]"
+              ? `${content.substring(0, maxContentLength)}\n...[truncated]`
               : content;
 
           const errorMessage = `❌ *Error occurred while updating message*\n\n*Error:* ${error.data?.error || ""}${error.message || ""}\n\nThe response may be too long or contain invalid formatting.\n\n*Raw Content:*\n\`\`\`\n${truncatedContent}\n\`\`\``;
@@ -827,7 +827,7 @@ export class ThreadResponseConsumer {
             text: errorMessage,
           });
           logger.info(
-            `Sent fallback error message with raw content for validation error: ${error.data?.error}`,
+            `Sent fallback error message with raw content for validation error: ${error.data?.error}`
           );
         } catch (fallbackError) {
           logger.error("Failed to send fallback error message:", fallbackError);
@@ -856,7 +856,7 @@ export class ThreadResponseConsumer {
   private async handleError(
     data: ThreadResponsePayload,
     isFirstResponse: boolean,
-    botMessageTs?: string,
+    botMessageTs?: string
   ): Promise<void> {
     const { error, channelId, threadTs, userId } = data;
 
@@ -864,7 +864,7 @@ export class ThreadResponseConsumer {
 
     try {
       logger.info(
-        `Sending error message to channel ${channelId}, thread ${threadTs}`,
+        `Sending error message to channel ${channelId}, thread ${threadTs}`
       );
 
       const errorContent = `❌ **Error occurred**\n\n**Error:** \`${error}\``;
@@ -889,7 +889,7 @@ export class ThreadResponseConsumer {
         data.gitBranch,
         this.userMappings,
         this.repoManager,
-        this.slackClient,
+        this.slackClient
       );
 
       // Add GitHub action links if available
@@ -926,7 +926,7 @@ export class ThreadResponseConsumer {
       }
     } catch (updateError: any) {
       logger.error(
-        `Failed to send error message to Slack: ${updateError.message}`,
+        `Failed to send error message to Slack: ${updateError.message}`
       );
       throw updateError;
     }

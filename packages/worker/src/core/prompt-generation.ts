@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 
-import { writeFile } from "fs/promises";
-import { join } from "path";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import logger from "./logger";
-import type { SessionContext, ConversationMessage } from "./types";
+import type { ConversationMessage, SessionContext } from "./types";
 
 const TEMP_DIR = process.env.RUNNER_TEMP || "/tmp";
 
@@ -22,7 +22,7 @@ export interface PromptContext {
  * Generate formatted conversation history for Claude prompt
  */
 function formatConversationHistory(
-  conversation: ConversationMessage[],
+  conversation: ConversationMessage[]
 ): string {
   if (conversation.length === 0) {
     return "No previous conversation history.";
@@ -54,7 +54,7 @@ function generateContextSection(context: SessionContext): string {
 
   if (context.threadTs) {
     sections.push(
-      "Session Type: Thread-based conversation (resuming previous discussion)",
+      "Session Type: Thread-based conversation (resuming previous discussion)"
     );
   } else {
     sections.push("Session Type: New conversation");
@@ -68,7 +68,7 @@ function generateContextSection(context: SessionContext): string {
     sections.push(`Working Directory: ${context.workingDirectory}`);
   }
 
-  return sections.join("\n") + "\n\n";
+  return `${sections.join("\n")}\n\n`;
 }
 
 /**
@@ -83,14 +83,14 @@ function generateEnvironmentSection(context: SessionContext): string {
     sections.push("You are working in a user-specific GitHub repository:");
     sections.push(`- Repository: ${context.repositoryUrl}`);
     sections.push(
-      `- Working Directory: ${context.workingDirectory || "/workspace"}`,
+      `- Working Directory: ${context.workingDirectory || "/workspace"}`
     );
     sections.push("- You have full access to read, write, and commit changes");
     sections.push("- The repository has been cloned and is ready for use");
   } else {
     sections.push("You are working in an isolated container environment:");
     sections.push(
-      `- Working Directory: ${context.workingDirectory || "/workspace"}`,
+      `- Working Directory: ${context.workingDirectory || "/workspace"}`
     );
     sections.push("- You have access to standard development tools");
   }
@@ -102,7 +102,7 @@ function generateEnvironmentSection(context: SessionContext): string {
   sections.push("- Changes will be persisted to GitHub ");
   sections.push("- Progress updates are streamed to Slack in real-time");
 
-  return sections.join("\n") + "\n\n";
+  return `${sections.join("\n")}\n\n`;
 }
 
 /**
@@ -129,7 +129,7 @@ Keep responses concise but helpful. Focus on solving the user's specific request
  */
 export async function createPromptFile(
   context: SessionContext,
-  conversation: ConversationMessage[] = [],
+  conversation: ConversationMessage[] = []
 ): Promise<string> {
   const promptParts = [];
 
@@ -176,7 +176,7 @@ export async function createPromptFile(
   await writeFile(promptPath, promptContent, "utf-8");
 
   logger.info(
-    `Created prompt file: ${promptPath} (${promptContent.length} characters)`,
+    `Created prompt file: ${promptPath} (${promptContent.length} characters)`
   );
   return promptPath;
 }
@@ -185,7 +185,7 @@ export async function createPromptFile(
  * Create simple prompt file for basic requests (backward compatibility)
  */
 export async function createSimplePromptFile(
-  userRequest: string,
+  userRequest: string
 ): Promise<string> {
   const promptContent = `You are Claude Code, an AI assistant helping users with software development tasks.
 

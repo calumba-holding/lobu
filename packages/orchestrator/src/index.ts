@@ -5,14 +5,14 @@ import { initSentry } from "@peerbot/shared";
 // Initialize Sentry monitoring
 initSentry();
 
+import { join } from "node:path";
 import { config as dotenvConfig } from "dotenv";
-import { join } from "path";
-import { OrchestratorConfig, OrchestratorError, ErrorCode } from "./types";
+import type { BaseDeploymentManager } from "./base/BaseDeploymentManager";
 import { DatabasePool } from "./db-connection-pool";
-import { BaseDeploymentManager } from "./base/BaseDeploymentManager";
-import { K8sDeploymentManager } from "./k8s/K8sDeploymentManager";
 import { DockerDeploymentManager } from "./docker/DockerDeploymentManager";
+import { K8sDeploymentManager } from "./k8s/K8sDeploymentManager";
 import { QueueConsumer } from "./task-queue-consumer";
+import type { OrchestratorConfig } from "./types";
 
 class PeerbotOrchestrator {
   private config: OrchestratorConfig;
@@ -30,7 +30,7 @@ class PeerbotOrchestrator {
   }
 
   private createDeploymentManager(
-    config: OrchestratorConfig,
+    config: OrchestratorConfig
   ): BaseDeploymentManager {
     // Check for explicit deployment mode
     const deploymentMode = process.env.DEPLOYMENT_MODE;
@@ -45,7 +45,7 @@ class PeerbotOrchestrator {
     if (deploymentMode === "kubernetes" || deploymentMode === "k8s") {
       if (!this.isKubernetesAvailable()) {
         throw new Error(
-          "DEPLOYMENT_MODE=kubernetes but Kubernetes is not available",
+          "DEPLOYMENT_MODE=kubernetes but Kubernetes is not available"
         );
       }
       return new K8sDeploymentManager(config, this.dbPool);
@@ -61,7 +61,7 @@ class PeerbotOrchestrator {
     }
 
     throw new Error(
-      "Neither Kubernetes nor Docker is available. Please ensure one is installed and accessible.",
+      "Neither Kubernetes nor Docker is available. Please ensure one is installed and accessible."
     );
   }
 
@@ -73,9 +73,9 @@ class PeerbotOrchestrator {
       }
 
       // Check if kubectl config is available
-      const fs = require("fs");
-      const os = require("os");
-      const path = require("path");
+      const fs = require("node:fs");
+      const os = require("node:os");
+      const path = require("node:path");
 
       // Check for kubeconfig in default locations
       const kubeconfigPaths = [
@@ -98,7 +98,7 @@ class PeerbotOrchestrator {
   private isDockerAvailable(): boolean {
     try {
       // Try to connect to Docker daemon
-      const { execSync } = require("child_process");
+      const { execSync } = require("node:child_process");
       execSync("docker version", { stdio: "ignore", timeout: 5000 });
       return true;
     } catch {
@@ -114,7 +114,7 @@ class PeerbotOrchestrator {
       console.log("📦 Running database migrations...");
 
       // TODO: Emre: I don't want to worry about migrations until we release the first version.
-      const { spawn } = require("child_process");
+      const { spawn } = require("node:child_process");
       const dbmateProcess = spawn("dbmate", ["up"], {
         cwd: process.cwd(),
         env: {
@@ -140,7 +140,7 @@ class PeerbotOrchestrator {
       dbmateProcess.on("close", (code: any) => {
         if (code === 0) {
           console.log(
-            "✅ Database created and migrations applied successfully",
+            "✅ Database created and migrations applied successfully"
           );
           resolve();
         } else {
@@ -202,7 +202,7 @@ class PeerbotOrchestrator {
   }
 
   private setupHealthEndpoints(): void {
-    const http = require("http");
+    const http = require("node:http");
 
     const server = http.createServer(async (req: any, res: any) => {
       const url = new URL(req.url, `http://${req.headers.host}`);
@@ -251,7 +251,7 @@ class PeerbotOrchestrator {
           res.end(
             JSON.stringify({
               error: error instanceof Error ? error.message : String(error),
-            }),
+            })
           );
         }
       } else if (req.method === "POST" && url.pathname.startsWith("/scale/")) {
@@ -259,9 +259,9 @@ class PeerbotOrchestrator {
         const pathParts = url.pathname.split("/");
         if (pathParts.length === 4 && pathParts[1] === "scale") {
           const deploymentName = pathParts[2];
-          const replicas = parseInt(pathParts[3]);
+          const replicas = parseInt(pathParts[3], 10);
 
-          if (isNaN(replicas) || replicas < 0) {
+          if (Number.isNaN(replicas) || replicas < 0) {
             res.statusCode = 400;
             res.end(JSON.stringify({ error: "Invalid replica count" }));
             return;
@@ -281,7 +281,7 @@ class PeerbotOrchestrator {
                 // Scale the deployment using deployment manager
                 await this.deploymentManager.scaleDeployment(
                   deploymentName,
-                  replicas,
+                  replicas
                 );
 
                 const result = {
@@ -299,7 +299,7 @@ class PeerbotOrchestrator {
               } catch (error) {
                 console.error(
                   `Failed to scale deployment ${deploymentName}:`,
-                  error,
+                  error
                 );
                 res.statusCode = 500;
                 res.end(
@@ -308,11 +308,11 @@ class PeerbotOrchestrator {
                       error instanceof Error ? error.message : String(error),
                     deployment: deploymentName,
                     requestedReplicas: replicas,
-                  }),
+                  })
                 );
               }
             });
-          } catch (error) {
+          } catch (_error) {
             res.statusCode = 500;
             res.end(JSON.stringify({ error: "Failed to read request body" }));
           }
@@ -322,7 +322,7 @@ class PeerbotOrchestrator {
             JSON.stringify({
               error:
                 "Invalid scale endpoint format. Use POST /scale/{deploymentName}/{replicas}",
-            }),
+            })
           );
         }
       } else {
@@ -333,7 +333,9 @@ class PeerbotOrchestrator {
     });
 
     const port = process.env.ORCHESTRATOR_PORT || 8080;
-    server.listen(port, () => {});
+    server.listen(port, () => {
+      // Server started
+    });
   }
 
   private setupIdleCleanup(): void {
@@ -349,7 +351,7 @@ class PeerbotOrchestrator {
       } catch (error) {
         console.error(
           "Error during deployment reconciliation - will retry on next interval:",
-          error instanceof Error ? error.message : String(error),
+          error instanceof Error ? error.message : String(error)
         );
         // Don't exit process - just log the error and continue
       }
@@ -412,9 +414,12 @@ async function main() {
       },
       queues: {
         connectionString: process.env.DATABASE_URL!,
-        retryLimit: parseInt(process.env.PGBOSS_RETRY_LIMIT || "3"),
-        retryDelay: parseInt(process.env.PGBOSS_RETRY_DELAY || "30"),
-        expireInSeconds: parseInt(process.env.PGBOSS_EXPIRE_SECONDS || "300"),
+        retryLimit: parseInt(process.env.PGBOSS_RETRY_LIMIT || "3", 10),
+        retryDelay: parseInt(process.env.PGBOSS_RETRY_DELAY || "30", 10),
+        expireInSeconds: parseInt(
+          process.env.PGBOSS_EXPIRE_SECONDS || "300",
+          10
+        ),
       },
       worker: {
         image: {
@@ -434,8 +439,9 @@ async function main() {
         },
         idleCleanupMinutes: parseInt(
           process.env.WORKER_IDLE_CLEANUP_MINUTES || "60",
+          10
         ),
-        maxDeployments: parseInt(process.env.MAX_WORKER_DEPLOYMENTS || ""),
+        maxDeployments: parseInt(process.env.MAX_WORKER_DEPLOYMENTS || "", 10),
       },
       kubernetes: {
         namespace: process.env.KUBERNETES_NAMESPACE || "peerbot",
@@ -453,7 +459,7 @@ async function main() {
 
     // Keep the process alive
     process.on("SIGUSR1", () => {
-      const status = orchestrator.getStatus();
+      const _status = orchestrator.getStatus();
     });
   } catch (error) {
     console.error("💥 Failed to start Peerbot Orchestrator:", error);

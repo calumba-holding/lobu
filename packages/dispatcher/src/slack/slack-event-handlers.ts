@@ -1,26 +1,30 @@
 #!/usr/bin/env bun
 
-import { randomUUID } from "crypto";
+import { randomUUID } from "node:crypto";
+import { SessionUtils } from "@peerbot/shared";
 import type { App } from "@slack/bolt";
 import type { GitHubRepositoryManager } from "../github/repository-manager";
-import type { DispatcherConfig, SlackContext, ThreadSession } from "../types";
-import {
-  QueueProducer,
-  type WorkerDeploymentPayload,
-  type ThreadMessagePayload,
-} from "../queue/task-queue-producer";
-import { SessionUtils } from "@peerbot/shared";
 import logger from "../logger";
 import { convertMarkdownToSlack } from "../queue/slack-thread-processor";
-import { setupMessageHandlers, setupUserHandlers, setupFileHandlers } from "./event-handlers";
-import { 
-  handleExecutableCodeBlock, 
-  handleBlockkitForm, 
-  handleStopWorker 
+import type {
+  QueueProducer,
+  ThreadMessagePayload,
+  WorkerDeploymentPayload,
+} from "../queue/task-queue-producer";
+import type { DispatcherConfig, SlackContext, ThreadSession } from "../types";
+import {
+  setupFileHandlers,
+  setupMessageHandlers,
+  setupUserHandlers,
+} from "./event-handlers";
+import {
+  handleBlockkitForm,
+  handleExecutableCodeBlock,
+  handleStopWorker,
 } from "./event-handlers/block-actions";
-import { 
-  handleBlockkitFormSubmission, 
-  handleRepositoryOverrideSubmission 
+import {
+  handleBlockkitFormSubmission,
+  handleRepositoryOverrideSubmission,
 } from "./event-handlers/form-handlers";
 
 /**
@@ -40,7 +44,7 @@ export class SlackEventHandlers {
     private app: App,
     private queueProducer: QueueProducer,
     private repoManager: GitHubRepositoryManager,
-    private config: DispatcherConfig,
+    private config: DispatcherConfig
   ) {
     this.setupEventHandlers();
     this.startCachePrewarming();
@@ -69,7 +73,7 @@ export class SlackEventHandlers {
       const handlerStartTime = Date.now();
       logger.info("=== APP_MENTION HANDLER TRIGGERED (QUEUE) ===");
       logger.info(
-        `[TIMING] Handler triggered at: ${new Date(handlerStartTime).toISOString()}`,
+        `[TIMING] Handler triggered at: ${new Date(handlerStartTime).toISOString()}`
       );
 
       try {
@@ -112,7 +116,7 @@ export class SlackEventHandlers {
 
         try {
           console.log(
-            `🔴 REACTION CHANGE: Adding error reaction 'x' to message ${event.ts} in channel ${event.channel}`,
+            `🔴 REACTION CHANGE: Adding error reaction 'x' to message ${event.ts} in channel ${event.channel}`
           );
           await client.reactions.add({
             channel: event.channel,
@@ -120,12 +124,12 @@ export class SlackEventHandlers {
             name: "x",
           });
           console.log(
-            `✅ REACTION ADDED: 'x' successfully added to message ${event.ts}`,
+            `✅ REACTION ADDED: 'x' successfully added to message ${event.ts}`
           );
         } catch (reactionError) {
           console.log(
             `❌ REACTION FAILED: Could not add 'x' reaction to message ${event.ts}:`,
-            reactionError,
+            reactionError
           );
           logger.error("Failed to add error reaction:", reactionError);
         }
@@ -155,9 +159,9 @@ export class SlackEventHandlers {
       // Skip ALL channel messages - only app_mention handles channel mentions
       // Use channel ID prefix to reliably detect channel vs DM (C* = channel, D* = DM)
       const channelId = (message as any).channel;
-      if (channelId && channelId.startsWith("C")) {
+      if (channelId?.startsWith("C")) {
         logger.debug(
-          `Skipping channel message in ${channelId} - only app_mention handles channels`,
+          `Skipping channel message in ${channelId} - only app_mention handles channels`
         );
         return;
       }
@@ -208,7 +212,7 @@ export class SlackEventHandlers {
       } catch (error) {
         logger.error("Error handling direct message:", error);
         await say(
-          `❌ Error: ${error instanceof Error ? error.message : "Unknown error occurred"}`,
+          `❌ Error: ${error instanceof Error ? error.message : "Unknown error occurred"}`
         );
       }
     });
@@ -227,9 +231,9 @@ export class SlackEventHandlers {
         // Handle repository override modal specifically
         if (view.callback_id === "repository_override_modal") {
           await handleRepositoryOverrideSubmission(
-            userId, 
-            view, 
-            client, 
+            userId,
+            view,
+            client,
             this.getOrCreateUserMapping.bind(this),
             this.updateAppHome.bind(this),
             this.repositoryCache
@@ -239,7 +243,12 @@ export class SlackEventHandlers {
 
         // Handle blockkit form modal submissions
         if (view.callback_id === "blockkit_form_modal") {
-          await handleBlockkitFormSubmission(userId, view, client, this.handleUserRequest.bind(this));
+          await handleBlockkitFormSubmission(
+            userId,
+            view,
+            client,
+            this.handleUserRequest.bind(this)
+          );
           return;
         }
 
@@ -327,7 +336,7 @@ export class SlackEventHandlers {
           channelId,
           messageTs,
           body,
-          client,
+          client
         );
       } catch (error) {
         logger.error("Error handling action:", error);
@@ -364,11 +373,11 @@ export class SlackEventHandlers {
   private async handleUserRequest(
     context: SlackContext,
     userRequest: string,
-    client: any,
+    client: any
   ): Promise<void> {
     const requestStartTime = Date.now();
     logger.info(
-      `[TIMING] handleUserRequest started at: ${new Date(requestStartTime).toISOString()}`,
+      `[TIMING] handleUserRequest started at: ${new Date(requestStartTime).toISOString()}`
     );
 
     // Normalize threadTs BEFORE session key generation to ensure consistency
@@ -385,13 +394,13 @@ export class SlackEventHandlers {
     });
 
     logger.info(
-      `Handling request for session: ${sessionKey} (threadTs: ${normalizedThreadTs})`,
+      `Handling request for session: ${sessionKey} (threadTs: ${normalizedThreadTs})`
     );
 
     // Check if session is already active - allow multiple messages, worker will queue them
     const existingSession = this.activeSessions.get(sessionKey);
     logger.info(
-      `Existing session status for ${sessionKey}: ${existingSession?.status || "none"}`,
+      `Existing session status for ${sessionKey}: ${existingSession?.status || "none"}`
     );
 
     // Don't block - let worker handle sequential processing
@@ -400,7 +409,7 @@ export class SlackEventHandlers {
       // Get user's GitHub username mapping
       const username = await this.getOrCreateUserMapping(
         context.userId,
-        client,
+        client
       );
 
       // Generate unique Claude session ID for each message to ensure each gets its own bot response
@@ -408,7 +417,7 @@ export class SlackEventHandlers {
       const existingClaudeSessionId = randomUUID();
       const isNewSession = true; // Always treat as new session
       logger.info(
-        `Generated new Claude session ID ${existingClaudeSessionId} for message ${context.messageTs} in thread ${sessionKey}`,
+        `Generated new Claude session ID ${existingClaudeSessionId} for message ${context.messageTs} in thread ${sessionKey}`
       );
 
       // Check repository cache first
@@ -447,7 +456,7 @@ export class SlackEventHandlers {
       // Add immediate acknowledgment reaction
       try {
         console.log(
-          `👀 REACTION CHANGE: Adding acknowledgment reaction 'eyes' to message ${context.messageTs} in channel ${context.channelId} (user: ${context.userId})`,
+          `👀 REACTION CHANGE: Adding acknowledgment reaction 'eyes' to message ${context.messageTs} in channel ${context.channelId} (user: ${context.userId})`
         );
         await client.reactions.add({
           channel: context.channelId,
@@ -455,13 +464,13 @@ export class SlackEventHandlers {
           name: "eyes",
         });
         console.log(
-          `✅ REACTION ADDED: 'eyes' successfully added to message ${context.messageTs} - bot is processing request`,
+          `✅ REACTION ADDED: 'eyes' successfully added to message ${context.messageTs} - bot is processing request`
         );
         logger.info(`Added eyes reaction to message ${context.messageTs}`);
       } catch (reactionError) {
         console.log(
           `❌ REACTION FAILED: Could not add 'eyes' reaction to message ${context.messageTs}:`,
-          reactionError,
+          reactionError
         );
         logger.warn("Failed to add eyes reaction:", reactionError);
       }
@@ -503,7 +512,7 @@ export class SlackEventHandlers {
           await this.queueProducer.enqueueWorkerDeployment(deploymentPayload);
 
         logger.info(
-          `Enqueued direct message job ${jobId} for session ${sessionKey}`,
+          `Enqueued direct message job ${jobId} for session ${sessionKey}`
         );
         threadSession.status = "pending";
       } else {
@@ -544,20 +553,20 @@ export class SlackEventHandlers {
           await this.queueProducer.enqueueThreadMessage(threadPayload);
 
         logger.info(
-          `Enqueued thread message job ${jobId} for continuing session ${existingClaudeSessionId}`,
+          `Enqueued thread message job ${jobId} for continuing session ${existingClaudeSessionId}`
         );
         threadSession.status = "running"; // Mark as running since worker is processing
       }
     } catch (error) {
       logger.error(
         `Failed to handle request for session ${sessionKey}:`,
-        error,
+        error
       );
 
       // Try to update reaction to error
       try {
         console.log(
-          `🔄 REACTION CHANGE: Removing 'eyes' reaction from message ${context.messageTs} due to error`,
+          `🔄 REACTION CHANGE: Removing 'eyes' reaction from message ${context.messageTs} due to error`
         );
         await client.reactions.remove({
           channel: context.channelId,
@@ -565,11 +574,11 @@ export class SlackEventHandlers {
           name: "eyes",
         });
         console.log(
-          `✅ REACTION REMOVED: 'eyes' removed from message ${context.messageTs}`,
+          `✅ REACTION REMOVED: 'eyes' removed from message ${context.messageTs}`
         );
 
         console.log(
-          `🔴 REACTION CHANGE: Adding error reaction 'x' to message ${context.messageTs}`,
+          `🔴 REACTION CHANGE: Adding error reaction 'x' to message ${context.messageTs}`
         );
         await client.reactions.add({
           channel: context.channelId,
@@ -577,12 +586,12 @@ export class SlackEventHandlers {
           name: "x",
         });
         console.log(
-          `✅ REACTION ADDED: 'x' successfully added to message ${context.messageTs} - indicating error`,
+          `✅ REACTION ADDED: 'x' successfully added to message ${context.messageTs} - indicating error`
         );
       } catch (reactionError) {
         console.log(
           `❌ REACTION FAILED: Could not update reactions on message ${context.messageTs}:`,
-          reactionError,
+          reactionError
         );
         logger.error("Failed to update error reaction:", reactionError);
       }
@@ -622,7 +631,7 @@ export class SlackEventHandlers {
    * Extract user request from mention text
    */
   private extractUserRequest(text: string): string {
-    let cleaned = text.replace(/<@[^>]+>/g, "").trim();
+    const cleaned = text.replace(/<@[^>]+>/g, "").trim();
 
     if (!cleaned) {
       return "Hello! How can I help you today?";
@@ -650,7 +659,7 @@ export class SlackEventHandlers {
 
   private async getOrCreateUserMapping(
     slackUserId: string,
-    client: any,
+    client: any
   ): Promise<string> {
     const existingMapping = this.userMappings.get(slackUserId);
     if (existingMapping) {
@@ -704,7 +713,7 @@ export class SlackEventHandlers {
     channelId: string,
     messageTs: string,
     body: any,
-    client: any,
+    client: any
   ): Promise<void> {
     logger.info(`Handling block action: ${actionId}`);
 
@@ -750,7 +759,7 @@ export class SlackEventHandlers {
             channelId,
             messageTs,
             body,
-            client,
+            client
           );
         }
         // Handle executable code block buttons (bash, python, etc.)
@@ -764,7 +773,7 @@ export class SlackEventHandlers {
             messageTs,
             body,
             client,
-            this.handleUserRequest.bind(this),
+            this.handleUserRequest.bind(this)
           );
         }
         // Handle stop worker button clicks
@@ -775,12 +784,12 @@ export class SlackEventHandlers {
             userId,
             channelId,
             messageTs,
-            client,
+            client
           );
         } else {
           // Log unsupported actions but don't send messages to users
           logger.info(
-            `Unsupported action: ${actionId} from user ${userId} in channel ${channelId}`,
+            `Unsupported action: ${actionId} from user ${userId} in channel ${channelId}`
           );
           // Silently acknowledge - no user notification needed
         }
@@ -789,7 +798,7 @@ export class SlackEventHandlers {
 
   private async updateAppHome(userId: string, client: any): Promise<void> {
     logger.info(
-      `Updating app home for user: ${userId} with README from active repository`,
+      `Updating app home for user: ${userId} with README from active repository`
     );
 
     try {
@@ -798,7 +807,7 @@ export class SlackEventHandlers {
 
       // Fetch README.md content from the user's active repository
       const readmeContent = await this.fetchRepositoryReadme(
-        repository.repositoryUrl,
+        repository.repositoryUrl
       );
       const readmeSection = readmeContent
         ? `*📖 README.md - ${repository.repositoryName}:*\n\n${this.formatReadmeForSlack(readmeContent)}`
@@ -893,12 +902,12 @@ export class SlackEventHandlers {
    * Fetch README content from a repository URL
    */
   private async fetchRepositoryReadme(
-    repositoryUrl: string,
+    repositoryUrl: string
   ): Promise<string | null> {
     try {
       // Extract owner and repo name from GitHub URL
       const match = repositoryUrl.match(
-        /github\.com[:/]([^/]+)\/([^/.]+)(?:\.git)?$/,
+        /github\.com[:/]([^/]+)\/([^/.]+)(?:\.git)?$/
       );
       if (!match || !match[1] || !match[2]) {
         logger.warn(`Could not parse repository URL: ${repositoryUrl}`);
@@ -912,7 +921,7 @@ export class SlackEventHandlers {
     } catch (error) {
       logger.error(
         `Failed to fetch README for repository ${repositoryUrl}:`,
-        error,
+        error
       );
       return null;
     }
@@ -926,7 +935,7 @@ export class SlackEventHandlers {
     const maxLength = 2000; // Conservative limit for Slack blocks
     const truncatedReadme =
       readme.length > maxLength
-        ? readme.substring(0, maxLength) + "..."
+        ? `${readme.substring(0, maxLength)}...`
         : readme;
 
     return convertMarkdownToSlack(truncatedReadme);
@@ -946,7 +955,7 @@ export class SlackEventHandlers {
           value = (action as any).selected_option.value;
         }
 
-        if (value && value.toString().trim()) {
+        if (value?.toString().trim()) {
           const label = actionId || blockId;
           const readableLabel = label
             .replace(/[_-]/g, " ")

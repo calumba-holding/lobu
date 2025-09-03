@@ -158,7 +158,7 @@ export class OrchestratorError extends Error {
     public code: ErrorCode,
     message: string,
     public details?: any,
-    public shouldRetry: boolean = false,
+    public shouldRetry: boolean = false
   ) {
     super(message);
     this.name = "OrchestratorError";
@@ -169,7 +169,7 @@ export class OrchestratorError extends Error {
       ErrorCode.DATABASE_CONNECTION_FAILED,
       `Database error: ${error instanceof Error ? error.message : String(error)}`,
       { code: error.code, detail: error.detail },
-      true,
+      true
     );
   }
 }

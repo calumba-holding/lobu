@@ -1,11 +1,10 @@
 #!/usr/bin/env bun
 
-import { exec } from "child_process";
-import { promisify } from "util";
-import { unlink, stat } from "fs/promises";
-import { createWriteStream } from "fs";
-import { spawn } from "child_process";
-import { randomUUID } from "crypto";
+import { exec, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { createWriteStream } from "node:fs";
+import { stat, unlink } from "node:fs/promises";
+import { promisify } from "node:util";
 import logger from "./logger";
 import type {
   ClaudeExecutionOptions,
@@ -21,7 +20,7 @@ const PIPE_PATH = `${process.env.RUNNER_TEMP || "/tmp"}/claude_prompt_pipe`;
  * Check for unstashed files and commit them if any exist
  */
 async function checkAndCommitUnstashedFiles(
-  workingDirectory?: string,
+  workingDirectory?: string
 ): Promise<void> {
   const cwd = workingDirectory || process.cwd();
 
@@ -40,7 +39,7 @@ async function checkAndCommitUnstashedFiles(
       // Get list of modified files for commit message
       const { stdout: statusOutput } = await execAsync(
         "git status --porcelain --cached",
-        { cwd },
+        { cwd }
       );
       const modifiedFiles = statusOutput
         .split("\n")
@@ -51,7 +50,7 @@ async function checkAndCommitUnstashedFiles(
       await execAsync(`git commit -m "${commitMessage}"`, { cwd });
 
       logger.info(
-        `Committed ${modifiedFiles} unstashed files before Claude execution`,
+        `Committed ${modifiedFiles} unstashed files before Claude execution`
       );
     }
   } catch (error) {
@@ -101,7 +100,7 @@ function parseCustomEnvVars(claudeEnv?: string): Record<string, string> {
 
 function prepareRunConfig(
   promptPath: string,
-  options: ClaudeExecutionOptions,
+  options: ClaudeExecutionOptions
 ): {
   claudeArgs: string[];
   promptPath: string;
@@ -129,9 +128,9 @@ function prepareRunConfig(
   }
   if (options.maxTurns) {
     const maxTurnsNum = parseInt(options.maxTurns, 10);
-    if (isNaN(maxTurnsNum) || maxTurnsNum <= 0) {
+    if (Number.isNaN(maxTurnsNum) || maxTurnsNum <= 0) {
       throw new Error(
-        `maxTurns must be a positive number, got: ${options.maxTurns}`,
+        `maxTurns must be a positive number, got: ${options.maxTurns}`
       );
     }
     claudeArgs.push("--max-turns", options.maxTurns);
@@ -153,9 +152,9 @@ function prepareRunConfig(
   }
   if (options.timeoutMinutes) {
     const timeoutMinutesNum = parseInt(options.timeoutMinutes, 10);
-    if (isNaN(timeoutMinutesNum) || timeoutMinutesNum <= 0) {
+    if (Number.isNaN(timeoutMinutesNum) || timeoutMinutesNum <= 0) {
       throw new Error(
-        `timeoutMinutes must be a positive number, got: ${options.timeoutMinutes}`,
+        `timeoutMinutes must be a positive number, got: ${options.timeoutMinutes}`
       );
     }
   }
@@ -174,7 +173,7 @@ export async function runClaudeWithProgress(
   promptPath: string,
   options: ClaudeExecutionOptions,
   onProgress?: ProgressCallback,
-  workingDirectory?: string,
+  workingDirectory?: string
 ): Promise<ClaudeExecutionResult> {
   const config = prepareRunConfig(promptPath, options);
 
@@ -184,7 +183,7 @@ export async function runClaudeWithProgress(
   // Create a named pipe
   try {
     await unlink(PIPE_PATH);
-  } catch (e) {
+  } catch (_e) {
     // Ignore if file doesn't exist
   }
 
@@ -196,7 +195,7 @@ export async function runClaudeWithProgress(
   try {
     const stats = await stat(config.promptPath);
     promptSize = stats.size.toString();
-  } catch (e) {
+  } catch (_e) {
     // Ignore error
   }
 
@@ -210,7 +209,7 @@ export async function runClaudeWithProgress(
 
   // Output to console
   console.log(
-    `🚀 CLAUDE EXECUTION: Starting Claude agent with prompt file ${config.promptPath} (${promptSize} bytes)`,
+    `🚀 CLAUDE EXECUTION: Starting Claude agent with prompt file ${config.promptPath} (${promptSize} bytes)`
   );
   logger.info(`Running Claude with prompt from file: ${config.promptPath}`);
 
@@ -274,13 +273,13 @@ export async function runClaudeWithProgress(
         // Log agent stream updates with useful context
         if (parsed.type) {
           console.log(
-            `🤖 AGENT STREAM: ${parsed.type}${parsed.content ? ` - ${parsed.content.substring(0, 100)}${parsed.content.length > 100 ? "..." : ""}` : ""}`,
+            `🤖 AGENT STREAM: ${parsed.type}${parsed.content ? ` - ${parsed.content.substring(0, 100)}${parsed.content.length > 100 ? "..." : ""}` : ""}`
           );
         } else if (parsed.error) {
           console.log(`❌ AGENT ERROR: ${parsed.error}`);
         } else if (parsed.message) {
           console.log(
-            `💬 AGENT MESSAGE: ${parsed.message.substring(0, 100)}${parsed.message.length > 100 ? "..." : ""}`,
+            `💬 AGENT MESSAGE: ${parsed.message.substring(0, 100)}${parsed.message.length > 100 ? "..." : ""}`
           );
         }
 
@@ -294,10 +293,10 @@ export async function runClaudeWithProgress(
         }
 
         const prettyJson = JSON.stringify(parsed, null, 2);
-        process.stdout.write(prettyJson + "\n");
-      } catch (e) {
+        process.stdout.write(`${prettyJson}\n`);
+      } catch (_e) {
         // Not a JSON object, print as is
-        process.stdout.write(line + "\n");
+        process.stdout.write(`${line}\n`);
       }
     }
 
@@ -337,9 +336,9 @@ export async function runClaudeWithProgress(
     timeoutMs = parseInt(options.timeoutMinutes, 10) * 60 * 1000;
   } else if (process.env.INPUT_TIMEOUT_MINUTES) {
     const envTimeout = parseInt(process.env.INPUT_TIMEOUT_MINUTES, 10);
-    if (isNaN(envTimeout) || envTimeout <= 0) {
+    if (Number.isNaN(envTimeout) || envTimeout <= 0) {
       throw new Error(
-        `INPUT_TIMEOUT_MINUTES must be a positive number, got: ${process.env.INPUT_TIMEOUT_MINUTES}`,
+        `INPUT_TIMEOUT_MINUTES must be a positive number, got: ${process.env.INPUT_TIMEOUT_MINUTES}`
       );
     }
     timeoutMs = envTimeout * 60 * 1000;
@@ -352,14 +351,14 @@ export async function runClaudeWithProgress(
     const timeoutId = setTimeout(() => {
       if (!resolved) {
         logger.error(
-          `Claude process timed out after ${timeoutMs / 1000} seconds`,
+          `Claude process timed out after ${timeoutMs / 1000} seconds`
         );
         claudeProcess.kill("SIGTERM");
         // Give it 5 seconds to terminate gracefully, then force kill
         setTimeout(() => {
           try {
             claudeProcess.kill("SIGKILL");
-          } catch (e) {
+          } catch (_e) {
             // Process may already be dead
           }
         }, 5000);
@@ -389,26 +388,26 @@ export async function runClaudeWithProgress(
   // Clean up processes
   try {
     catProcess.kill("SIGTERM");
-  } catch (e) {
+  } catch (_e) {
     // Process may already be dead
   }
   try {
     pipeProcess.kill("SIGTERM");
-  } catch (e) {
+  } catch (_e) {
     // Process may already be dead
   }
 
   // Clean up pipe file
   try {
     await unlink(PIPE_PATH);
-  } catch (e) {
+  } catch (_e) {
     // Ignore errors during cleanup
   }
 
   // Process completion without saving files
   if (exitCode === 0) {
     console.log(
-      `✅ CLAUDE EXECUTION: Claude agent completed successfully (exit code: ${exitCode})`,
+      `✅ CLAUDE EXECUTION: Claude agent completed successfully (exit code: ${exitCode})`
     );
 
     // Call completion callback
@@ -427,7 +426,7 @@ export async function runClaudeWithProgress(
     };
   } else {
     console.log(
-      `❌ CLAUDE EXECUTION: Claude agent failed (exit code: ${exitCode}${errorOutput ? `, stderr: ${errorOutput.substring(0, 100)}...` : ""})`,
+      `❌ CLAUDE EXECUTION: Claude agent failed (exit code: ${exitCode}${errorOutput ? `, stderr: ${errorOutput.substring(0, 100)}...` : ""})`
     );
 
     // Create detailed error message with more context

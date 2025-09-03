@@ -1,4 +1,4 @@
-import { OrchestratorConfig } from "../types";
+import type { OrchestratorConfig } from "../types";
 
 export abstract class BaseSecretManager {
   protected config: OrchestratorConfig;
@@ -12,7 +12,7 @@ export abstract class BaseSecretManager {
    */
   abstract getOrCreateUserCredentials(
     username: string,
-    createPostgresUser: (username: string, password: string) => Promise<void>,
+    createPostgresUser: (username: string, password: string) => Promise<void>
   ): Promise<string>;
 
   /**
@@ -20,7 +20,7 @@ export abstract class BaseSecretManager {
    */
   abstract storeUserCredentials(
     username: string,
-    password: string,
+    password: string
   ): Promise<void>;
 
   /**

@@ -1,6 +1,10 @@
 import { BaseSecretManager } from "../base/BaseSecretManager";
-import { OrchestratorConfig, OrchestratorError, ErrorCode } from "../types";
-import { DatabasePool } from "../db-connection-pool";
+import type { DatabasePool } from "../db-connection-pool";
+import {
+  ErrorCode,
+  type OrchestratorConfig,
+  OrchestratorError,
+} from "../types";
 
 export class PostgresSecretManager extends BaseSecretManager {
   private dbPool: DatabasePool;
@@ -15,7 +19,7 @@ export class PostgresSecretManager extends BaseSecretManager {
    */
   async getOrCreateUserCredentials(
     username: string,
-    createPostgresUser: (username: string, password: string) => Promise<void>,
+    createPostgresUser: (username: string, password: string) => Promise<void>
   ): Promise<string> {
     try {
       // First ensure the user exists in the users table
@@ -26,14 +30,14 @@ export class PostgresSecretManager extends BaseSecretManager {
          ON CONFLICT (platform, platform_user_id) 
          DO UPDATE SET updated_at = NOW()
          RETURNING id`,
-        [platformUserId],
+        [platformUserId]
       );
       const userId = userResult.rows[0].id;
 
       // Try to read existing credentials from database
       const result = await this.dbPool.query(
         `SELECT value as password FROM user_environ WHERE user_id = $1 AND name = 'PEERBOT_DATABASE_PASSWORD'`,
-        [userId],
+        [userId]
       );
 
       if (result.rows.length > 0 && result.rows[0].password) {
@@ -44,7 +48,7 @@ export class PostgresSecretManager extends BaseSecretManager {
     } catch (error) {
       console.log(
         `Error reading existing credentials for ${username}, creating new ones:`,
-        error,
+        error
       );
     }
 
@@ -63,14 +67,14 @@ export class PostgresSecretManager extends BaseSecretManager {
    */
   async storeUserCredentials(
     username: string,
-    password: string,
+    password: string
   ): Promise<void> {
     try {
       // First get the user_id from the users table
       const platformUserId = username.toUpperCase(); // Convert back to original format
       const userResult = await this.dbPool.query(
         `SELECT id FROM users WHERE platform = 'slack' AND platform_user_id = $1`,
-        [platformUserId],
+        [platformUserId]
       );
 
       if (userResult.rows.length === 0) {
@@ -86,9 +90,13 @@ export class PostgresSecretManager extends BaseSecretManager {
 
       // Store each credential as a separate row in user_environ
       const credentials = [
-        { name: 'PEERBOT_DATABASE_URL', value: dbUrl.toString(), type: 'system' },
-        { name: 'PEERBOT_DATABASE_USERNAME', value: username, type: 'system' },
-        { name: 'PEERBOT_DATABASE_PASSWORD', value: password, type: 'system' }
+        {
+          name: "PEERBOT_DATABASE_URL",
+          value: dbUrl.toString(),
+          type: "system",
+        },
+        { name: "PEERBOT_DATABASE_USERNAME", value: username, type: "system" },
+        { name: "PEERBOT_DATABASE_PASSWORD", value: password, type: "system" },
       ];
 
       // Insert or update each environment variable
@@ -103,19 +111,19 @@ export class PostgresSecretManager extends BaseSecretManager {
             type = EXCLUDED.type,
             updated_at = NOW()
         `,
-          [userId, cred.name, cred.value, cred.type],
+          [userId, cred.name, cred.value, cred.type]
         );
       }
 
       console.log(
-        `✅ Stored permanent credentials in database for user: ${username}`,
+        `✅ Stored permanent credentials in database for user: ${username}`
       );
     } catch (error) {
       throw new OrchestratorError(
         ErrorCode.DEPLOYMENT_CREATE_FAILED,
         `Failed to store user credentials in database: ${error instanceof Error ? error.message : String(error)}`,
         { username, error },
-        true,
+        true
       );
     }
   }

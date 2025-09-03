@@ -5,10 +5,9 @@ if (process.env.K8S_SKIP_TLS_VERIFY === "true") {
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 }
 
-import { ClaudeWorker } from "./claude-worker";
-import { WorkerQueueConsumer } from "./queue/queue-consumer";
-import type { WorkerConfig } from "./types";
+import type { ClaudeWorker } from "./claude-worker";
 import logger from "./logger";
+import { WorkerQueueConsumer } from "./queue/queue-consumer";
 
 /**
  * Queue-based persistent Claude worker
@@ -16,8 +15,6 @@ import logger from "./logger";
  */
 export class QueuePersistentClaudeWorker {
   private worker: ClaudeWorker | null = null;
-  // @ts-ignore - Config loaded but not currently used
-  private config!: WorkerConfig;
   private queueConsumer: WorkerQueueConsumer;
   private userId: string;
   private targetThreadId?: string;
@@ -42,7 +39,7 @@ export class QueuePersistentClaudeWorker {
       connectionString,
       this.userId,
       deploymentName,
-      this.targetThreadId,
+      this.targetThreadId
     );
 
     logger.info(`🚀 Starting Queue-based Persistent Claude Worker`);
@@ -121,8 +118,8 @@ export class QueuePersistentClaudeWorker {
  * Main entry point for queue-based persistent worker
  * @internal
  */
-// @ts-ignore - Called from index.ts when WORKER_MODE is 'queue'
-async function main() {
+// @ts-expect-error - Called from index.ts when WORKER_MODE is 'queue'
+async function _main() {
   try {
     // Get user ID from environment - required for worker
     const userId = process.env.USER_ID;
@@ -135,7 +132,7 @@ async function main() {
 
     const persistentWorker = new QueuePersistentClaudeWorker(
       userId,
-      targetThreadId,
+      targetThreadId
     );
     await persistentWorker.start();
 
@@ -153,7 +150,9 @@ async function main() {
     });
 
     // Keep the process running
-    await new Promise(() => {}); // Run forever
+    await new Promise(() => {
+      // Keep process running indefinitely
+    }); // Run forever
   } catch (error) {
     logger.error("❌ Queue-based persistent worker failed:", error);
     process.exit(1);

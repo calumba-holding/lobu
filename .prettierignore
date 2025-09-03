@@ -1,8 +1,0 @@
-# Test fixtures should not be formatted to preserve exact output matching
-test/fixtures/
-
-# Helm chart templates contain Go template syntax that prettier can't parse
-charts/peerbot/templates/
-
-# Workspace directories contain dynamic user content
-packages/*/workspaces/

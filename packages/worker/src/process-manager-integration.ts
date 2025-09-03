@@ -18,7 +18,7 @@ export async function startProcessManager(): Promise<ProcessManagerInstance> {
   if (processManagerInstance) {
     logger.info(
       "Process manager already running on port",
-      processManagerInstance.port,
+      processManagerInstance.port
     );
     return processManagerInstance;
   }

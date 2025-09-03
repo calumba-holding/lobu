@@ -1,7 +1,7 @@
-import http from "http";
+import http from "node:http";
 import express from "express";
-import { AnthropicProxy } from "./proxy/anthropic-proxy";
 import logger from "./logger";
+import type { AnthropicProxy } from "./proxy/anthropic-proxy";
 
 let healthServer: http.Server | null = null;
 let proxyApp: express.Application | null = null;
@@ -11,24 +11,24 @@ export function setupHealthEndpoints(anthropicProxy?: AnthropicProxy) {
 
   // Create Express app for proxy and health endpoints
   proxyApp = express();
-  
+
   // Add body parsing middleware for JSON and raw data
-  proxyApp.use(express.json({ limit: '50mb' }));
-  proxyApp.use(express.raw({ type: 'application/json', limit: '50mb' }));
-  
+  proxyApp.use(express.json({ limit: "50mb" }));
+  proxyApp.use(express.raw({ type: "application/json", limit: "50mb" }));
+
   // Health endpoints
   proxyApp.get("/health", (_req, res) => {
-    res.json({ 
-      status: "ok", 
+    res.json({
+      status: "ok",
       timestamp: new Date().toISOString(),
-      anthropicProxy: !!anthropicProxy 
+      anthropicProxy: !!anthropicProxy,
     });
   });
-  
+
   proxyApp.get("/ready", (_req, res) => {
     res.json({ ready: true });
   });
-  
+
   // Add Anthropic proxy if provided
   if (anthropicProxy) {
     proxyApp.use("/api/anthropic", anthropicProxy.getRouter());
@@ -41,6 +41,8 @@ export function setupHealthEndpoints(anthropicProxy?: AnthropicProxy) {
   // Listen on port 8080 for health checks and proxy
   const healthPort = 8080;
   healthServer.listen(healthPort, () => {
-    logger.info(`Health check and proxy server listening on port ${healthPort}`);
+    logger.info(
+      `Health check and proxy server listening on port ${healthPort}`
+    );
   });
 }

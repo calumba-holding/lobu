@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { describe, it, expect, beforeEach, mock, jest } from "bun:test";
+import { beforeEach, describe, expect, it, jest } from "bun:test";
 
 // Since we can't read the actual event handlers, we'll create tests based on expected functionality
 
@@ -22,11 +22,11 @@ interface MockSlackApp {
 }
 
 describe("Slack Event Handlers", () => {
-  let mockSlackApp: MockSlackApp;
-  let mockJobManager: any;
+  let _mockSlackApp: MockSlackApp;
+  let _mockJobManager: any;
 
   beforeEach(() => {
-    mockSlackApp = {
+    _mockSlackApp = {
       event: jest.fn(),
       message: jest.fn(),
       command: jest.fn(),
@@ -34,7 +34,7 @@ describe("Slack Event Handlers", () => {
       start: jest.fn(),
     };
 
-    mockJobManager = {
+    _mockJobManager = {
       createWorkerJob: jest.fn(),
       getActiveJobCount: jest.fn().mockReturnValue(0),
       listActiveJobs: jest.fn().mockResolvedValue([]),
@@ -127,14 +127,14 @@ describe("Slack Event Handlers", () => {
       const cleanPrompt = messageText.replace(`<@${botUserId}>`, "").trim();
 
       expect(cleanPrompt).toBe(
-        "help me debug this function\n\n```js\nfunction test() {\n  return 'hello';\n}\n```",
+        "help me debug this function\n\n```js\nfunction test() {\n  return 'hello';\n}\n```"
       );
     });
   });
 
   describe("Slash Commands", () => {
     it("should handle /claude command", async () => {
-      const mockCommand = {
+      const _mockCommand = {
         command: "/claude",
         text: "help me with this issue",
         user_id: "U123456",
@@ -155,7 +155,7 @@ describe("Slack Event Handlers", () => {
     });
 
     it("should handle /claude status command", async () => {
-      const mockCommand = {
+      const _mockCommand = {
         command: "/claude",
         text: "status",
         user_id: "U123456",
@@ -175,7 +175,7 @@ describe("Slack Event Handlers", () => {
     });
 
     it("should handle /claude help command", async () => {
-      const mockCommand = {
+      const _mockCommand = {
         command: "/claude",
         text: "help",
         user_id: "U123456",
@@ -193,7 +193,7 @@ describe("Slack Event Handlers", () => {
       await mockRespond(helpText);
 
       expect(mockRespond).toHaveBeenCalledWith(
-        expect.stringContaining("Claude Commands:"),
+        expect.stringContaining("Claude Commands:")
       );
     });
   });
@@ -280,13 +280,13 @@ describe("Slack Event Handlers", () => {
       } catch (error) {
         if (error.message.includes("Rate limit exceeded")) {
           await mockRespond(
-            "You've reached the rate limit. Please wait before starting another task.",
+            "You've reached the rate limit. Please wait before starting another task."
           );
         }
       }
 
       expect(mockRespond).toHaveBeenCalledWith(
-        "You've reached the rate limit. Please wait before starting another task.",
+        "You've reached the rate limit. Please wait before starting another task."
       );
     });
 
@@ -301,14 +301,14 @@ describe("Slack Event Handlers", () => {
 
       try {
         await mockJobManager.createWorkerJob({});
-      } catch (error) {
+      } catch (_error) {
         await mockRespond(
-          "Failed to start Claude session. Please try again later.",
+          "Failed to start Claude session. Please try again later."
         );
       }
 
       expect(mockRespond).toHaveBeenCalledWith(
-        "Failed to start Claude session. Please try again later.",
+        "Failed to start Claude session. Please try again later."
       );
     });
   });

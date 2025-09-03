@@ -1,6 +1,5 @@
 #!/usr/bin/env bun
 
-import type { App } from "@slack/bolt";
 import logger from "../../logger";
 
 /**
@@ -18,7 +17,11 @@ export async function handleExecutableCodeBlock(
   messageTs: string,
   body: any,
   client: any,
-  handleUserRequestFn: (context: any, userInput: string, client: any) => Promise<void>
+  handleUserRequestFn: (
+    context: any,
+    userInput: string,
+    client: any
+  ) => Promise<void>
 ): Promise<void> {
   logger.info(`Handling executable code block: ${actionId}`);
 
@@ -72,10 +75,7 @@ export async function handleExecutableCodeBlock(
 
     await handleUserRequestFn(context, formattedInput, client);
   } catch (error) {
-    logger.error(
-      `Failed to handle executable code block ${actionId}:`,
-      error,
-    );
+    logger.error(`Failed to handle executable code block ${actionId}:`, error);
 
     await client.chat.postEphemeral({
       channel: channelId,
@@ -95,7 +95,7 @@ export async function handleBlockkitForm(
   channelId: string,
   messageTs: string,
   body: any,
-  client: any,
+  client: any
 ): Promise<void> {
   logger.info(`Handling blockkit form: ${actionId}`);
 
@@ -140,7 +140,7 @@ export async function handleBlockkitForm(
     const rawBlocksJson = JSON.stringify(blocks, null, 2);
     const truncatedBlocks =
       rawBlocksJson.length > 2500
-        ? rawBlocksJson.substring(0, 2500) + "\n...[truncated]"
+        ? `${rawBlocksJson.substring(0, 2500)}\n...[truncated]`
         : rawBlocksJson;
 
     await client.chat.postEphemeral({
@@ -160,11 +160,9 @@ export async function handleStopWorker(
   userId: string,
   channelId: string,
   messageTs: string,
-  client: any,
+  client: any
 ): Promise<void> {
-  logger.info(
-    `Handling stop worker request for deployment: ${deploymentName}`,
-  );
+  logger.info(`Handling stop worker request for deployment: ${deploymentName}`);
 
   try {
     // Make API call to orchestrator to scale deployment to 0
@@ -181,7 +179,7 @@ export async function handleStopWorker(
           requestedBy: userId,
           reason: "User requested stop via Slack button",
         }),
-      },
+      }
     );
 
     if (response.ok) {
@@ -210,13 +208,13 @@ export async function handleStopWorker(
     } else {
       const errorText = await response.text();
       throw new Error(
-        `Orchestrator responded with ${response.status}: ${errorText}`,
+        `Orchestrator responded with ${response.status}: ${errorText}`
       );
     }
   } catch (error) {
     logger.error(
       `Failed to stop worker for deployment ${deploymentName}:`,
-      error,
+      error
     );
 
     await client.chat.postEphemeral({

@@ -2,7 +2,7 @@
 
 import type { App } from "@slack/bolt";
 import logger from "../../logger";
-import { setupEventHandlers, type EventHandlerContext } from "./utils";
+import { type EventHandlerContext, setupEventHandlers } from "./utils";
 
 /**
  * User and team-related event handlers

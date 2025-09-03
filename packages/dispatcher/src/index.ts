@@ -5,17 +5,20 @@ import { initSentry } from "@peerbot/shared";
 // Initialize Sentry monitoring
 initSentry();
 
-import { config as dotenvConfig } from "dotenv";
-import { join } from "path";
+import { join } from "node:path";
 import { App, ExpressReceiver, LogLevel } from "@slack/bolt";
-import { SlackEventHandlers } from "./slack/slack-event-handlers";
-import { QueueProducer } from "./queue/task-queue-producer";
-import { ThreadResponseConsumer } from "./queue/slack-thread-processor";
+import { config as dotenvConfig } from "dotenv";
 import { GitHubRepositoryManager } from "./github/repository-manager";
-import { setupHealthEndpoints } from "./simple-http";
-import { createAnthropicProxy, AnthropicProxy } from "./proxy/anthropic-proxy";
-import type { DispatcherConfig } from "./types";
 import logger from "./logger";
+import {
+  type AnthropicProxy,
+  createAnthropicProxy,
+} from "./proxy/anthropic-proxy";
+import { ThreadResponseConsumer } from "./queue/slack-thread-processor";
+import { QueueProducer } from "./queue/task-queue-producer";
+import { setupHealthEndpoints } from "./simple-http";
+import { SlackEventHandlers } from "./slack/slack-event-handlers";
+import type { DispatcherConfig } from "./types";
 
 export class SlackDispatcher {
   private app: App;
@@ -88,12 +91,12 @@ export class SlackDispatcher {
     this.app.use(async ({ payload, next }) => {
       const event = (payload as any).event || payload;
       logger.debug(
-        `[Slack Event] Type: ${event?.type}, Subtype: ${event?.subtype}`,
+        `[Slack Event] Type: ${event?.type}, Subtype: ${event?.subtype}`
       );
       if (event) {
         logger.debug(
           `[Slack Event Details]`,
-          JSON.stringify(event).substring(0, 200),
+          JSON.stringify(event).substring(0, 200)
         );
       }
       await next();
@@ -145,7 +148,7 @@ export class SlackDispatcher {
         // Add request logging middleware
         expressApp.use((req: any, _res: any, next: any) => {
           logger.debug(
-            `[${new Date().toISOString()}] ${req.method} ${req.path}`,
+            `[${new Date().toISOString()}] ${req.method} ${req.path}`
           );
           logger.debug("Headers:", req.headers);
           if (req.method === "POST" && req.body) {
@@ -169,14 +172,16 @@ export class SlackDispatcher {
         // Mount Anthropic proxy if enabled (HTTP mode - also available on port 8080)
         if (this.anthropicProxy) {
           expressApp.use("/api/anthropic", this.anthropicProxy.getRouter());
-          logger.info("✅ Anthropic proxy enabled at /api/anthropic (HTTP mode)");
+          logger.info(
+            "✅ Anthropic proxy enabled at /api/anthropic (HTTP mode)"
+          );
         }
 
         logger.debug("Express routes after Slack app start:");
         expressApp._router.stack.forEach((middleware: any) => {
           if (middleware.route) {
             logger.debug(
-              `- ${Object.keys(middleware.route.methods).join(", ").toUpperCase()} ${middleware.route.path}`,
+              `- ${Object.keys(middleware.route.methods).join(", ").toUpperCase()} ${middleware.route.path}`
             );
           } else if (middleware.name === "router") {
             logger.debug("- Router middleware");
@@ -187,11 +192,11 @@ export class SlackDispatcher {
         logger.info("Socket Mode debugging - checking client availability");
         logger.info(
           "App receiver type:",
-          (this.app as any).receiver?.constructor.name,
+          (this.app as any).receiver?.constructor.name
         );
         logger.info(
           "Socket Mode client exists:",
-          !!(this.app as any).receiver?.client,
+          !!(this.app as any).receiver?.client
         );
 
         const socketModeClient = (this.app as any).receiver?.client;
@@ -199,7 +204,7 @@ export class SlackDispatcher {
           logger.info("Setting up Socket Mode event handlers...");
           logger.info(
             "Socket Mode client type:",
-            socketModeClient.constructor.name,
+            socketModeClient.constructor.name
           );
 
           socketModeClient.on("slack_event", (event: any, _body: any) => {
@@ -246,7 +251,7 @@ export class SlackDispatcher {
           const timeoutPromise = new Promise((_, reject) => {
             setTimeout(() => {
               logger.error(
-                "Socket Mode start timeout reached after 60 seconds",
+                "Socket Mode start timeout reached after 60 seconds"
               );
               reject(new Error("Socket Mode start timeout after 60 seconds"));
             }, 60000);
@@ -264,17 +269,17 @@ export class SlackDispatcher {
         ? "Socket Mode"
         : `HTTP on port ${this.config.slack.port}`;
       logger.info(
-        `🚀 Slack Dispatcher is running in ${mode}! (Local Development)`,
+        `🚀 Slack Dispatcher is running in ${mode}! (Local Development)`
       );
 
       // Log configuration
       logger.info("Configuration:");
       logger.info(`- GitHub Organization: ${this.config.github.organization}`);
       logger.info(
-        `- Session Timeout: ${this.config.sessionTimeoutMinutes} minutes`,
+        `- Session Timeout: ${this.config.sessionTimeoutMinutes} minutes`
       );
       logger.info(
-        `- Signing Secret: ${this.config.slack.signingSecret?.substring(0, 8)}...`,
+        `- Signing Secret: ${this.config.slack.signingSecret?.substring(0, 8)}...`
       );
     } catch (error) {
       logger.error("Failed to start Slack dispatcher:", error);
@@ -342,7 +347,7 @@ export class SlackDispatcher {
 
       if (!authResult.ok) {
         throw new Error(
-          `Auth test failed: ${authResult.error || "Unknown error"}`,
+          `Auth test failed: ${authResult.error || "Unknown error"}`
         );
       }
 
@@ -361,7 +366,7 @@ export class SlackDispatcher {
         this.app,
         this.queueProducer,
         this.repoManager,
-        config,
+        config
       );
 
       // Now create ThreadResponseConsumer with access to user mappings
@@ -369,7 +374,7 @@ export class SlackDispatcher {
         config.queues.connectionString,
         config.slack.token,
         this.repoManager,
-        this.eventHandlers.getUserMappings(),
+        this.eventHandlers.getUserMappings()
       );
     } catch (error) {
       logger.error("Failed to get bot info:", error);
@@ -399,7 +404,7 @@ export class SlackDispatcher {
         // These are expected Socket Mode reconnection events, just log as debug
         logger.debug(
           "Socket Mode connection event (expected):",
-          reasonStr.substring(0, 100),
+          reasonStr.substring(0, 100)
         );
         return;
       }
@@ -451,9 +456,9 @@ async function main() {
 
     // Load configuration from environment
     logger.info("Environment variables debug:", {
-      botToken: botToken?.substring(0, 10) + "...",
-      appToken: process.env.SLACK_APP_TOKEN?.substring(0, 10) + "...",
-      signingSecret: process.env.SLACK_SIGNING_SECRET?.substring(0, 10) + "...",
+      botToken: `${botToken?.substring(0, 10)}...`,
+      appToken: `${process.env.SLACK_APP_TOKEN?.substring(0, 10)}...`,
+      signingSecret: `${process.env.SLACK_SIGNING_SECRET?.substring(0, 10)}...`,
     });
 
     const config: DispatcherConfig = {
@@ -462,7 +467,7 @@ async function main() {
         appToken: process.env.SLACK_APP_TOKEN,
         signingSecret: process.env.SLACK_SIGNING_SECRET,
         socketMode: process.env.SLACK_HTTP_MODE !== "true",
-        port: parseInt(process.env.PORT || "3000"),
+        port: parseInt(process.env.PORT || "3000", 10),
         botUserId: process.env.SLACK_BOT_USER_ID,
         allowedUsers: process.env.SLACK_ALLOWED_USERS?.split(","),
         allowedChannels: process.env.SLACK_ALLOWED_CHANNELS?.split(","),
@@ -481,6 +486,7 @@ async function main() {
       },
       sessionTimeoutMinutes: parseInt(
         process.env.SESSION_TIMEOUT_MINUTES || "5",
+        10
       ),
       logLevel: (process.env.LOG_LEVEL as any) || LogLevel.INFO,
       // Queue configuration (required)
@@ -488,23 +494,28 @@ async function main() {
         connectionString: process.env.DATABASE_URL!,
         directMessage: process.env.QUEUE_DIRECT_MESSAGE || "direct_message",
         messageQueue: process.env.QUEUE_MESSAGE_QUEUE || "message_queue",
-        retryLimit: parseInt(process.env.PGBOSS_RETRY_LIMIT || "3"),
-        retryDelay: parseInt(process.env.PGBOSS_RETRY_DELAY || "30"),
-        expireInHours: parseInt(process.env.PGBOSS_EXPIRE_HOURS || "24"),
+        retryLimit: parseInt(process.env.PGBOSS_RETRY_LIMIT || "3", 10),
+        retryDelay: parseInt(process.env.PGBOSS_RETRY_DELAY || "30", 10),
+        expireInHours: parseInt(process.env.PGBOSS_EXPIRE_HOURS || "24", 10),
       },
       // Anthropic proxy configuration (optional)
-      anthropicProxy: process.env.ANTHROPIC_PROXY_ENABLED === "true" ? {
-        enabled: true,
-        anthropicApiKey: process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_CODE_OAUTH_TOKEN!,
-        postgresConnectionString: process.env.DATABASE_URL!,
-        anthropicBaseUrl: process.env.ANTHROPIC_BASE_URL,
-      } : undefined,
+      anthropicProxy:
+        process.env.ANTHROPIC_PROXY_ENABLED === "true"
+          ? {
+              enabled: true,
+              anthropicApiKey:
+                process.env.ANTHROPIC_API_KEY ||
+                process.env.CLAUDE_CODE_OAUTH_TOKEN!,
+              postgresConnectionString: process.env.DATABASE_URL!,
+              anthropicBaseUrl: process.env.ANTHROPIC_BASE_URL,
+            }
+          : undefined,
     };
 
     logger.info("Final config debug:", {
-      slackToken: config.slack.token?.substring(0, 10) + "...",
-      slackAppToken: config.slack.appToken?.substring(0, 10) + "...",
-      slackSigningSecret: config.slack.signingSecret?.substring(0, 10) + "...",
+      slackToken: `${config.slack.token?.substring(0, 10)}...`,
+      slackAppToken: `${config.slack.appToken?.substring(0, 10)}...`,
+      slackSigningSecret: `${config.slack.signingSecret?.substring(0, 10)}...`,
       socketMode: config.slack.socketMode,
     });
 

@@ -5,7 +5,7 @@ const logger = winston.createLogger({
   format: winston.format.combine(
     winston.format.timestamp({ format: "YYYY-MM-DD HH:mm:ss" }),
     winston.format.errors({ stack: true }),
-    winston.format.splat(),
+    winston.format.splat()
   ),
   defaultMeta: { service: "worker" },
   transports: [
@@ -17,7 +17,7 @@ const logger = winston.createLogger({
           if (Object.keys(meta).length) {
             try {
               metaStr = ` ${JSON.stringify(meta, null, 0)}`;
-            } catch (err) {
+            } catch (_err) {
               // Handle circular structures by using a replacer function
               metaStr = ` ${JSON.stringify(meta, (_, value) => {
                 if (typeof value === "object" && value !== null) {
@@ -34,7 +34,7 @@ const logger = winston.createLogger({
             }
           }
           return `[${timestamp}] [${level}] ${message}${metaStr}`;
-        }),
+        })
       ),
     }),
   ],

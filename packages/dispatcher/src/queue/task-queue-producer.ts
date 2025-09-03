@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 
 import * as Sentry from "@sentry/node";
-import PgBoss from "pg-boss";
 import { Pool } from "pg";
+import PgBoss from "pg-boss";
 import logger from "../logger";
 
 /**
@@ -63,7 +63,7 @@ export class QueueProducer {
       username: string;
       password: string;
       ssl?: boolean;
-    },
+    }
   ) {
     this.pgBoss = new PgBoss(connectionString);
 
@@ -130,7 +130,7 @@ export class QueueProducer {
       retryLimit?: number;
       retryDelay?: number;
       expireInSeconds?: number;
-    },
+    }
   ): Promise<string> {
     if (!this.isConnected) {
       throw new Error("Queue producer is not connected");
@@ -148,17 +148,17 @@ export class QueueProducer {
 
       // Debug: Check what send() actually returns
       logger.info(
-        `pgBoss.send() returned: ${JSON.stringify(jobId)}, type: ${typeof jobId}`,
+        `pgBoss.send() returned: ${JSON.stringify(jobId)}, type: ${typeof jobId}`
       );
       logger.info(
-        `Enqueued message job ${jobId} for user ${payload.userId}, thread ${payload.threadId}`,
+        `Enqueued message job ${jobId} for user ${payload.userId}, thread ${payload.threadId}`
       );
       return jobId || "job-sent";
     } catch (error) {
       Sentry.captureException(error);
       logger.error(
         `Failed to enqueue message for user ${payload.userId}:`,
-        error,
+        error
       );
       throw error;
     }
@@ -175,7 +175,7 @@ export class QueueProducer {
       retryLimit?: number;
       retryDelay?: number;
       expireInSeconds?: number;
-    },
+    }
   ): Promise<string> {
     return this.enqueueMessage(payload, options);
   }
@@ -191,7 +191,7 @@ export class QueueProducer {
       retryLimit?: number;
       retryDelay?: number;
       expireInSeconds?: number;
-    },
+    }
   ): Promise<string> {
     return this.enqueueMessage(payload, options);
   }
@@ -202,11 +202,11 @@ export class QueueProducer {
   async queryWithUserContext<T>(
     userId: string,
     query: string,
-    params?: any[],
+    params?: any[]
   ): Promise<{ rows: T[]; rowCount: number }> {
     if (!this.pool) {
       throw new Error(
-        "Database pool not available - queue producer not configured with database config",
+        "Database pool not available - queue producer not configured with database config"
       );
     }
 
@@ -234,11 +234,11 @@ export class QueueProducer {
   async updateJobStatus(
     jobId: string,
     status: "pending" | "active" | "completed" | "failed",
-    retryCount?: number,
+    retryCount?: number
   ): Promise<void> {
     if (!this.pool) {
       logger.warn(
-        `Cannot update job status for ${jobId} - database pool not available`,
+        `Cannot update job status for ${jobId} - database pool not available`
       );
       return;
     }

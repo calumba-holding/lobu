@@ -1,13 +1,7 @@
 import * as Sentry from "@sentry/node";
 import PgBoss from "pg-boss";
-import * as k8s from "@kubernetes/client-node";
-import {
-  OrchestratorConfig,
-  WorkerDeploymentRequest,
-  OrchestratorError,
-  ErrorCode,
-} from "./types";
-import { BaseDeploymentManager } from "./base/BaseDeploymentManager";
+import type { BaseDeploymentManager } from "./base/BaseDeploymentManager";
+import { ErrorCode, type OrchestratorConfig, OrchestratorError } from "./types";
 
 export class QueueConsumer {
   private pgBoss: PgBoss;
@@ -17,7 +11,7 @@ export class QueueConsumer {
 
   constructor(
     config: OrchestratorConfig,
-    deploymentManager: BaseDeploymentManager,
+    deploymentManager: BaseDeploymentManager
   ) {
     this.config = config;
     this.deploymentManager = deploymentManager;
@@ -55,7 +49,7 @@ export class QueueConsumer {
       } catch (error) {
         console.warn(
           "⚠️  Failed to setup pgboss RLS:",
-          error instanceof Error ? error.message : String(error),
+          error instanceof Error ? error.message : String(error)
         );
       }
 
@@ -77,7 +71,7 @@ export class QueueConsumer {
             console.log("=== PG-BOSS JOB RECEIVED ===");
             console.log("Raw job:", JSON.stringify(job, null, 2));
             return this.handleMessage(job);
-          },
+          }
         );
       });
 
@@ -90,7 +84,7 @@ export class QueueConsumer {
         ErrorCode.QUEUE_JOB_PROCESSING_FAILED,
         `Failed to start queue consumer: ${error instanceof Error ? error.message : String(error)}`,
         { error },
-        true,
+        true
       );
     }
   }
@@ -115,7 +109,7 @@ export class QueueConsumer {
     console.log("Job data:", JSON.stringify(data, null, 2));
 
     console.log(
-      `Processing message job ${jobId} for user ${data?.userId}, thread ${data?.threadId}`,
+      `Processing message job ${jobId} for user ${data?.userId}, thread ${data?.threadId}`
     );
 
     try {
@@ -126,7 +120,7 @@ export class QueueConsumer {
       if (isNewThread) {
         // New thread - create deployment
         console.log(
-          `New thread ${data.threadId} - creating deployment ${deploymentName}`,
+          `New thread ${data.threadId} - creating deployment ${deploymentName}`
         );
 
         await Sentry.startSpan(
@@ -144,9 +138,9 @@ export class QueueConsumer {
               data.userId,
               data.threadId,
               teamId,
-              data,
+              data
             );
-          },
+          }
         );
         console.log(`✅ Created deployment: ${deploymentName}`);
 
@@ -155,22 +149,22 @@ export class QueueConsumer {
       } else {
         // Existing thread - ensure deployment is scaled to 1
         console.log(
-          `Existing thread ${data.threadId} - ensuring deployment ${deploymentName} is running`,
+          `Existing thread ${data.threadId} - ensuring deployment ${deploymentName} is running`
         );
 
         try {
           await this.deploymentManager.scaleDeployment(deploymentName, 1);
           console.log(`✅ Scaled deployment ${deploymentName} to 1`);
-        } catch (error) {
+        } catch (_error) {
           // Deployment doesn't exist, recreate it
           console.log(
-            `Deployment ${deploymentName} doesn't exist, recreating...`,
+            `Deployment ${deploymentName} doesn't exist, recreating...`
           );
           await this.deploymentManager.createWorkerDeployment(
             data.userId,
             data.threadId,
             teamId,
-            data,
+            data
           );
           console.log(`✅ Recreated deployment: ${deploymentName}`);
 
@@ -192,7 +186,7 @@ export class QueueConsumer {
         },
         async () => {
           await this.sendToWorkerQueue(data, deploymentName);
-        },
+        }
       );
 
       // Update deployment activity annotation for simplified tracking
@@ -208,7 +202,7 @@ export class QueueConsumer {
         ErrorCode.QUEUE_JOB_PROCESSING_FAILED,
         `Failed to process message job: ${error instanceof Error ? error.message : String(error)}`,
         { jobId, data, error },
-        true,
+        true
       );
     }
   }
@@ -218,7 +212,7 @@ export class QueueConsumer {
    */
   private async sendToWorkerQueue(
     data: any,
-    deploymentName: string,
+    deploymentName: string
   ): Promise<void> {
     try {
       // Create thread-specific queue name: thread_message_[deploymentid]
@@ -245,17 +239,17 @@ export class QueueConsumer {
           retryLimit: this.config.queues.retryLimit,
           retryDelay: this.config.queues.retryDelay,
           priority: 10, // Thread messages have high priority
-        },
+        }
       );
 
       if (!jobId) {
         throw new Error(
-          `pgBoss.send() returned null/undefined for queue: ${threadQueueName}`,
+          `pgBoss.send() returned null/undefined for queue: ${threadQueueName}`
         );
       }
 
       console.log(
-        `✅ Sent message to thread queue ${threadQueueName} for thread ${data.threadId}, jobId: ${jobId}`,
+        `✅ Sent message to thread queue ${threadQueueName} for thread ${data.threadId}, jobId: ${jobId}`
       );
     } catch (error) {
       console.error(`❌ [ERROR] sendToWorkerQueue failed:`, error);
@@ -263,7 +257,7 @@ export class QueueConsumer {
         ErrorCode.QUEUE_JOB_PROCESSING_FAILED,
         `Failed to send message to thread queue: ${error instanceof Error ? error.message : String(error)}`,
         { deploymentName, data, error },
-        true,
+        true
       );
     }
   }

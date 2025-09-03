@@ -1,9 +1,8 @@
-import { Pool, PoolClient } from "pg";
-import { OrchestratorConfig, OrchestratorError, ErrorCode } from "./types";
+import { Pool, type PoolClient } from "pg";
+import { type OrchestratorConfig, OrchestratorError } from "./types";
 
 export class DatabasePool {
   private pool: Pool;
-  private config: OrchestratorConfig["database"];
 
   constructor(config: OrchestratorConfig["database"]) {
     this.config = config;
@@ -39,7 +38,7 @@ export class DatabasePool {
   async queryWithUserContext(
     userId: string,
     text: string,
-    params?: any[],
+    params?: any[]
   ): Promise<any> {
     const client = await this.getClient();
     try {
@@ -59,7 +58,7 @@ export class DatabasePool {
 
   async transactionWithUserContext<T>(
     userId: string,
-    callback: (client: PoolClient) => Promise<T>,
+    callback: (client: PoolClient) => Promise<T>
   ): Promise<T> {
     const client = await this.getClient();
     try {
@@ -87,7 +86,7 @@ export class DatabasePool {
     jobId: string,
     status: string,
     output?: any,
-    errorMessage?: string,
+    errorMessage?: string
   ): Promise<void> {
     try {
       await this.query("SELECT update_job_status($1, $2, $3, $4)", [

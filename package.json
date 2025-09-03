@@ -11,8 +11,12 @@
     "packages/worker"
   ],
   "scripts": {
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "lint": "biome lint .",
+    "lint:fix": "biome lint --write .",
+    "check": "biome check .",
+    "check:fix": "biome check --write .",
     "install-hooks": "bun run scripts/install-hooks.sh",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
@@ -45,11 +49,11 @@
     "zod": "^3.24.4"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.2.2",
     "@types/bun": "1.2.11",
     "@types/node": "^20.0.0",
     "@types/node-fetch": "^2.6.12",
     "dotenv": "^17.2.1",
-    "prettier": "3.5.3",
     "typescript": "^5.8.3"
   }
 }

@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 
 import { runClaudeWithProgress } from "./claude-session-executor";
-import { SessionManager } from "./session-manager";
-import { createPromptFile } from "./prompt-generation";
 import logger from "./logger";
+import { createPromptFile } from "./prompt-generation";
+import { SessionManager } from "./session-manager";
 import type {
   ClaudeExecutionOptions,
   ClaudeExecutionResult,
@@ -34,7 +34,7 @@ export class ClaudeSessionRunner {
   constructor(
     config: {
       timeoutMinutes?: number;
-    } = {},
+    } = {}
   ) {
     this.sessionManager = new SessionManager({
       timeoutMinutes: config.timeoutMinutes,
@@ -45,7 +45,7 @@ export class ClaudeSessionRunner {
    * Execute a Claude session with conversation history
    */
   async executeSession(
-    options: ExecuteClaudeSessionOptions,
+    options: ExecuteClaudeSessionOptions
   ): Promise<SessionExecutionResult> {
     const {
       sessionKey,
@@ -58,11 +58,11 @@ export class ClaudeSessionRunner {
     try {
       // Create session with conversation history from context
       logger.info(
-        `Creating session ${sessionKey} with ${context.conversationHistory?.length || 0} messages from history`,
+        `Creating session ${sessionKey} with ${context.conversationHistory?.length || 0} messages from history`
       );
       const sessionState = await this.sessionManager.createSession(
         sessionKey,
-        context,
+        context
       );
 
       // Add conversation history to session if provided
@@ -72,7 +72,7 @@ export class ClaudeSessionRunner {
       ) {
         sessionState.conversation = [...context.conversationHistory];
         logger.info(
-          `Loaded ${context.conversationHistory.length} messages into session`,
+          `Loaded ${context.conversationHistory.length} messages into session`
         );
       }
 
@@ -92,7 +92,7 @@ export class ClaudeSessionRunner {
       // Create prompt file with full conversation context (now includes the user message)
       const promptPath = await createPromptFile(
         context,
-        sessionState.conversation,
+        sessionState.conversation
       );
 
       // Start session timeout monitoring
@@ -114,7 +114,7 @@ export class ClaudeSessionRunner {
             await onProgress(update);
           }
         },
-        context.workingDirectory, // Pass working directory
+        context.workingDirectory // Pass working directory
       );
 
       // Add Claude's response to conversation
@@ -166,6 +166,9 @@ export class ClaudeSessionRunner {
   }
 }
 
+export { runClaudeWithProgress } from "./claude-session-executor";
+export { createPromptFile } from "./prompt-generation";
+export { SessionManager } from "./session-manager";
 // Re-export types and utilities
 export type {
   ClaudeExecutionOptions,
@@ -174,7 +177,3 @@ export type {
   SessionContext,
   SessionState,
 } from "./types";
-
-export { SessionManager } from "./session-manager";
-export { runClaudeWithProgress } from "./claude-session-executor";
-export { createPromptFile } from "./prompt-generation";

@@ -1,12 +1,16 @@
+import path from "node:path";
 import Docker from "dockerode";
-import path from "path";
 import {
   BaseDeploymentManager,
-  DeploymentInfo,
+  type DeploymentInfo,
 } from "../base/BaseDeploymentManager";
+import type { DatabasePool } from "../db-connection-pool";
+import {
+  ErrorCode,
+  type OrchestratorConfig,
+  OrchestratorError,
+} from "../types";
 import { PostgresSecretManager } from "./PostgresSecretManager";
-import { OrchestratorConfig, OrchestratorError, ErrorCode } from "../types";
-import { DatabasePool } from "../db-connection-pool";
 
 interface ContainerInfo {
   id: string;
@@ -71,7 +75,7 @@ export class DockerDeploymentManager extends BaseDeploymentManager {
         ErrorCode.DEPLOYMENT_CREATE_FAILED,
         `Failed to list Docker containers: ${error instanceof Error ? error.message : String(error)}`,
         { error },
-        true,
+        true
       );
     }
   }
@@ -81,7 +85,7 @@ export class DockerDeploymentManager extends BaseDeploymentManager {
     username: string,
     userId: string,
     messageData?: any,
-    userEnvVars: Record<string, string> = {},
+    userEnvVars: Record<string, string> = {}
   ): Promise<void> {
     try {
       // Extract thread ID from deployment name for per-thread workspace isolation
@@ -110,7 +114,7 @@ export class DockerDeploymentManager extends BaseDeploymentManager {
         deploymentName,
         messageData,
         true,
-        userEnvVars,
+        userEnvVars
       );
 
       const envVars = [
@@ -118,7 +122,7 @@ export class DockerDeploymentManager extends BaseDeploymentManager {
         // Database URL already contains username and password, no need to pass them separately
         // Convert common environment variables to Docker format
         ...Object.entries(commonEnvVars).map(
-          ([key, value]) => `${key}=${value}`,
+          ([key, value]) => `${key}=${value}`
         ),
       ];
 
@@ -159,7 +163,7 @@ export class DockerDeploymentManager extends BaseDeploymentManager {
           },
           // Resource limits similar to K8s
           Memory: this.parseMemoryLimit(
-            this.config.worker.resources.limits.memory,
+            this.config.worker.resources.limits.memory
           ),
           NanoCpus: this.parseCpuLimit(this.config.worker.resources.limits.cpu),
         },
@@ -176,14 +180,14 @@ export class DockerDeploymentManager extends BaseDeploymentManager {
         ErrorCode.DEPLOYMENT_CREATE_FAILED,
         `Failed to create Docker container: ${error instanceof Error ? error.message : String(error)}`,
         { deploymentName, error },
-        true,
+        true
       );
     }
   }
 
   async scaleDeployment(
     deploymentName: string,
-    replicas: number,
+    replicas: number
   ): Promise<void> {
     try {
       const container = this.docker.getContainer(deploymentName);
@@ -201,7 +205,7 @@ export class DockerDeploymentManager extends BaseDeploymentManager {
         ErrorCode.DEPLOYMENT_SCALE_FAILED,
         `Failed to scale Docker container ${deploymentName}: ${error instanceof Error ? error.message : String(error)}`,
         { deploymentName, replicas, error },
-        true,
+        true
       );
     }
   }
@@ -216,7 +220,7 @@ export class DockerDeploymentManager extends BaseDeploymentManager {
       try {
         await container.stop();
         console.log(`✅ Stopped container: ${deploymentName}`);
-      } catch (error) {
+      } catch (_error) {
         // Container might already be stopped
         console.log(`⚠️  Container ${deploymentName} was not running`);
       }
@@ -227,7 +231,7 @@ export class DockerDeploymentManager extends BaseDeploymentManager {
     } catch (error: any) {
       if (error.statusCode === 404) {
         console.log(
-          `⚠️  Container ${deploymentName} not found (already deleted)`,
+          `⚠️  Container ${deploymentName} not found (already deleted)`
         );
       } else {
         throw error;
@@ -237,19 +241,19 @@ export class DockerDeploymentManager extends BaseDeploymentManager {
 
   async updateDeploymentActivity(deploymentName: string): Promise<void> {
     try {
-      const container = this.docker.getContainer(deploymentName);
+      const _container = this.docker.getContainer(deploymentName);
       const timestamp = new Date().toISOString();
 
       // Update container labels (Docker doesn't support runtime label updates, so we log for now)
       console.log(
-        `✅ Updated activity timestamp for container: ${deploymentName} at ${timestamp}`,
+        `✅ Updated activity timestamp for container: ${deploymentName} at ${timestamp}`
       );
       // Note: Docker doesn't support runtime label updates like K8s annotations
       // This could be implemented by recreating the container with updated labels if needed
     } catch (error) {
       console.error(
         `❌ Failed to update activity for container ${deploymentName}:`,
-        error instanceof Error ? error.message : String(error),
+        error instanceof Error ? error.message : String(error)
       );
       // Don't throw - activity tracking should not block message processing
     }
@@ -260,7 +264,7 @@ export class DockerDeploymentManager extends BaseDeploymentManager {
     return await this.secretManager.getOrCreateUserCredentials(
       username,
       (username: string, password: string) =>
-        this.databaseManager.createPostgresUser(username, password),
+        this.databaseManager.createPostgresUser(username, password)
     );
   }
 
@@ -282,13 +286,13 @@ export class DockerDeploymentManager extends BaseDeploymentManager {
     }
 
     // If no unit is specified, assume bytes
-    return parseInt(memoryStr);
+    return parseInt(memoryStr, 10);
   }
 
   private parseCpuLimit(cpuStr: string): number {
     if (cpuStr.endsWith("m")) {
       // Millicores
-      const millicores = parseInt(cpuStr.replace("m", ""));
+      const millicores = parseInt(cpuStr.replace("m", ""), 10);
       return (millicores / 1000) * 1000000000; // Convert to nanocores
     }
 

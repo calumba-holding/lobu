@@ -166,7 +166,7 @@ export const mockChildProcess = {
     kill: jest.fn(),
     pid: 12345,
   }),
-  exec: jest.fn().mockImplementation((command: string, callback: any) => {
+  exec: jest.fn().mockImplementation((_command: string, callback: any) => {
     setTimeout(() => callback(null, "command output", ""), 10);
   }),
 };
@@ -184,7 +184,9 @@ export class MockProgressTracker {
 
   updateProgress(message: string) {
     this.updates.push(message);
-    this.callbacks.forEach((callback) => callback(message));
+    this.callbacks.forEach((callback) => {
+      callback(message);
+    });
   }
 
   getUpdates(): string[] {
@@ -267,7 +269,7 @@ export class MockResourceMonitor {
     if (!this.metrics.has(name)) {
       this.metrics.set(name, []);
     }
-    this.metrics.get(name)!.push(value);
+    this.metrics.get(name)?.push(value);
   }
 
   getMetrics(name: string): number[] {
@@ -302,8 +304,8 @@ export const timeoutUtils = {
       new Promise<never>((_, reject) =>
         setTimeout(
           () => reject(new Error(`Timeout after ${timeoutMs}ms`)),
-          timeoutMs,
-        ),
+          timeoutMs
+        )
       ),
     ]);
   },
@@ -311,7 +313,7 @@ export const timeoutUtils = {
   async retry<T>(
     operation: () => Promise<T>,
     maxAttempts: number = 3,
-    delayMs: number = 100,
+    delayMs: number = 100
   ): Promise<T> {
     let lastError: Error;
 
@@ -431,7 +433,7 @@ export const testLogger = {
   },
 
   getLogs(
-    level?: string,
+    level?: string
   ): Array<{ level: string; message: string; timestamp: Date }> {
     return level
       ? this.logs.filter((log) => log.level === level)
@@ -454,7 +456,7 @@ export const testLogger = {
 
     if (!found) {
       throw new Error(
-        `Expected ${level} log matching ${messagePattern}, but not found`,
+        `Expected ${level} log matching ${messagePattern}, but not found`
       );
     }
   },

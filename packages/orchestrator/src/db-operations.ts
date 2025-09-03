@@ -1,4 +1,4 @@
-import { DatabasePool } from "./db-connection-pool";
+import type { DatabasePool } from "./db-connection-pool";
 
 export class DatabaseManager {
   private dbPool: DatabasePool;
@@ -28,23 +28,23 @@ export class DatabaseManager {
       // Use the RLS-aware user creation function with just the username and password
       const createdUsername = await client.query(
         "SELECT create_isolated_pgboss_user($1, $2) as username",
-        [username, password],
+        [username, password]
       );
 
       const actualUsername = createdUsername.rows[0]?.username;
       if (actualUsername !== username) {
         console.warn(
-          `Username mismatch: expected ${username}, got ${actualUsername}`,
+          `Username mismatch: expected ${username}, got ${actualUsername}`
         );
       }
 
       console.log(
-        `✅ Successfully ensured user ${username} has isolated pgboss access`,
+        `✅ Successfully ensured user ${username} has isolated pgboss access`
       );
     } catch (error) {
       console.error(
         `Failed to create/update PostgreSQL user ${username}:`,
-        error,
+        error
       );
       throw error;
     } finally {

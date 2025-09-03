@@ -1,5 +1,5 @@
-import { AnthropicProxy, AnthropicProxyConfig } from "../anthropic-proxy";
 import { Router } from "express";
+import { AnthropicProxy, type AnthropicProxyConfig } from "../anthropic-proxy";
 
 describe("AnthropicProxy", () => {
   const mockConfig: AnthropicProxyConfig = {
@@ -12,14 +12,14 @@ describe("AnthropicProxy", () => {
   test("should create proxy with router", () => {
     const proxy = new AnthropicProxy(mockConfig);
     const router = proxy.getRouter();
-    
+
     expect(router).toBeInstanceOf(Router);
   });
 
   test("should have health endpoint", async () => {
     const proxy = new AnthropicProxy(mockConfig);
     const router = proxy.getRouter();
-    
+
     // Check that router has routes
     expect(router.stack).toHaveLength(2); // health + catch-all routes
   });
@@ -27,7 +27,7 @@ describe("AnthropicProxy", () => {
   test("should be disabled when config.enabled is false", () => {
     const disabledConfig = { ...mockConfig, enabled: false };
     const proxy = new AnthropicProxy(disabledConfig);
-    
+
     expect(proxy).toBeInstanceOf(AnthropicProxy);
   });
 });

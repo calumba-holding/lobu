@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
-import type { LogLevel } from "@slack/bolt";
 import type { ClaudeExecutionOptions } from "@peerbot/shared";
+import type { LogLevel } from "@slack/bolt";
 
 export interface SlackConfig {
   token: string;
@@ -129,7 +129,7 @@ export class DispatcherError extends Error {
   constructor(
     public operation: string,
     message: string,
-    public cause?: Error,
+    public cause?: Error
   ) {
     super(message);
     this.name = "DispatcherError";
@@ -141,7 +141,7 @@ export class GitHubRepositoryError extends Error {
     public operation: string,
     public username: string,
     message: string,
-    public cause?: Error,
+    public cause?: Error
   ) {
     super(message);
     this.name = "GitHubRepositoryError";

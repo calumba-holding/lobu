@@ -1,7 +1,11 @@
-import { DatabasePool } from "../db-connection-pool";
+import type { DatabasePool } from "../db-connection-pool";
 import { DatabaseManager } from "../db-operations";
-import { BaseSecretManager } from "./BaseSecretManager";
-import { OrchestratorConfig, OrchestratorError, ErrorCode } from "../types";
+import {
+  ErrorCode,
+  type OrchestratorConfig,
+  OrchestratorError,
+} from "../types";
+import type { BaseSecretManager } from "./BaseSecretManager";
 
 export interface DeploymentInfo {
   deploymentName: string;
@@ -23,7 +27,7 @@ export abstract class BaseDeploymentManager {
   constructor(
     config: OrchestratorConfig,
     dbPool: DatabasePool,
-    secretManager: BaseSecretManager,
+    secretManager: BaseSecretManager
   ) {
     this.config = config;
     this.dbPool = dbPool;
@@ -34,7 +38,9 @@ export abstract class BaseDeploymentManager {
   /**
    * Get all environment variables for a user from database
    */
-  protected async getUserEnvironmentVariables(userId: string): Promise<Record<string, string>> {
+  protected async getUserEnvironmentVariables(
+    userId: string
+  ): Promise<Record<string, string>> {
     try {
       const platformUserId = userId.toUpperCase();
       const result = await this.dbPool.query(
@@ -44,7 +50,7 @@ export abstract class BaseDeploymentManager {
            WHERE platform = 'slack' AND platform_user_id = $1
          )
          ORDER BY type DESC, name`, // System vars first, then user vars
-        [platformUserId],
+        [platformUserId]
       );
 
       const envVars: Record<string, string> = {};
@@ -54,7 +60,10 @@ export abstract class BaseDeploymentManager {
 
       return envVars;
     } catch (error) {
-      console.log(`Error fetching environment variables for user ${userId}:`, error);
+      console.log(
+        `Error fetching environment variables for user ${userId}:`,
+        error
+      );
       return {};
     }
   }
@@ -66,11 +75,11 @@ export abstract class BaseDeploymentManager {
     username: string,
     userId: string,
     messageData?: any,
-    userEnvVars?: Record<string, string>,
+    userEnvVars?: Record<string, string>
   ): Promise<void>;
   abstract scaleDeployment(
     deploymentName: string,
-    replicas: number,
+    replicas: number
   ): Promise<void>;
   abstract deleteDeployment(deploymentId: string): Promise<void>;
   abstract updateDeploymentActivity(deploymentName: string): Promise<void>;
@@ -81,8 +90,8 @@ export abstract class BaseDeploymentManager {
   async createWorkerDeployment(
     userId: string,
     threadId: string,
-    teamId?: string,
-    messageData?: any,
+    _teamId?: string,
+    messageData?: any
   ): Promise<void> {
     const deploymentName = `peerbot-worker-${threadId}`;
 
@@ -94,13 +103,13 @@ export abstract class BaseDeploymentManager {
       await this.secretManager.getOrCreateUserCredentials(
         username,
         (username: string, password: string) =>
-          this.databaseManager.createPostgresUser(username, password),
+          this.databaseManager.createPostgresUser(username, password)
       );
 
       // Check if deployment already exists by getting the list and filtering
       const deployments = await this.listDeployments();
       const existingDeployment = deployments.find(
-        (d) => d.deploymentName === deploymentName,
+        (d) => d.deploymentName === deploymentName
       );
 
       if (existingDeployment) {
@@ -112,7 +121,7 @@ export abstract class BaseDeploymentManager {
       const maxDeployments = this.config.worker.maxDeployments;
       if (maxDeployments > 0 && deployments.length >= maxDeployments) {
         console.log(
-          `⚠️  Maximum deployments limit reached (${deployments.length}/${maxDeployments}). Running cleanup before creating new deployment.`,
+          `⚠️  Maximum deployments limit reached (${deployments.length}/${maxDeployments}). Running cleanup before creating new deployment.`
         );
         await this.reconcileDeployments();
 
@@ -120,27 +129,27 @@ export abstract class BaseDeploymentManager {
         const deploymentsAfterCleanup = await this.listDeployments();
         if (deploymentsAfterCleanup.length >= maxDeployments) {
           throw new Error(
-            `Cannot create new deployment: Maximum deployments limit (${maxDeployments}) reached. Current active deployments: ${deploymentsAfterCleanup.length}`,
+            `Cannot create new deployment: Maximum deployments limit (${maxDeployments}) reached. Current active deployments: ${deploymentsAfterCleanup.length}`
           );
         }
       }
 
       // Fetch user environment variables once
       const userEnvVars = await this.getUserEnvironmentVariables(userId);
-      
+
       await this.createDeployment(
         deploymentName,
         username,
         userId,
         messageData,
-        userEnvVars,
+        userEnvVars
       );
     } catch (error) {
       throw new OrchestratorError(
         ErrorCode.DEPLOYMENT_CREATE_FAILED,
         `Failed to create worker deployment: ${error instanceof Error ? error.message : String(error)}`,
         { userId, threadId, error },
-        true,
+        true
       );
     }
   }
@@ -154,7 +163,7 @@ export abstract class BaseDeploymentManager {
     deploymentName: string,
     messageData?: any,
     includeSecrets: boolean = true,
-    userEnvVars: Record<string, string> = {},
+    userEnvVars: Record<string, string> = {}
   ): { [key: string]: string } {
     const envVars: { [key: string]: string } = {
       WORKER_MODE: "queue",
@@ -180,33 +189,35 @@ export abstract class BaseDeploymentManager {
 
     // Add optional environment variables only if they exist
     if (messageData?.platformMetadata?.botResponseTs) {
-      envVars["BOT_RESPONSE_TS"] = messageData.platformMetadata.botResponseTs;
+      envVars.BOT_RESPONSE_TS = messageData.platformMetadata.botResponseTs;
     }
 
     // Include secrets from process.env for Docker deployments
     if (includeSecrets) {
       if (process.env.GITHUB_TOKEN) {
-        envVars["GITHUB_TOKEN"] = process.env.GITHUB_TOKEN;
+        envVars.GITHUB_TOKEN = process.env.GITHUB_TOKEN;
       }
 
       // Only include OAuth token if proxy is disabled
       // When proxy is enabled, the token is handled by the proxy itself
-      if (process.env.CLAUDE_CODE_OAUTH_TOKEN && process.env.ANTHROPIC_PROXY_ENABLED !== "true") {
-        envVars["CLAUDE_CODE_OAUTH_TOKEN"] =
-          process.env.CLAUDE_CODE_OAUTH_TOKEN;
+      if (
+        process.env.CLAUDE_CODE_OAUTH_TOKEN &&
+        process.env.ANTHROPIC_PROXY_ENABLED !== "true"
+      ) {
+        envVars.CLAUDE_CODE_OAUTH_TOKEN = process.env.CLAUDE_CODE_OAUTH_TOKEN;
       }
     }
 
     if (process.env.CLAUDE_ALLOWED_TOOLS) {
-      envVars["CLAUDE_ALLOWED_TOOLS"] = process.env.CLAUDE_ALLOWED_TOOLS;
+      envVars.CLAUDE_ALLOWED_TOOLS = process.env.CLAUDE_ALLOWED_TOOLS;
     }
 
     if (process.env.CLAUDE_DISALLOWED_TOOLS) {
-      envVars["CLAUDE_DISALLOWED_TOOLS"] = process.env.CLAUDE_DISALLOWED_TOOLS;
+      envVars.CLAUDE_DISALLOWED_TOOLS = process.env.CLAUDE_DISALLOWED_TOOLS;
     }
 
     if (process.env.CLAUDE_TIMEOUT_MINUTES) {
-      envVars["CLAUDE_TIMEOUT_MINUTES"] = process.env.CLAUDE_TIMEOUT_MINUTES;
+      envVars.CLAUDE_TIMEOUT_MINUTES = process.env.CLAUDE_TIMEOUT_MINUTES;
     }
 
     // Add worker environment variables from configuration
@@ -218,14 +229,15 @@ export abstract class BaseDeploymentManager {
 
     // Configure Anthropic API proxy if enabled
     if (process.env.ANTHROPIC_PROXY_ENABLED === "true") {
-      const dispatcherService = process.env.DISPATCHER_SERVICE_NAME || "peerbot-dispatcher";
+      const dispatcherService =
+        process.env.DISPATCHER_SERVICE_NAME || "peerbot-dispatcher";
       const dispatcherPort = process.env.DISPATCHER_SERVICE_PORT || "3000";
       const namespace = process.env.KUBERNETES_NAMESPACE || "peerbot";
-      
+
       // Detect if we're running in Docker mode (DEPLOYMENT_MODE=docker) or Kubernetes mode
       const isDockerMode = process.env.DEPLOYMENT_MODE === "docker";
       let proxyUrl: string;
-      
+
       if (isDockerMode) {
         // For Docker mode, use localhost (host.docker.internal doesn't work reliably)
         // The dispatcher runs on port 8080 in Docker mode for the proxy endpoint
@@ -234,31 +246,37 @@ export abstract class BaseDeploymentManager {
         // For Kubernetes mode, use internal service DNS
         proxyUrl = `http://${dispatcherService}.${namespace}.svc.cluster.local:${dispatcherPort}/api/anthropic`;
       }
-      
+
       // Set the base URL to use dispatcher's proxy
-      envVars["ANTHROPIC_BASE_URL"] = proxyUrl;
-      
+      envVars.ANTHROPIC_BASE_URL = proxyUrl;
+
       // Pass PostgreSQL credentials in x-api-key for proxy authentication
       // The proxy will validate these, then use the OAuth token from its config
-      envVars["ANTHROPIC_API_KEY"] = `${username}:${process.env.POSTGRESQL_PASSWORD || 'peerbot123'}`;
-      
-      console.log(`🔧 Configured worker to use Anthropic proxy at ${envVars["ANTHROPIC_BASE_URL"]}`);
+      envVars.ANTHROPIC_API_KEY = `${username}:${process.env.POSTGRESQL_PASSWORD || "peerbot123"}`;
+
+      console.log(
+        `🔧 Configured worker to use Anthropic proxy at ${envVars.ANTHROPIC_BASE_URL}`
+      );
     } else if (process.env.CLAUDE_CODE_OAUTH_TOKEN) {
       // If proxy is disabled, pass OAuth token to Claude Code in the expected env var
-      envVars["CLAUDE_CODE_OAUTH_TOKEN"] = process.env.CLAUDE_CODE_OAUTH_TOKEN;
-      console.log(`🔧 Using OAuth token directly with Claude Code (proxy disabled)`);
+      envVars.CLAUDE_CODE_OAUTH_TOKEN = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+      console.log(
+        `🔧 Using OAuth token directly with Claude Code (proxy disabled)`
+      );
     }
 
     // Merge user environment variables (they take precedence over defaults)
     Object.entries(userEnvVars).forEach(([key, value]) => {
       // Skip database credentials as they're handled separately
-      if (!key.startsWith('PEERBOT_DATABASE_')) {
+      if (!key.startsWith("PEERBOT_DATABASE_")) {
         envVars[key] = value;
       }
     });
 
     if (Object.keys(userEnvVars).length > 0) {
-      console.log(`📦 Loaded ${Object.keys(userEnvVars).length} user environment variables for ${userId}`);
+      console.log(
+        `📦 Loaded ${Object.keys(userEnvVars).length} user environment variables for ${userId}`
+      );
     }
 
     return envVars;
@@ -269,7 +287,7 @@ export abstract class BaseDeploymentManager {
    */
   async deleteWorkerDeployment(deploymentId: string): Promise<void> {
     try {
-      const deploymentName = `peerbot-worker-${deploymentId}`;
+      const _deploymentName = `peerbot-worker-${deploymentId}`;
 
       await this.deleteDeployment(deploymentId);
     } catch (error) {
@@ -277,7 +295,7 @@ export abstract class BaseDeploymentManager {
         ErrorCode.DEPLOYMENT_DELETE_FAILED,
         `Failed to delete deployment for ${deploymentId}: ${error instanceof Error ? error.message : String(error)}`,
         { deploymentId, error },
-        true,
+        true
       );
     }
   }
@@ -301,7 +319,7 @@ export abstract class BaseDeploymentManager {
 
       // Sort deployments by last activity (oldest first)
       const sortedDeployments = [...activeDeployments].sort(
-        (a, b) => a.lastActivity.getTime() - b.lastActivity.getTime(),
+        (a, b) => a.lastActivity.getTime() - b.lastActivity.getTime()
       );
 
       let processedCount = 0;
@@ -326,7 +344,7 @@ export abstract class BaseDeploymentManager {
           } catch (error) {
             console.error(
               `❌ Failed to delete deployment ${deploymentName}:`,
-              error,
+              error
             );
           }
         } else if (isIdle && replicas > 0) {
@@ -337,7 +355,7 @@ export abstract class BaseDeploymentManager {
           } catch (error) {
             console.error(
               `❌ Failed to scale down deployment ${deploymentName}:`,
-              error,
+              error
             );
           }
         }
@@ -345,7 +363,7 @@ export abstract class BaseDeploymentManager {
 
       // Check if we exceed max deployments (after cleanup)
       const remainingDeployments = sortedDeployments.filter(
-        (d) => !d.isVeryOld,
+        (d) => !d.isVeryOld
       );
       if (remainingDeployments.length > maxDeployments) {
         const excessCount = remainingDeployments.length - maxDeployments;
@@ -358,7 +376,7 @@ export abstract class BaseDeploymentManager {
           } catch (error) {
             console.error(
               `❌ Failed to remove deployment ${deploymentName}:`,
-              error,
+              error
             );
           }
         }
@@ -366,13 +384,13 @@ export abstract class BaseDeploymentManager {
 
       if (processedCount > 0) {
         console.log(
-          `✅ Cleanup completed: processed ${processedCount} deployment(s)`,
+          `✅ Cleanup completed: processed ${processedCount} deployment(s)`
         );
       }
     } catch (error) {
       console.error(
         "Error during deployment reconciliation:",
-        error instanceof Error ? error.message : String(error),
+        error instanceof Error ? error.message : String(error)
       );
     }
   }

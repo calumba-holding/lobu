@@ -13,7 +13,11 @@ export async function handleBlockkitFormSubmission(
   userId: string,
   view: any,
   client: any,
-  handleUserRequestFn: (context: any, userInput: string, client: any) => Promise<void>
+  handleUserRequestFn: (
+    context: any,
+    userInput: string,
+    client: any
+  ) => Promise<void>
 ): Promise<void> {
   logger.info(`Handling blockkit form submission for user: ${userId}`);
 
@@ -26,7 +30,7 @@ export async function handleBlockkitFormSubmission(
 
   if (!channelId || !threadTs) {
     logger.error(
-      "Missing channel or thread information in blockkit form submission",
+      "Missing channel or thread information in blockkit form submission"
     );
     return;
   }
@@ -46,7 +50,7 @@ export async function handleBlockkitFormSubmission(
   // This handles cases where the blockkit is just informational content with action buttons
   if (!userInput.trim()) {
     logger.info(
-      `No form inputs found, extracting modal content for button: ${buttonText}`,
+      `No form inputs found, extracting modal content for button: ${buttonText}`
     );
 
     // Extract text content from the modal blocks
@@ -246,7 +250,7 @@ function extractViewInputs(stateValues: any): string {
       ) {
         // Handle action blocks with button selections
         const selectedActions = (action as any).actions.filter(
-          (act: any) => act.selected || act.value,
+          (act: any) => act.selected || act.value
         );
         if (selectedActions.length > 0) {
           value = selectedActions
@@ -255,7 +259,7 @@ function extractViewInputs(stateValues: any): string {
         }
       }
 
-      if (value && value.toString().trim()) {
+      if (value?.toString().trim()) {
         // Use actionId as label if available, otherwise use blockId
         const label = actionId || blockId;
         // Convert snake_case or camelCase to readable format
@@ -273,7 +277,7 @@ function extractViewInputs(stateValues: any): string {
 
   // Debug logging to help troubleshoot form submission issues
   logger.info(
-    `Form submission debug - stateValues: ${JSON.stringify(stateValues, null, 2)}`,
+    `Form submission debug - stateValues: ${JSON.stringify(stateValues, null, 2)}`
   );
   logger.info(`Extracted inputs: ${inputs.join(", ")}`);
 
@@ -303,7 +307,7 @@ function extractModalContent(blocks: any[]): string {
       // Extract context elements
       for (const element of block.elements) {
         if (element.type === "mrkdwn" && element.text) {
-          let text = element.text
+          const text = element.text
             .replace(/\*\*(.+?)\*\*/g, "$1")
             .replace(/\*(.+?)\*/g, "$1");
           content.push(text);

@@ -10,7 +10,7 @@ class GitHubRepositoryError extends Error {
     public operation: string,
     public username: string,
     message: string,
-    public cause?: Error,
+    public cause?: Error
   ) {
     super(message);
     this.name = "GitHubRepositoryError";
@@ -37,11 +37,11 @@ export class GitHubRepositoryManager {
     try {
       // Handle both HTTPS and SSH URLs
       const match = url.match(/github\.com[:/]([^/]+)\/([^/.]+)(?:\.git)?$/);
-      if (match && match[2]) {
+      if (match?.[2]) {
         return match[2]; // Return repository name
       }
       return "unknown-repo";
-    } catch (error) {
+    } catch (_error) {
       return "unknown-repo";
     }
   }
@@ -64,7 +64,7 @@ export class GitHubRepositoryManager {
         };
 
         logger.info(
-          `Using repository override for user ${username}: ${repository.repositoryUrl}`,
+          `Using repository override for user ${username}: ${repository.repositoryUrl}`
         );
         return repository;
       }
@@ -119,7 +119,7 @@ export class GitHubRepositoryManager {
           };
 
           logger.info(
-            `Found existing repository for user ${username} under ${owner}: ${repository.repositoryUrl}`,
+            `Found existing repository for user ${username} under ${owner}: ${repository.repositoryUrl}`
           );
           foundRepo = true;
           break;
@@ -142,7 +142,7 @@ export class GitHubRepositoryManager {
         return repository;
       } else {
         throw new Error(
-          `Failed to find or create repository for user ${username}`,
+          `Failed to find or create repository for user ${username}`
         );
       }
     } catch (error) {
@@ -150,7 +150,7 @@ export class GitHubRepositoryManager {
         "ensureUserRepository",
         username,
         `Failed to ensure repository for user ${username}`,
-        error as Error,
+        error as Error
       );
     }
   }
@@ -159,7 +159,7 @@ export class GitHubRepositoryManager {
    * Create a new user repository
    */
   private async createUserRepository(
-    username: string,
+    username: string
   ): Promise<UserRepository> {
     try {
       const repositoryName = username;
@@ -185,12 +185,12 @@ export class GitHubRepositoryManager {
             license_template: "mit",
           });
           logger.info(
-            `Created repository for user ${username} in organization ${this.config.organization}`,
+            `Created repository for user ${username} in organization ${this.config.organization}`
           );
         } catch (orgError: any) {
           if (orgError.status === 404) {
             logger.info(
-              `Organization ${this.config.organization} not found, creating repository for authenticated user...`,
+              `Organization ${this.config.organization} not found, creating repository for authenticated user...`
             );
             repoResponse =
               await this.octokit.rest.repos.createForAuthenticatedUser({
@@ -211,7 +211,7 @@ export class GitHubRepositoryManager {
       } else {
         // No organization specified, create for authenticated user
         logger.info(
-          `No organization specified, creating repository for authenticated user...`,
+          `No organization specified, creating repository for authenticated user...`
         );
         repoResponse = await this.octokit.rest.repos.createForAuthenticatedUser(
           {
@@ -224,7 +224,7 @@ export class GitHubRepositoryManager {
             auto_init: true,
             gitignore_template: "Node",
             license_template: "mit",
-          },
+          }
         );
       }
 
@@ -252,7 +252,7 @@ export class GitHubRepositoryManager {
       };
 
       logger.info(
-        `Created repository for user ${username}: ${repository.repositoryUrl}`,
+        `Created repository for user ${username}: ${repository.repositoryUrl}`
       );
 
       return repository;
@@ -261,7 +261,7 @@ export class GitHubRepositoryManager {
         "createUserRepository",
         username,
         `Failed to create repository for user ${username}`,
-        error as Error,
+        error as Error
       );
     }
   }
@@ -271,7 +271,7 @@ export class GitHubRepositoryManager {
    */
   private async createInitialStructure(
     owner: string,
-    repositoryName: string,
+    repositoryName: string
   ): Promise<void> {
     const directories = [
       {
@@ -323,7 +323,7 @@ export class GitHubRepositoryManager {
    */
   async fetchReadmeContent(
     owner: string,
-    repo: string,
+    repo: string
   ): Promise<string | null> {
     try {
       logger.info(`Fetching README.md from ${owner}/${repo}...`);
@@ -336,16 +336,16 @@ export class GitHubRepositoryManager {
 
       if ("content" in response.data && response.data.content) {
         const content = Buffer.from(response.data.content, "base64").toString(
-          "utf8",
+          "utf8"
         );
         logger.info(
-          `Successfully fetched README.md from ${owner}/${repo} (${content.length} characters)`,
+          `Successfully fetched README.md from ${owner}/${repo} (${content.length} characters)`
         );
         return content;
       }
 
       logger.warn(
-        `README.md found but no content available for ${owner}/${repo}`,
+        `README.md found but no content available for ${owner}/${repo}`
       );
       return null;
     } catch (error: any) {

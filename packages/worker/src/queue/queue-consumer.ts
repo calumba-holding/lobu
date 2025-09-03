@@ -3,8 +3,8 @@
 import * as Sentry from "@sentry/node";
 import PgBoss from "pg-boss";
 import { ClaudeWorker } from "../claude-worker";
-import type { WorkerConfig } from "../types";
 import logger from "../logger";
+import type { WorkerConfig } from "../types";
 
 /**
  * Queue consumer for workers that listen to thread-specific messages
@@ -50,7 +50,7 @@ export class WorkerQueueConsumer {
     connectionString: string,
     userId: string,
     deploymentName: string,
-    targetThreadId?: string,
+    targetThreadId?: string
   ) {
     this.pgBoss = new PgBoss(connectionString);
     this.userId = userId;
@@ -83,7 +83,7 @@ export class WorkerQueueConsumer {
           },
           async () => {
             return this.handleThreadMessage(job);
-          },
+          }
         );
       });
 
@@ -135,13 +135,15 @@ export class WorkerQueueConsumer {
       logger.info("Received job structure:", {
         type: typeof job,
         keys: Object.keys(job || {}),
-        hasNumericKeys: Object.keys(job || {}).some((k) => !isNaN(Number(k))),
+        hasNumericKeys: Object.keys(job || {}).some(
+          (k) => !Number.isNaN(Number(k))
+        ),
       });
 
       // Check if this is the PgBoss format (object with numeric keys)
       if (typeof job === "object" && job !== null) {
         const keys = Object.keys(job);
-        const numericKeys = keys.filter((key) => !isNaN(Number(key)));
+        const numericKeys = keys.filter((key) => !Number.isNaN(Number(key)));
 
         if (numericKeys.length > 0) {
           // PgBoss passes jobs as an array, get the first element
@@ -156,11 +158,11 @@ export class WorkerQueueConsumer {
             // This is the actual job object from PgBoss
             actualData = firstJob.data;
             logger.info(
-              `Successfully extracted job data for job ${firstJob.id} from queue ${firstJob.name}`,
+              `Successfully extracted job data for job ${firstJob.id} from queue ${firstJob.name}`
             );
           } else {
             throw new Error(
-              "Invalid job format: expected job object with data field",
+              "Invalid job format: expected job object with data field"
             );
           }
         } else {
@@ -180,17 +182,17 @@ export class WorkerQueueConsumer {
       logger.error("Failed to parse job data:", error);
       logger.error(
         "Raw job structure:",
-        JSON.stringify(job, null, 2).substring(0, 500),
+        JSON.stringify(job, null, 2).substring(0, 500)
       );
       throw new Error(
-        `Invalid job data format: ${error instanceof Error ? error.message : String(error)}`,
+        `Invalid job data format: ${error instanceof Error ? error.message : String(error)}`
       );
     }
 
     // Validate message is for our user (case insensitive sanity check)
     if (actualData.userId.toLowerCase() !== this.userId.toLowerCase()) {
       logger.warn(
-        `Received message for user ${actualData.userId}, but this worker is for user ${this.userId}`,
+        `Received message for user ${actualData.userId}, but this worker is for user ${this.userId}`
       );
       return; // Skip this message - wrong user
     }
@@ -202,7 +204,7 @@ export class WorkerQueueConsumer {
     });
 
     logger.info(
-      `Message queued. Queue length: ${this.messageQueue.length}, isProcessing: ${this.isProcessing}`,
+      `Message queued. Queue length: ${this.messageQueue.length}, isProcessing: ${this.isProcessing}`
     );
 
     // If not currently processing, start sequential processing
@@ -247,15 +249,15 @@ export class WorkerQueueConsumer {
     // Log session info for debugging
     if (resumeSessionId) {
       logger.info(
-        `Resuming existing Claude session: ${resumeSessionId} for thread ${payload.threadId}`,
+        `Resuming existing Claude session: ${resumeSessionId} for thread ${payload.threadId}`
       );
     } else if (sessionId) {
       logger.info(
-        `Creating new Claude session: ${sessionId} for thread ${payload.threadId}`,
+        `Creating new Claude session: ${sessionId} for thread ${payload.threadId}`
       );
     } else {
       logger.info(
-        `Starting Claude session without explicit ID for thread ${payload.threadId}`,
+        `Starting Claude session without explicit ID for thread ${payload.threadId}`
       );
     }
 
@@ -342,7 +344,7 @@ export class WorkerQueueConsumer {
         this.messageQueue = []; // Clear queue
 
         logger.info(
-          `Processing batch of ${messagesToProcess.length} messages sequentially`,
+          `Processing batch of ${messagesToProcess.length} messages sequentially`
         );
 
         // Sort by timestamp to ensure correct order
@@ -362,7 +364,7 @@ export class WorkerQueueConsumer {
    * Process a batch of messages together
    */
   private async processBatchedMessages(
-    messages: QueuedMessage[],
+    messages: QueuedMessage[]
   ): Promise<void> {
     if (messages.length === 0) return;
 
@@ -413,7 +415,7 @@ export class WorkerQueueConsumer {
       // Set environment variables
       if (!process.env.USER_ID) {
         logger.warn(
-          `USER_ID not set in environment, using userId from payload: ${message.payload.userId}`,
+          `USER_ID not set in environment, using userId from payload: ${message.payload.userId}`
         );
         process.env.USER_ID = message.payload.userId;
       }
@@ -428,7 +430,7 @@ export class WorkerQueueConsumer {
         workerConfig.resumeSessionId = this.lastSessionId;
         workerConfig.sessionId = undefined; // Let Claude generate a new session ID for the continuation
         logger.info(
-          `Resuming Claude session ${this.lastSessionId} for message ${message.payload.messageId}`,
+          `Resuming Claude session ${this.lastSessionId} for message ${message.payload.messageId}`
         );
       } else {
         // First message in this worker - create a new session using the agentSessionId
@@ -438,7 +440,7 @@ export class WorkerQueueConsumer {
           `session-${message.payload.messageId}`;
         workerConfig.resumeSessionId = undefined;
         logger.info(
-          `Creating new Claude session ${workerConfig.sessionId} for message ${message.payload.messageId}`,
+          `Creating new Claude session ${workerConfig.sessionId} for message ${message.payload.messageId}`
         );
       }
 
@@ -452,12 +454,12 @@ export class WorkerQueueConsumer {
         this.lastSessionId = workerConfig.sessionId;
       }
       logger.info(
-        `✅ Successfully processed message ${message.payload.messageId}, session ${this.lastSessionId || "none"} saved for potential resume`,
+        `✅ Successfully processed message ${message.payload.messageId}, session ${this.lastSessionId || "none"} saved for potential resume`
       );
     } catch (error) {
       logger.error(
         `❌ Failed to process message ${message.payload.messageId}:`,
-        error,
+        error
       );
 
       // Try to provide more detailed error context in the queue
@@ -492,7 +494,7 @@ export class WorkerQueueConsumer {
     try {
       // Add cleanup annotation to deployment (simplified approach)
       logger.info(
-        `Would signal deployment ${this.deploymentName} for cleanup (skipping K8s patch to avoid API complexity)`,
+        `Would signal deployment ${this.deploymentName} for cleanup (skipping K8s patch to avoid API complexity)`
       );
 
       logger.info(`✅ Signaled deployment ${this.deploymentName} for cleanup`);
