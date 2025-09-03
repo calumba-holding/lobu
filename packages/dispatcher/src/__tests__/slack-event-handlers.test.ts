@@ -22,8 +22,8 @@ interface MockSlackApp {
 }
 
 describe("Slack Event Handlers", () => {
-  let mockSlackApp: MockSlackApp;
-  let mockJobManager: any;
+  // let mockSlackApp: MockSlackApp;
+  // let mockJobManager: any;
 
   beforeEach(() => {
     mockSlackApp = {
@@ -134,7 +134,7 @@ describe("Slack Event Handlers", () => {
 
   describe("Slash Commands", () => {
     it("should handle /claude command", async () => {
-      const mockCommand = {
+      const _mockCommand = {
         command: "/claude",
         text: "help me with this issue",
         user_id: "U123456",
@@ -155,7 +155,7 @@ describe("Slack Event Handlers", () => {
     });
 
     it("should handle /claude status command", async () => {
-      const mockCommand = {
+      const _mockCommand = {
         command: "/claude",
         text: "status",
         user_id: "U123456",
@@ -175,7 +175,7 @@ describe("Slack Event Handlers", () => {
     });
 
     it("should handle /claude help command", async () => {
-      const mockCommand = {
+      const _mockCommand = {
         command: "/claude",
         text: "help",
         user_id: "U123456",
