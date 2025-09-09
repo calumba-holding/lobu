@@ -96,6 +96,13 @@ jobs:
         env:
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
           TF_VAR_hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_EC2_METADATA_DISABLED: true
+          TF_AWS_S3_FORCE_PATH_STYLE: true
+          AWS_S3_USE_PATH_STYLE: true
+          SSL_CERT_FILE: /dev/null
         run: terraform plan -out=tfplan
         
       - name: Terraform Apply
@@ -103,6 +110,13 @@ jobs:
         env:
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
           TF_VAR_hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_EC2_METADATA_DISABLED: true
+          TF_AWS_S3_FORCE_PATH_STYLE: true
+          AWS_S3_USE_PATH_STYLE: true
+          SSL_CERT_FILE: /dev/null
         run: terraform apply -auto-approve tfplan
         
       - name: Get Kubeconfig
@@ -110,6 +124,13 @@ jobs:
         env:
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
           TF_VAR_hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_EC2_METADATA_DISABLED: true
+          TF_AWS_S3_FORCE_PATH_STYLE: true
+          AWS_S3_USE_PATH_STYLE: true
+          SSL_CERT_FILE: /dev/null
         run: |
           terraform output -raw kubeconfig > /tmp/kubeconfig
           echo "KUBECONFIG=/tmp/kubeconfig" >> $GITHUB_ENV
