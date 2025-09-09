@@ -1,0 +1,65 @@
+name: Upload Terraform State via Rclone
+
+on:
+  workflow_dispatch:
+
+jobs:
+  upload-state:
+    name: Upload State with Rclone
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Install rclone
+        run: |
+          curl https://rclone.org/install.sh | sudo bash
+          rclone version
+          
+      - name: Configure rclone for R2
+        run: |
+          mkdir -p ~/.config/rclone
+          cat > ~/.config/rclone/rclone.conf << EOF
+          [r2]
+          type = s3
+          provider = Cloudflare
+          access_key_id = ${{ secrets.R2_ACCESS_KEY_ID }}
+          secret_access_key = ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          endpoint = ${{ secrets.R2_ENDPOINT }}
+          acl = private
+          no_check_bucket = true
+          EOF
+          
+      - name: Upload state files
+        working-directory: charts/peerbot/provider/hetzner
+        run: |
+          echo "📤 Uploading terraform state to R2..."
+          
+          # Upload state file
+          if rclone copy terraform.tfstate r2:${{ secrets.R2_BUCKET_NAME }}/hetzner/ -v; then
+            echo "✅ Successfully uploaded terraform.tfstate"
+          else
+            echo "❌ Failed to upload terraform.tfstate"
+            exit 1
+          fi
+          
+          # Upload backup if exists
+          if [ -f terraform.tfstate.backup ]; then
+            echo "📤 Uploading backup..."
+            rclone copy terraform.tfstate.backup r2:${{ secrets.R2_BUCKET_NAME }}/hetzner/ -v || true
+            echo "✅ Backup uploaded"
+          fi
+          
+          # List files
+          echo ""
+          echo "📋 Files in R2:"
+          rclone ls r2:${{ secrets.R2_BUCKET_NAME }}/hetzner/
+          
+      - name: Success message
+        run: |
+          echo "✨ State migration complete!"
+          echo ""
+          echo "Next steps:"
+          echo "1. Remove state files from git: git rm --cached charts/peerbot/provider/hetzner/terraform.tfstate*"
+          echo "2. Run the deploy workflow: gh workflow run deploy-community.yml --ref main"
