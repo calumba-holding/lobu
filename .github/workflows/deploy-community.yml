@@ -53,12 +53,15 @@ jobs:
               region = "auto"
               access_key = "${{ secrets.R2_ACCESS_KEY_ID }}"
               secret_key = "${{ secrets.R2_SECRET_ACCESS_KEY }}"
-              endpoint = "${{ secrets.R2_ENDPOINT }}"
+              endpoints = {
+                s3 = "${{ secrets.R2_ENDPOINT }}"
+              }
               skip_credentials_validation = true
               skip_metadata_api_check = true
               skip_region_validation = true
               skip_requesting_account_id = true
               force_path_style = true
+              use_path_style = true
             }
           }
           EOF
@@ -67,7 +70,21 @@ jobs:
         working-directory: charts/peerbot/provider/hetzner
         env:
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
-        run: terraform init
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_EC2_METADATA_DISABLED: true
+        run: |
+          # Try terraform init with retry logic for R2 TLS issues
+          for i in {1..3}; do
+            if terraform init; then
+              echo "Terraform init succeeded"
+              break
+            else
+              echo "Attempt $i failed, retrying..."
+              sleep 5
+            fi
+          done
         
       - name: Terraform Plan
         working-directory: charts/peerbot/provider/hetzner
@@ -128,6 +145,10 @@ jobs:
         env:
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
           TF_VAR_hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_EC2_METADATA_DISABLED: true
         run: |
           # Configure backend
           cat > backend.tf << 'EOF'
@@ -138,17 +159,30 @@ jobs:
               region = "auto"
               access_key = "${{ secrets.R2_ACCESS_KEY_ID }}"
               secret_key = "${{ secrets.R2_SECRET_ACCESS_KEY }}"
-              endpoint = "${{ secrets.R2_ENDPOINT }}"
+              endpoints = {
+                s3 = "${{ secrets.R2_ENDPOINT }}"
+              }
               skip_credentials_validation = true
               skip_metadata_api_check = true
               skip_region_validation = true
               skip_requesting_account_id = true
               force_path_style = true
+              use_path_style = true
             }
           }
           EOF
           
-          terraform init
+          # Try terraform init with retry logic for R2 TLS issues
+          for i in {1..3}; do
+            if terraform init; then
+              echo "Terraform init succeeded"
+              break
+            else
+              echo "Attempt $i failed, retrying..."
+              sleep 5
+            fi
+          done
+          
           terraform output -raw kubeconfig > /tmp/kubeconfig
           echo "KUBECONFIG=/tmp/kubeconfig" >> $GITHUB_ENV
           
