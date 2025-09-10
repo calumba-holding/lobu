@@ -80,9 +80,8 @@ jobs:
           echo "SSH key fingerprint:"
           ssh-keygen -l -f ~/.ssh/id_ed25519.pub
           
-          # Start SSH agent and add key
-          eval "$(ssh-agent -s)"
-          ssh-add ~/.ssh/id_ed25519
+          # DO NOT add key to SSH agent to avoid "too many authentication failures"
+          # The key will be used directly via IdentityFile in SSH config
           
           # Configure SSH to accept new host keys automatically (for CI/CD)
           cat >> ~/.ssh/config << 'EOL'
@@ -91,6 +90,7 @@ jobs:
             UserKnownHostsFile /dev/null
             User root
             IdentityFile ~/.ssh/id_ed25519
+            IdentitiesOnly yes
             ConnectTimeout 30
             ServerAliveInterval 60
             ServerAliveCountMax 3
@@ -206,16 +206,8 @@ jobs:
           echo "SSH public key fingerprint:"
           ssh-keygen -l -f ./ssh_key.pub
           
-          # Start SSH agent and add key for provisioners
-          eval "$(ssh-agent -s)"
-          ssh-add ./ssh_key
-          
-          # Export SSH auth sock for Terraform
-          export SSH_AUTH_SOCK=$SSH_AUTH_SOCK
-          
-          # Show SSH agent keys for debugging
-          echo "SSH keys loaded in agent:"
-          ssh-add -l
+          # DO NOT use SSH agent - it causes "too many authentication failures"
+          # Terraform will use the key file directly
           
           # Apply Terraform - expect provisioners to fail from GitHub Actions
           # The infrastructure will be created but K3s installation may fail
@@ -274,6 +266,7 @@ jobs:
                -o UserKnownHostsFile=/dev/null \
                -o PasswordAuthentication=no \
                -o PreferredAuthentications=publickey \
+               -o IdentitiesOnly=yes \
                -i ./ssh_key \
                root@$FIRST_SERVER_IP "echo 'SSH connection successful!'" 2>&1; then
             echo "✅ SSH connection successful!"
