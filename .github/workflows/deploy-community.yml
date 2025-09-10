@@ -62,8 +62,20 @@ jobs:
         working-directory: charts/peerbot/provider/hetzner
         env:
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          TF_CLI_CONFIG_FILE: /tmp/terraform.rc
         run: |
-          terraform init -upgrade
+          # Create Terraform CLI config with credentials
+          cat > /tmp/terraform.rc << EOF
+          credentials "app.terraform.io" {
+            token = "${{ secrets.TF_API_TOKEN }}"
+          }
+          EOF
+          
+          # Remove any existing state files to avoid migration prompts
+          rm -rf .terraform terraform.tfstate* .terraform.lock.hcl
+          
+          # Initialize with fresh state from Terraform Cloud
+          terraform init -upgrade -reconfigure
         
       - name: Terraform Plan
         working-directory: charts/peerbot/provider/hetzner
@@ -139,7 +151,16 @@ jobs:
           }
           EOF
           
-          terraform init
+          # Create Terraform CLI config with credentials
+          cat > /tmp/terraform.rc << EOF
+          credentials "app.terraform.io" {
+            token = "${{ secrets.TF_API_TOKEN }}"
+          }
+          EOF
+          export TF_CLI_CONFIG_FILE=/tmp/terraform.rc
+          
+          # Initialize and get output
+          terraform init -upgrade -reconfigure
           terraform output -raw kubeconfig > /tmp/kubeconfig
           echo "KUBECONFIG=/tmp/kubeconfig" >> $GITHUB_ENV
           
