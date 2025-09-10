@@ -155,7 +155,7 @@ jobs:
           
           for i in $(seq 1 $MAX_RETRIES); do
             echo "Attempt $i of $MAX_RETRIES..."
-            if terraform plan -out=tfplan; then
+            if terraform plan; then
               echo "Terraform plan succeeded"
               exit 0
             else
@@ -191,7 +191,7 @@ jobs:
           ssh-add -l
           
           # Apply Terraform with timeout - continue even if provisioners fail
-          timeout 540 terraform apply -auto-approve tfplan || {
+          timeout 540 terraform apply -auto-approve || {
             echo "Terraform apply failed, likely due to provisioners"
             echo "apply_failed=true" >> $GITHUB_OUTPUT
             # Still try to get what was created
@@ -208,8 +208,9 @@ jobs:
           # Install hcloud CLI
           curl -sSL https://github.com/hetznercloud/cli/releases/latest/download/hcloud-linux-amd64.tar.gz | tar xz
           sudo mv hcloud /usr/local/bin/
-          hcloud context create peerbot-ci --token $HCLOUD_TOKEN
-          hcloud context use peerbot-ci
+          
+          # Configure hcloud with token
+          export HCLOUD_TOKEN=$HCLOUD_TOKEN
           
           # Run bootstrap script
           bash scripts/bootstrap-k3s.sh || {
