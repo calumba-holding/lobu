@@ -43,6 +43,20 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           chmod 644 ~/.ssh/id_ed25519.pub
           
+          # Start SSH agent and add key
+          eval "$(ssh-agent -s)"
+          ssh-add ~/.ssh/id_ed25519
+          
+          # Configure SSH to accept new host keys automatically (for CI/CD)
+          cat >> ~/.ssh/config << 'EOL'
+          Host *
+            StrictHostKeyChecking accept-new
+            UserKnownHostsFile /dev/null
+            User root
+            IdentityFile ~/.ssh/id_ed25519
+          EOL
+          chmod 600 ~/.ssh/config
+          
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
@@ -101,7 +115,12 @@ jobs:
         env:
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
           TF_VAR_hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
-        run: terraform apply -auto-approve tfplan
+        run: |
+          # Start SSH agent and add key for provisioners
+          eval "$(ssh-agent -s)"
+          ssh-add ~/.ssh/id_ed25519
+          
+          terraform apply -auto-approve tfplan
         
       - name: Get Kubeconfig
         working-directory: charts/peerbot/provider/hetzner
