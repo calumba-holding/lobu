@@ -146,20 +146,14 @@ git config --global safe.directory '*'
 
 echo "✅ Git configuration completed"
 
-# Extract PostgreSQL credentials from DATABASE_URL for Anthropic proxy authentication
-if [[ -n "${PEERBOT_DATABASE_URL:-}" && -n "${ANTHROPIC_BASE_URL:-}" ]]; then
-    echo "🔐 Configuring Anthropic proxy authentication..."
-    # Extract username and password from postgres://username:password@host:port/database
-    PG_USERNAME=$(echo "$PEERBOT_DATABASE_URL" | sed -n 's/.*:\/\/\([^:]*\):.*/\1/p')
-    PG_PASSWORD=$(echo "$PEERBOT_DATABASE_URL" | sed -n 's/.*:\/\/[^:]*:\([^@]*\)@.*/\1/p')
-    
-    if [[ -n "$PG_USERNAME" && -n "$PG_PASSWORD" ]]; then
-        # Update ANTHROPIC_API_KEY with the actual credentials
-        export ANTHROPIC_API_KEY="${PG_USERNAME}:${PG_PASSWORD}"
-        echo "✅ Configured proxy authentication for user: $PG_USERNAME"
-    else
-        echo "⚠️ Warning: Could not extract PostgreSQL credentials from DATABASE_URL"
-    fi
+# Check if Anthropic proxy authentication is configured
+if [[ -n "${ANTHROPIC_API_KEY:-}" && -n "${ANTHROPIC_BASE_URL:-}" ]]; then
+    echo "🔐 Anthropic proxy authentication is configured"
+    # Extract just the username for logging (don't log the password)
+    AUTH_USER=$(echo "$ANTHROPIC_API_KEY" | cut -d: -f1)
+    echo "✅ Configured proxy authentication for user: $AUTH_USER"
+elif [[ -n "${ANTHROPIC_BASE_URL:-}" ]]; then
+    echo "⚠️ Warning: ANTHROPIC_BASE_URL is set but ANTHROPIC_API_KEY is not configured"
 fi
 
 # Display final status
