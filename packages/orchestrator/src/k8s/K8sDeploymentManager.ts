@@ -173,8 +173,8 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
     messageData?: any,
     userEnvVars: Record<string, string> = {}
   ): Promise<void> {
-    // Ensure the thread has a persistent volume for data persistence across pod restarts
-    await this.ensurePersistentVolume(deploymentName, userId);
+    // Skip per-thread PVC creation - use shared PVC instead
+    // await this.ensurePersistentVolume(deploymentName, userId);
 
     // Get environment variables before creating the deployment spec
     const envVars = this.generateEnvironmentVariables(
@@ -328,10 +328,8 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
               {
                 name: "workspace",
                 persistentVolumeClaim: {
-                  claimName: `peerbot-thread-workspace-${deploymentName
-                    .replace("peerbot-worker-", "")
-                    .replace(/[^a-zA-Z0-9]/g, "-")
-                    .toLowerCase()}`,
+                  // Use shared PVC for all workers instead of per-thread PVCs
+                  claimName: "peerbot-worker-pvc",
                 },
               },
             ],
