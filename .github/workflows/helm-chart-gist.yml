@@ -48,7 +48,10 @@ jobs:
           helm package charts/peerbot --destination helm-repo/
           
           # Generate repository index
-          helm repo index helm-repo/ --url https://gist.githubusercontent.com/${{ github.repository_owner }}/${{ secrets.HELM_GIST_ID }}/raw/
+          # Get chart version for URL
+          CHART_VERSION=$(grep '^version:' charts/peerbot/Chart.yaml | awk '{print $2}')
+          # Generate index with GitHub releases URL for chart packages
+          helm repo index helm-repo/ --url https://github.com/${{ github.repository }}/releases/download/helm-v${CHART_VERSION}/
 
       - name: Get current Gist content
         id: get-gist
@@ -76,16 +79,31 @@ jobs:
           INDEX_CONTENT=$(cat helm-repo/index.yaml | jq -Rs .)
           jq --arg content "$INDEX_CONTENT" '.["index.yaml"] = {"content": $content}' gist-files.json > temp.json && mv temp.json gist-files.json
           
-          # Add new chart packages
-          for chart in helm-repo/*.tgz; do
-            if [ -f "$chart" ]; then
-              filename=$(basename "$chart")
-              echo "Adding chart package: $filename"
-              # For binary files, we need to base64 encode them
-              CHART_CONTENT=$(base64 < "$chart" | tr -d '\n')
-              jq --arg filename "$filename" --arg content "$CHART_CONTENT" '.[$filename] = {"content": $content, "encoding": "base64"}' gist-files.json > temp.json && mv temp.json gist-files.json
-            fi
-          done
+          # Add artifacthub-repo.yml if it exists
+          if [ -f "artifacthub-repo.yml" ]; then
+            ARTIFACTHUB_CONTENT=$(cat artifacthub-repo.yml | jq -Rs .)
+            jq --arg content "$ARTIFACTHUB_CONTENT" '.["artifacthub-repo.yml"] = {"content": $content}' gist-files.json > temp.json && mv temp.json gist-files.json
+          fi
+          
+          # Add README with instructions
+          README_CONTENT=$(cat << 'EOF' | jq -Rs .)
+          # Peerbot Helm Repository
+          
+          This is the official Helm chart repository for Peerbot.
+          
+          ## Usage
+          
+          ```bash
+          helm repo add peerbot https://gist.githubusercontent.com/buremba/${{ secrets.HELM_GIST_ID }}/raw/
+          helm repo update
+          helm install my-peerbot peerbot/peerbot
+          ```
+          
+          ## Chart Packages
+          
+          The chart packages (.tgz files) are available as GitHub Release assets.
+          EOF
+          jq --arg content "$README_CONTENT" '.["README.md"] = {"content": $content}' gist-files.json > temp.json && mv temp.json gist-files.json
 
       - name: Create or Update Gist
         run: |
@@ -136,10 +154,49 @@ jobs:
               \"url\": \"$GIST_URL\"
             }" || echo "ArtifactHub notification failed, but continuing..."
 
+      - name: Create GitHub Release
+        if: success()
+        run: |
+          # Get chart version
+          CHART_VERSION=$(grep '^version:' charts/peerbot/Chart.yaml | awk '{print $2}')
+          RELEASE_TAG="helm-v${CHART_VERSION}"
+          
+          # Check if release already exists
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists, updating assets..."
+            # Delete existing chart asset if it exists
+            gh release delete-asset "$RELEASE_TAG" "peerbot-${CHART_VERSION}.tgz" --yes 2>/dev/null || true
+            # Upload new chart
+            gh release upload "$RELEASE_TAG" "helm-repo/peerbot-${CHART_VERSION}.tgz" --clobber
+          else
+            echo "Creating new release $RELEASE_TAG..."
+            gh release create "$RELEASE_TAG" \
+              --title "Helm Chart v${CHART_VERSION}" \
+              --notes "Helm chart for Peerbot v${CHART_VERSION}
+              
+              ## Installation
+              
+              \`\`\`bash
+              # Using Helm repository
+              helm repo add peerbot https://gist.githubusercontent.com/${{ github.repository_owner }}/${{ secrets.HELM_GIST_ID }}/raw/
+              helm repo update
+              helm install my-peerbot peerbot/peerbot
+              
+              # Or directly from this release
+              wget https://github.com/${{ github.repository }}/releases/download/$RELEASE_TAG/peerbot-${CHART_VERSION}.tgz
+              helm install my-peerbot ./peerbot-${CHART_VERSION}.tgz
+              \`\`\`" \
+              "helm-repo/peerbot-${CHART_VERSION}.tgz"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
       - name: Output Repository Information
         run: |
+          CHART_VERSION=$(grep '^version:' charts/peerbot/Chart.yaml | awk '{print $2}')
           echo "📦 Helm chart published successfully!"
           echo "🔗 Helm repository URL: https://gist.githubusercontent.com/${{ github.repository_owner }}/${{ secrets.HELM_GIST_ID }}/raw/"
+          echo "📦 Chart Package: https://github.com/${{ github.repository }}/releases/download/helm-v${CHART_VERSION}/peerbot-${CHART_VERSION}.tgz"
           echo ""
           echo "To use this repository:"
           echo "helm repo add peerbot https://gist.githubusercontent.com/${{ github.repository_owner }}/${{ secrets.HELM_GIST_ID }}/raw/"
