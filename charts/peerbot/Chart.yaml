@@ -25,11 +25,11 @@ annotations:
   artifacthub.io/containsSecurityUpdates: "false"
   artifacthub.io/images: |
     - name: peerbot-dispatcher
-      image: ghcr.io/buremba/peerbot-dispatcher:latest
+      image: buremba/peerbot-dispatcher:latest
     - name: peerbot-orchestrator  
-      image: ghcr.io/buremba/peerbot-orchestrator:latest
+      image: buremba/peerbot-orchestrator:latest
     - name: peerbot-worker
-      image: ghcr.io/buremba/peerbot-worker:latest
+      image: buremba/peerbot-worker:latest
   artifacthub.io/links: |
     - name: GitHub Repository
       url: https://github.com/buremba/peerbot
