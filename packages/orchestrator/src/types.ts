@@ -103,6 +103,10 @@ export interface SimpleDeployment {
             runAsNonRoot?: boolean;
             readOnlyRootFilesystem?: boolean;
           };
+          resources?: {
+            requests?: Record<string, string>;
+            limits?: Record<string, string>;
+          };
           volumeMounts?: Array<{
             name: string;
             mountPath: string;

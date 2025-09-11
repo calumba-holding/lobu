@@ -241,6 +241,16 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
                   runAsUser: 0,
                   runAsNonRoot: false,
                 },
+                resources: {
+                  requests: {
+                    cpu: "10m",
+                    memory: "32Mi",
+                  },
+                  limits: {
+                    cpu: "50m",
+                    memory: "64Mi",
+                  },
+                },
                 volumeMounts: [
                   {
                     name: "workspace",
