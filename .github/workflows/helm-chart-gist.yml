@@ -1,0 +1,146 @@
+name: Publish Helm Charts to Gist
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'charts/**'
+
+permissions:
+  contents: read
+
+jobs:
+  publish-helm-chart:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.14.4
+
+      - name: Add Helm repositories
+        run: |
+          helm repo add bitnami https://charts.bitnami.com/bitnami
+          helm repo update
+
+      - name: Create helm repository directory
+        run: |
+          mkdir -p helm-repo
+
+      - name: Package Helm Chart
+        run: |
+          # Update dependencies
+          helm dependency update charts/peerbot
+          
+          # Package the chart
+          helm package charts/peerbot --destination helm-repo/
+          
+          # Generate repository index
+          helm repo index helm-repo/ --url https://gist.githubusercontent.com/${{ github.repository_owner }}/${{ secrets.HELM_GIST_ID }}/raw/
+
+      - name: Get current Gist content
+        id: get-gist
+        run: |
+          # Try to get current gist content
+          curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/gists/${{ secrets.HELM_GIST_ID }}" > current-gist.json || echo "{}" > current-gist.json
+          
+          # Check if gist exists and extract current files
+          if jq -e '.files' current-gist.json > /dev/null; then
+            echo "gist-exists=true" >> $GITHUB_OUTPUT
+            # Extract current chart files (keep existing .tgz files)
+            jq -r '.files | to_entries[] | select(.key | endswith(".tgz")) | .key' current-gist.json > existing-charts.txt || touch existing-charts.txt
+          else
+            echo "gist-exists=false" >> $GITHUB_OUTPUT
+            touch existing-charts.txt
+          fi
+
+      - name: Prepare Gist update
+        run: |
+          # Create the files object for the gist
+          echo '{}' > gist-files.json
+          
+          # Add index.yaml
+          INDEX_CONTENT=$(cat helm-repo/index.yaml | jq -Rs .)
+          jq --arg content "$INDEX_CONTENT" '.["index.yaml"] = {"content": $content}' gist-files.json > temp.json && mv temp.json gist-files.json
+          
+          # Add new chart packages
+          for chart in helm-repo/*.tgz; do
+            if [ -f "$chart" ]; then
+              filename=$(basename "$chart")
+              echo "Adding chart package: $filename"
+              # For binary files, we need to base64 encode them
+              CHART_CONTENT=$(base64 < "$chart" | tr -d '\n')
+              jq --arg filename "$filename" --arg content "$CHART_CONTENT" '.[$filename] = {"content": $content, "encoding": "base64"}' gist-files.json > temp.json && mv temp.json gist-files.json
+            fi
+          done
+
+      - name: Create or Update Gist
+        run: |
+          if [ "${{ steps.get-gist.outputs.gist-exists }}" == "true" ]; then
+            # Update existing gist
+            curl -X PATCH \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/gists/${{ secrets.HELM_GIST_ID }}" \
+              -d "{
+                \"description\": \"Helm Chart Repository for ${{ github.repository }}\",
+                \"files\": $(cat gist-files.json)
+              }"
+          else
+            # Create new gist
+            RESPONSE=$(curl -X POST \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/gists" \
+              -d "{
+                \"description\": \"Helm Chart Repository for ${{ github.repository }}\",
+                \"public\": true,
+                \"files\": $(cat gist-files.json)
+              }")
+            
+            GIST_ID=$(echo "$RESPONSE" | jq -r '.id')
+            echo "Created new gist with ID: $GIST_ID"
+            echo "Please add this as HELM_GIST_ID secret: $GIST_ID"
+          fi
+
+      - name: Notify ArtifactHub
+        if: success()
+        run: |
+          # Prepare the request payload for ArtifactHub
+          GIST_URL="https://gist.githubusercontent.com/${{ github.repository_owner }}/${{ secrets.HELM_GIST_ID }}/raw/index.yaml"
+          
+          # Get the chart version from Chart.yaml
+          CHART_VERSION=$(grep '^version:' charts/peerbot/Chart.yaml | cut -d' ' -f2)
+          
+          # Notify ArtifactHub about the new chart version
+          curl -X POST \
+            -H "Content-Type: application/json" \
+            -H "X-API-KEY-ID: ${{ secrets.ARTIFACTHUB_API_KEY_ID }}" \
+            -H "X-API-KEY-SECRET: ${{ secrets.ARTIFACTHUB_API_KEY_SECRET }}" \
+            "https://artifacthub.io/api/v1/packages/helm/${{ github.repository_owner }}/peerbot/notify" \
+            -d "{
+              \"version\": \"$CHART_VERSION\",
+              \"url\": \"$GIST_URL\"
+            }" || echo "ArtifactHub notification failed, but continuing..."
+
+      - name: Output Repository Information
+        run: |
+          echo "📦 Helm chart published successfully!"
+          echo "🔗 Helm repository URL: https://gist.githubusercontent.com/${{ github.repository_owner }}/${{ secrets.HELM_GIST_ID }}/raw/"
+          echo ""
+          echo "To use this repository:"
+          echo "helm repo add peerbot https://gist.githubusercontent.com/${{ github.repository_owner }}/${{ secrets.HELM_GIST_ID }}/raw/"
+          echo "helm repo update"
+          echo "helm install my-peerbot peerbot/peerbot"

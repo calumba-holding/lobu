@@ -87,7 +87,7 @@ claude:
 worker:
   enabled: false  # Dynamic workers only
   image:
-    repository: ghcr.io/buremba/peerbot/claude-worker
+    repository: buremba/peerbot-worker
     pullPolicy: Always
     tag: latest
   resources:
@@ -119,7 +119,7 @@ worker:
 dispatcher:
   enabled: true
   image:
-    repository: ghcr.io/buremba/peerbot/claude-dispatcher
+    repository: buremba/peerbot-dispatcher
     pullPolicy: Always
     tag: latest
   resources:
@@ -144,7 +144,7 @@ dispatcher:
 orchestrator:
   enabled: true
   image:
-    repository: ghcr.io/buremba/peerbot/claude-orchestrator
+    repository: buremba/peerbot-orchestrator
     tag: latest
     pullPolicy: Always
   resources:
