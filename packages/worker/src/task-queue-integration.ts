@@ -16,13 +16,13 @@ interface ThreadResponsePayload {
   threadTs: string;
   userId: string;
   content?: string;
-  isDone: boolean;
   error?: string;
   timestamp: number;
   originalMessageTs?: string; // User's original message timestamp for reactions
   gitBranch?: string; // Current git branch for Edit button URLs
   botResponseTs?: string; // Bot's response message timestamp for updates
   claudeSessionId?: string; // Claude session ID for tracking bot messages per session
+  processedMessageIds?: string[]; // List of processed message IDs (signals completion when present)
 }
 
 export class QueueIntegration {
@@ -40,6 +40,7 @@ export class QueueIntegration {
   private deploymentName?: string;
   private workspaceManager?: any; // WorkspaceManager dependency
   private claudeSessionId?: string; // Claude session ID
+  private processedMessageIds?: string[]; // Processed message IDs to include on completion
 
   constructor(config: {
     databaseUrl: string;
@@ -343,7 +344,6 @@ export class QueueIntegration {
         threadTs: this.responseTs,
         userId: process.env.USER_ID || "unknown",
         content: content,
-        isDone: false, // Agent is still running
         timestamp: Date.now(),
         originalMessageTs: this.messageId, // User's original message for reactions - no fallback to avoid stuck values
         gitBranch: await this.getCurrentGitBranch(), // Current git branch for Edit button URLs
@@ -372,7 +372,12 @@ export class QueueIntegration {
     }
   }
 
-  // Reaction methods removed - dispatcher now handles reactions directly based on isDone status
+  // Reaction methods removed - dispatcher now handles reactions based on processedMessageIds
+
+  // Store processed message IDs for inclusion on completion
+  setProcessedMessages(list: string[]): void {
+    this.processedMessageIds = Array.from(new Set(list.filter(Boolean)));
+  }
 
   /**
    * Send typing indicator via queue
@@ -406,12 +411,12 @@ export class QueueIntegration {
         threadTs: this.responseTs,
         userId: process.env.USER_ID || "unknown",
         content: finalMessage,
-        isDone: true, // Agent is done
         timestamp: Date.now(),
         originalMessageTs: this.messageId, // User's original message for reactions - no fallback to avoid stuck values
         gitBranch: await this.getCurrentGitBranch(), // Current git branch for Edit button URLs
         botResponseTs: this.botResponseTs, // Bot's response message for updates
         claudeSessionId: this.claudeSessionId, // Claude session ID for tracking bot messages
+        processedMessageIds: this.processedMessageIds, // Signal completion with processed messages
       };
 
       const jobId = await this.pgBoss.send("thread_response", payload, {
@@ -478,7 +483,6 @@ export class QueueIntegration {
         threadTs: this.responseTs,
         userId: process.env.USER_ID || "unknown",
         error: detailedError,
-        isDone: false, // Don't mark as done when there's an error
         timestamp: Date.now(),
         originalMessageTs: this.messageId, // User's original message for reactions - no fallback to avoid stuck values
         gitBranch: await this.getCurrentGitBranch(), // Current git branch for Edit button URLs

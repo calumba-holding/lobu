@@ -480,26 +480,30 @@ export class SlackEventHandlers {
 
       this.activeSessions.set(sessionKey, threadSession);
 
-      // Add immediate acknowledgment reaction
-      try {
-        console.log(
-          `👀 REACTION CHANGE: Adding acknowledgment reaction 'eyes' to message ${context.messageTs} in channel ${context.channelId} (user: ${context.userId})`
-        );
-        await client.reactions.add({
-          channel: context.channelId,
-          timestamp: context.messageTs,
-          name: "eyes",
-        });
-        console.log(
-          `✅ REACTION ADDED: 'eyes' successfully added to message ${context.messageTs} - bot is processing request`
-        );
-        logger.info(`Added eyes reaction to message ${context.messageTs}`);
-      } catch (reactionError) {
-        console.log(
-          `❌ REACTION FAILED: Could not add 'eyes' reaction to message ${context.messageTs}:`,
-          reactionError
-        );
-        logger.warn("Failed to add eyes reaction:", reactionError);
+      // Add immediate acknowledgment reaction based on DM vs channel rules
+      const isDM = context.channelId?.startsWith('D');
+      const isRootMessage = !context.threadTs; // Only root in channels
+      if (isDM || isRootMessage) {
+        try {
+          console.log(
+            `👀 REACTION CHANGE: Adding acknowledgment reaction 'eyes' to message ${context.messageTs} in channel ${context.channelId} (user: ${context.userId})`
+          );
+          await client.reactions.add({
+            channel: context.channelId,
+            timestamp: context.messageTs,
+            name: "eyes",
+          });
+          console.log(
+            `✅ REACTION ADDED: 'eyes' successfully added to message ${context.messageTs} - bot is processing request`
+          );
+          logger.info(`Added eyes reaction to message ${context.messageTs}`);
+        } catch (reactionError) {
+          console.log(
+            `❌ REACTION FAILED: Could not add 'eyes' reaction to message ${context.messageTs}:`,
+            reactionError
+          );
+          logger.warn("Failed to add eyes reaction:", reactionError);
+        }
       }
 
       // Determine if this is a new conversation or continuation

@@ -453,7 +453,7 @@ export class WorkerQueueConsumer {
     if (messages.length === 1) {
       const singleMessage = messages[0];
       if (singleMessage) {
-        await this.processSingleMessage(singleMessage);
+        await this.processSingleMessage(singleMessage, [singleMessage.payload.messageId]);
       }
       return;
     }
@@ -482,13 +482,14 @@ export class WorkerQueueConsumer {
       },
     };
 
-    await this.processSingleMessage(batchedMessage);
+    const processedIds = messages.map((m) => m.payload.messageId).filter(Boolean);
+    await this.processSingleMessage(batchedMessage, processedIds);
   }
 
   /**
    * Process a single message
    */
-  private async processSingleMessage(message: QueuedMessage): Promise<void> {
+  private async processSingleMessage(message: QueuedMessage, processedIds?: string[]): Promise<void> {
     try {
       // Set environment variables
       if (!process.env.USER_ID) {
@@ -522,6 +523,12 @@ export class WorkerQueueConsumer {
 
       // Create and execute worker
       this.currentWorker = new ClaudeWorker(workerConfig);
+      // Provide the list of processed message IDs for final completion signaling
+      if (processedIds && processedIds.length > 0) {
+        this.currentWorker.queueIntegration.setProcessedMessages(processedIds);
+      } else if (message?.payload?.messageId) {
+        this.currentWorker.queueIntegration.setProcessedMessages([message.payload.messageId]);
+      }
       await this.currentWorker.execute();
       
       logger.info(

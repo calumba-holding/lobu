@@ -434,7 +434,7 @@ interface ThreadResponsePayload {
   threadTs: string;
   userId: string;
   content?: string;
-  isDone: boolean;
+  processedMessageIds?: string[];
   reaction?: string;
   error?: string;
   timestamp: number;
@@ -572,37 +572,40 @@ export class ThreadResponseConsumer {
       // Use originalMessageTs for reactions (the actual user message timestamp)
       const reactionTimestamp = data.originalMessageTs || data.messageId;
 
-      // Handle reaction transitions
-      if (reactionTimestamp) {
-        if (isFirstResponse && !data.isDone && !data.error) {
-          // First pickup by worker: Replace eyes with gear
+      // Handle reaction transitions without gear. Completion is signaled by processedMessageIds presence.
+      const isDM = data.channelId?.startsWith('D');
+      if (data.error && reactionTimestamp) {
+        // Error: change eyes to x on the relevant message
+        await this.updateReaction(
+          data.channelId,
+          reactionTimestamp,
+          "eyes",
+          "x"
+        );
+      }
+
+      // On completion, processedMessageIds will be provided
+      if (Array.isArray(data.processedMessageIds) && data.processedMessageIds.length > 0) {
+        if (isDM) {
+          // Remove eyes from each processed user message (no checkmarks in DMs)
+          for (const ts of data.processedMessageIds) {
+            try {
+              await this.slackClient.reactions.remove({
+                channel: data.channelId,
+                timestamp: ts,
+                name: "eyes",
+              });
+            } catch (_e) {
+              // ignore if reaction not present
+            }
+          }
+        } else {
+          // Channel: only the root thread message should get the checkmark
           await this.updateReaction(
             data.channelId,
-            reactionTimestamp,
+            data.threadTs,
             "eyes",
-            "gear"
-          );
-        } else if (data.isDone) {
-          // Processing completed: Replace gear with checkmark
-          await this.updateReaction(
-            data.channelId,
-            reactionTimestamp,
-            "gear",
             "white_check_mark"
-          );
-        } else if (data.error) {
-          // Error occurred: Replace current reaction with error
-          await this.updateReaction(
-            data.channelId,
-            reactionTimestamp,
-            "gear",
-            "x"
-          );
-          await this.updateReaction(
-            data.channelId,
-            reactionTimestamp,
-            "eyes",
-            "x"
           );
         }
       }
@@ -645,14 +648,14 @@ export class ThreadResponseConsumer {
         await this.handleError(data, isFirstResponse, botMessageTs);
       }
 
-      // Log completion but DON'T clear session
+      // Log completion when processedMessageIds is present but DON'T clear session
       // Keep the session active so any late-arriving messages still update the same bot message
-      if (data.isDone) {
+      if (Array.isArray(data.processedMessageIds) && data.processedMessageIds.length > 0) {
         logger.info(
           `Thread processing completed for message ${data.messageId}`
         );
         // Don't clear the session here - it will be cleared when a new user message arrives
-        // This prevents duplicate bot messages if the worker sends more messages after isDone
+        // This prevents duplicate bot messages if the worker sends more messages after completion
       }
     } catch (error: any) {
       // Check if it's a validation error that shouldn't be retried
