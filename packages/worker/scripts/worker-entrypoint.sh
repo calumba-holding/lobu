@@ -69,10 +69,16 @@ fi
 echo "📁 Setting up workspace directory..."
 WORKSPACE_DIR="/workspace"
 mkdir -p "$WORKSPACE_DIR"
-cd "$WORKSPACE_DIR"
 
-# Set proper permissions for workspace
-chmod 755 "$WORKSPACE_DIR" 2>/dev/null || echo "⚠️  Could not change workspace permissions (this is normal in Kubernetes)"
+# Fix permissions for bind-mounted workspace (Docker Compose)
+# This is needed because bind mounts inherit host permissions
+if [ -d "$WORKSPACE_DIR" ] && [ "$(stat -c %U "$WORKSPACE_DIR")" = "root" ]; then
+    echo "🔧 Fixing workspace permissions (bind mount detected)..."
+    sudo chown -R claude:claude "$WORKSPACE_DIR" 2>/dev/null || echo "⚠️  Could not change workspace ownership"
+    chmod 755 "$WORKSPACE_DIR" 2>/dev/null || echo "⚠️  Could not change workspace permissions"
+fi
+
+cd "$WORKSPACE_DIR"
 
 echo "✅ Workspace directory ready: $WORKSPACE_DIR"
 

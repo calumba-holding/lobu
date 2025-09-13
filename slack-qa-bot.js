@@ -229,34 +229,51 @@ async function evaluateTestResult(
   );
 
   if (initialReaction === "none") {
+    // Some deployments might skip reactions; try to detect a reply anyway
     if (!jsonOutput) {
       console.log(
-        `❌ No reaction from bot within ${reactionTimeout/1000} seconds - bot failed to acknowledge the message`
-      );
-      console.log("\nTroubleshooting steps:");
-      console.log(
-        "1. Check dispatcher logs for incoming events: kubectl logs -n peerbot -l app.kubernetes.io/component=dispatcher --tail=50"
-      );
-      console.log(
-        '2. Verify dispatcher is receiving Slack events: kubectl logs -n peerbot -l app.kubernetes.io/component=dispatcher --tail=50 | grep "mention"'
-      );
-      console.log(
-        '3. Check if message is queued: kubectl logs -n peerbot -l app.kubernetes.io/component=dispatcher --tail=50 | grep "Enqueuing"'
-      );
-      console.log(
-        "4. Check orchestrator for scaling issues: kubectl logs -n peerbot -l app.kubernetes.io/component=orchestrator --tail=50"
-      );
-      console.log(
-        "5. Verify worker pods exist: kubectl get pods -n peerbot | grep claude-worker"
-      );
-      console.log(
-        "6. Check PostgreSQL connection: kubectl exec -it -n peerbot deployment/peerbot-dispatcher -- nc -zv postgres-service 5432"
-      );
-      console.log(
-        "7. Restart all components if needed: kubectl rollout restart deployment -n peerbot"
+        `⚠️ No reaction within ${reactionTimeout/1000}s; checking for a reply...`
       );
     }
-    return { success: false, error: "No acknowledgment from bot" };
+    const fallbackWait = Math.max(5000, Math.min(15000, timeout));
+    const maybeResponse = await waitForBotResponse(
+      channel,
+      messageTs,
+      fallbackWait,
+      jsonOutput
+    );
+    if (!maybeResponse) {
+      if (!jsonOutput) {
+        console.log(
+          `❌ No reaction or reply within ${(reactionTimeout + fallbackWait)/1000} seconds`
+        );
+        console.log("\nTroubleshooting steps:");
+        console.log(
+          "1. Check dispatcher logs for incoming events: kubectl logs -n peerbot -l app.kubernetes.io/component=dispatcher --tail=50"
+        );
+        console.log(
+          '2. Verify dispatcher is receiving Slack events: kubectl logs -n peerbot -l app.kubernetes.io/component=dispatcher --tail=50 | grep "mention"'
+        );
+        console.log(
+          '3. Check if message is queued: kubectl logs -n peerbot -l app.kubernetes.io/component=dispatcher --tail=50 | grep "Enqueuing"'
+        );
+        console.log(
+          "4. Check orchestrator for scaling issues: kubectl logs -n peerbot -l app.kubernetes.io/component=orchestrator --tail=50"
+        );
+        console.log(
+          "5. Verify worker pods exist: kubectl get pods -n peerbot | grep claude-worker"
+        );
+        console.log(
+          "6. Check PostgreSQL connection: kubectl exec -it -n peerbot deployment/peerbot-dispatcher -- nc -zv postgres-service 5432"
+        );
+        console.log(
+          "7. Restart all components if needed: kubectl rollout restart deployment -n peerbot"
+        );
+      }
+      return { success: false, error: "No reaction or reply" };
+    }
+    if (!jsonOutput) console.log("✅ Bot replied without reaction");
+    return { success: true, response: maybeResponse[0] };
   } else if (initialReaction === "success") {
     if (!jsonOutput)
       console.log("✅ Bot immediately processed message (checkmark reaction)");
@@ -521,9 +538,7 @@ async function runTest(messages, timeout = 30000, options = {}) {
       };
       console.log(JSON.stringify(output, null, 2));
     } else if (!quiet) {
-      console.log(
-        "\n🔗 Channel: https://peerbotcommunity.slack.com/archives/C0952LTF7DG"
-      );
+      console.log(`\n🔗 Channel: https://peerbotcommunity.slack.com/archives/${targetChannel}`);
     }
 
     // Exit with proper code

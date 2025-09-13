@@ -354,10 +354,5 @@ function extractActionSelections(view: any): string {
     }
   }
 
-  // If no specific selections found, provide a generic indication
-  if (selections.length === 0) {
-    selections.push("User made a selection from the available options");
-  }
-
   return selections.join("\n");
 }

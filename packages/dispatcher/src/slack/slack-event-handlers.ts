@@ -754,7 +754,22 @@ export class SlackEventHandlers {
       }
 
       const prData = JSON.parse(action.value);
-      const { prompt } = prData;
+      const { prompt, repo, branch } = prData;
+      
+      // Get the actual thread_ts from the message (messageTs is where button was clicked)
+      // If message has thread_ts, use it; otherwise this IS the thread root
+      const actualThreadTs = (body as any).message?.thread_ts || messageTs;
+      
+      // Create a more explicit instruction for PR creation
+      const enhancedPrompt = `${prompt || "Create a pull request"}
+
+IMPORTANT: Execute the following immediately:
+1. Run 'gh pr create' command NOW with a descriptive title and body
+2. Return the actual PR URL in your response
+3. Do NOT show forms or buttons for creating the PR - create it directly
+
+Repository: ${repo}
+Branch: ${branch}`;
       
       // Create a context for the user request
       const context: SlackContext = {
@@ -763,16 +778,16 @@ export class SlackEventHandlers {
         userDisplayName: "Unknown User", // Will be fetched if needed
         teamId: body.team?.id || "",
         messageTs,
-        threadTs: messageTs,
-        text: prompt || "Cleanup and create a pull request for me",
+        threadTs: actualThreadTs,
+        text: enhancedPrompt,
       };
       
       // Post the PR request as a user message to show intent
-      const formattedInput = prompt || "Cleanup and create a pull request for me";
+      const formattedInput = `Creating pull request for branch: ${branch}`;
       
       const inputMessage = await client.chat.postMessage({
         channel: channelId,
-        thread_ts: messageTs,
+        thread_ts: actualThreadTs,
         text: formattedInput,
         blocks: [
           {

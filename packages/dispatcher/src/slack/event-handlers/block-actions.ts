@@ -39,9 +39,13 @@ export async function handleExecutableCodeBlock(
     // Post the code execution request as a user message
     const formattedInput = `> 🚀 *Executed "${buttonText}" button*\n\n\`\`\`${language}\n${codeContent}\n\`\`\``;
 
+    // Get the actual thread_ts from the message (messageTs is where button was clicked)
+    // If message has thread_ts, use it; otherwise this IS the thread root
+    const actualThreadTs = (body as any).message?.thread_ts || messageTs;
+    
     const inputMessage = await client.chat.postMessage({
       channel: channelId,
-      thread_ts: messageTs,
+      thread_ts: actualThreadTs,
       text: formattedInput,
       blocks: [
         {
@@ -69,7 +73,7 @@ export async function handleExecutableCodeBlock(
       userDisplayName: "Unknown User", // TODO: Get from user info
       teamId: "", // TODO: Get from body
       messageTs: inputMessage.ts as string,
-      threadTs: messageTs,
+      threadTs: actualThreadTs,
       text: formattedInput,
     };
 
@@ -115,6 +119,10 @@ export async function handleBlockkitForm(
       throw new Error("No blocks found in form data");
     }
 
+    // Get the actual thread_ts from the message (messageTs is where button was clicked)
+    // If message has thread_ts, use it; otherwise this IS the thread root
+    const actualThreadTs = (body as any).message?.thread_ts || messageTs;
+    
     // Create modal with the blockkit form
     await client.views.open({
       trigger_id: body.trigger_id,
@@ -123,7 +131,7 @@ export async function handleBlockkitForm(
         callback_id: "blockkit_form_modal",
         private_metadata: JSON.stringify({
           channel_id: channelId,
-          thread_ts: messageTs,
+          thread_ts: actualThreadTs,
           action_id: actionId,
           button_text: action.text?.text || "Form",
         }),

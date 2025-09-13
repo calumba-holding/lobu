@@ -1,6 +1,5 @@
 #!/usr/bin/env bun
 
-import { execSync } from "node:child_process";
 import PgBoss from "pg-boss";
 import logger from "./logger";
 
@@ -20,6 +19,8 @@ interface ThreadResponsePayload {
   timestamp: number;
   originalMessageTs?: string; // User's original message timestamp for reactions
   gitBranch?: string; // Current git branch for Edit button URLs
+  hasGitChanges?: boolean; // Whether there are uncommitted/unpushed changes
+  pullRequestUrl?: string; // URL of existing PR if any
   botResponseTs?: string; // Bot's response message timestamp for updates
   claudeSessionId?: string; // Claude session ID for tracking bot messages per session
   processedMessageIds?: string[]; // List of processed message IDs (signals completion when present)
@@ -237,90 +238,110 @@ export class QueueIntegration {
   /**
    * Get the current git branch name only if the session has made changes
    */
-  private async getCurrentGitBranch(): Promise<string | undefined> {
-    try {
-      // If no workspace manager, fall back to old behavior
-      if (!this.workspaceManager) {
-        return this.getFallbackGitBranch();
-      }
-
-      // Check repository status
-      const status = await this.workspaceManager.getRepositoryStatus();
-
-      // Show Edit button if either:
-      // 1. There are pending changes, OR
-      // 2. We're on a session branch (claude/*) which means work was done
-      const isSessionBranch = status.branch?.startsWith("claude/");
-
-      if (status.hasChanges || isSessionBranch) {
-        return status.branch;
-      } else {
-        logger.debug(
-          `Git branch ${status.branch} has no changes and is not a session branch, skipping Edit button`
-        );
-        return undefined;
-      }
-    } catch (error) {
-      logger.warn(
-        "Could not get git branch status from workspace manager:",
-        error
-      );
-      return this.getFallbackGitBranch();
-    }
-  }
-
   /**
-   * Fallback method for getting git branch (old behavior)
+   * Get comprehensive git status including changes and PR status
    */
-  private getFallbackGitBranch(): string | undefined {
+  private async getGitStatus(): Promise<{
+    branch?: string;
+    hasGitChanges: boolean;
+    pullRequestUrl?: string;
+  }> {
     try {
-      // Use the workspace directory if USER_ID is available, otherwise fall back to process.cwd()
-      const workspaceDir = process.env.USER_ID
-        ? `/workspace/${process.env.USER_ID}`
-        : process.cwd();
-
-      const branch = execSync("git branch --show-current", {
-        encoding: "utf-8",
-        cwd: workspaceDir,
-      }).trim();
-
-      if (!branch) {
-        return undefined;
+      logger.info("getGitStatus called - checking repository status");
+      
+      if (!this.workspaceManager) {
+        logger.warn("No workspace manager available for git status");
+        return { hasGitChanges: false };
       }
 
-      // Show Edit button if either:
-      // 1. The branch has commits, OR
-      // 2. It's a session branch (claude/*) which indicates work was done
-      const isSessionBranch = branch.startsWith("claude/");
-
-      try {
-        execSync("git log -1 --oneline", {
-          encoding: "utf-8",
-          cwd: workspaceDir,
-          stdio: "pipe", // Suppress output
-        });
-
-        // Branch has commits
-        logger.info(
-          `Git branch: ${branch} (hasCommits: true, isSessionBranch: ${isSessionBranch})`
-        );
-        return branch;
-      } catch (_logError) {
-        // No commits yet, but still show Edit button for session branches
-        if (isSessionBranch) {
-          return branch;
-        } else {
-          logger.debug(
-            `Git branch ${branch} has no commits and is not a session branch, skipping Edit button`
-          );
-          return undefined;
+      const status = await this.workspaceManager.getRepositoryStatus();
+      const branch = status.branch;
+      logger.info(`Git branch detected: ${branch}, has changes: ${status.hasChanges}`);
+      
+      // Check for PR using gh CLI
+      let pullRequestUrl: string | undefined;
+      logger.info(`Branch value: "${branch}", Type: ${typeof branch}, starts with claude/: ${branch?.startsWith("claude/")}`);
+      
+      if (branch && branch.startsWith("claude/")) {
+        logger.info(`Entering PR detection block for branch: ${branch}`);
+        try {
+          const { execSync } = require("child_process");
+          const workingDir = this.workspaceManager.getCurrentWorkingDirectory();
+          logger.info(`About to check for PR in directory: ${workingDir}, branch: ${branch}`);
+          
+          // First check if gh CLI is authenticated
+          try {
+            logger.info("Checking GitHub CLI authentication...");
+            execSync("gh auth status", { 
+              cwd: workingDir, 
+              stdio: 'pipe',
+              timeout: 3000 // 3 second timeout
+            });
+            logger.info("GitHub CLI is authenticated");
+          } catch (authError: any) {
+            // If GH_TOKEN is set, authentication is available even if gh auth status fails
+            if (process.env.GH_TOKEN || process.env.GITHUB_TOKEN) {
+              logger.info("Using GH_TOKEN/GITHUB_TOKEN environment variable for authentication");
+            } else {
+              logger.warn("GitHub CLI not authenticated and no token found, skipping PR detection");
+              return { branch, hasGitChanges: status.hasChanges, pullRequestUrl: undefined };
+            }
+          }
+          
+          // Try to get PR information
+          let prInfo: string | undefined;
+          try {
+            logger.info("Checking for existing PR with gh pr view...");
+            // Use gh pr list to check if a PR exists for this branch first
+            const prList = execSync(`gh pr list --head "${branch}" --json url,state --limit 1`, {
+              cwd: workingDir,
+              encoding: "utf8",
+              stdio: 'pipe',
+              timeout: 5000 // 5 second timeout
+            });
+            
+            logger.info(`PR list result: ${prList}`);
+            
+            const prs = JSON.parse(prList || "[]");
+            if (prs.length > 0) {
+              prInfo = JSON.stringify(prs[0]);
+              logger.info(`Found PR: ${prInfo}`);
+            } else {
+              logger.info(`No PR exists for branch ${branch}`);
+              return { branch, hasGitChanges: status.hasChanges, pullRequestUrl: undefined };
+            }
+          } catch (prError: any) {
+            logger.warn(`Error checking PR: ${prError.message}`);
+            return { branch, hasGitChanges: status.hasChanges, pullRequestUrl: undefined };
+          }
+          
+          const parsed = JSON.parse(prInfo);
+          if (parsed.url && parsed.state === "OPEN") {
+            pullRequestUrl = parsed.url;
+            logger.info(`Found existing PR for branch ${branch}: ${pullRequestUrl}`);
+          } else {
+            logger.debug(`PR exists but not open. State: ${parsed.state}`);
+          }
+        } catch (error: any) {
+          // Unexpected error
+          logger.error(`Unexpected error checking PR for branch ${branch}:`, error.message);
         }
+      } else {
+        logger.info(`Skipping PR detection: branch="${branch}" doesn't start with "claude/" or is undefined`);
       }
+
+      return {
+        branch,
+        hasGitChanges: status.hasChanges,
+        pullRequestUrl,
+      };
     } catch (error) {
-      logger.warn("Could not get current git branch:", error);
-      return undefined;
+      logger.warn("Failed to get git status:", error);
+      return { hasGitChanges: false };
     }
   }
+
+
 
   /**
    * Perform the actual queue update
@@ -338,6 +359,9 @@ export class QueueIntegration {
         content = "✅ Task completed";
       }
 
+      // Get git status with PR info
+      const gitStatus = await this.getGitStatus();
+
       const payload: ThreadResponsePayload = {
         messageId: this.messageId,
         channelId: this.responseChannel,
@@ -346,7 +370,9 @@ export class QueueIntegration {
         content: content,
         timestamp: Date.now(),
         originalMessageTs: this.messageId, // User's original message for reactions - no fallback to avoid stuck values
-        gitBranch: await this.getCurrentGitBranch(), // Current git branch for Edit button URLs
+        gitBranch: gitStatus.branch, // Current git branch
+        hasGitChanges: gitStatus.hasGitChanges, // Whether there are uncommitted/unpushed changes
+        pullRequestUrl: gitStatus.pullRequestUrl, // URL of existing PR if any
         botResponseTs: this.botResponseTs, // Bot's response message for updates
         claudeSessionId: this.claudeSessionId, // Claude session ID for tracking bot messages
       };
@@ -405,6 +431,9 @@ export class QueueIntegration {
     }
 
     try {
+      // Get git status with PR info
+      const gitStatus = await this.getGitStatus();
+
       const payload: ThreadResponsePayload = {
         messageId: this.messageId,
         channelId: this.responseChannel,
@@ -413,7 +442,9 @@ export class QueueIntegration {
         content: finalMessage,
         timestamp: Date.now(),
         originalMessageTs: this.messageId, // User's original message for reactions - no fallback to avoid stuck values
-        gitBranch: await this.getCurrentGitBranch(), // Current git branch for Edit button URLs
+        gitBranch: gitStatus.branch, // Current git branch
+        hasGitChanges: gitStatus.hasGitChanges, // Whether there are uncommitted/unpushed changes
+        pullRequestUrl: gitStatus.pullRequestUrl, // URL of existing PR if any
         botResponseTs: this.botResponseTs, // Bot's response message for updates
         claudeSessionId: this.claudeSessionId, // Claude session ID for tracking bot messages
         processedMessageIds: this.processedMessageIds, // Signal completion with processed messages
@@ -477,6 +508,9 @@ export class QueueIntegration {
           "\n\n💡 This appears to be a timeout error. The operation may need more time or there could be a network issue.";
       }
 
+      // Get git status with PR info
+      const gitStatus = await this.getGitStatus();
+
       const payload: ThreadResponsePayload = {
         messageId: this.messageId,
         channelId: this.responseChannel,
@@ -485,7 +519,9 @@ export class QueueIntegration {
         error: detailedError,
         timestamp: Date.now(),
         originalMessageTs: this.messageId, // User's original message for reactions - no fallback to avoid stuck values
-        gitBranch: await this.getCurrentGitBranch(), // Current git branch for Edit button URLs
+        gitBranch: gitStatus.branch, // Current git branch
+        hasGitChanges: gitStatus.hasGitChanges, // Whether there are uncommitted/unpushed changes
+        pullRequestUrl: gitStatus.pullRequestUrl, // URL of existing PR if any
         botResponseTs: this.botResponseTs, // Bot's response message for updates
         claudeSessionId: this.claudeSessionId, // Claude session ID for tracking bot messages
       };

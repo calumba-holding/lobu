@@ -50,23 +50,23 @@ function processMarkdownAndBlockkit(content: string): {
         console.log(
           `[DEBUG] Found action block - language: ${language}, action: ${metadata.action}, show: ${metadata.show}`
         );
-        
-        if (metadata.show === false) {
-          console.log(
-            `[DEBUG] Skipping blockkit with show:false - action: ${metadata.action}`
-          );
-          processedContent = processedContent.replace(fullMatch, "");
-          continue;
-        }
 
         if (language === "blockkit") {
+          // Always hide the code block from the message for blockkit actions
+          processedContent = processedContent.replace(fullMatch, "");
+          
+          // Skip entirely if show: false
+          if (metadata.show === false) {
+            console.log(
+              `[DEBUG] Skipping blockkit with show:false - action: ${metadata.action}`
+            );
+            continue;
+          }
+          
           const parsed = codeContent
             ? JSON.parse(codeContent.trim())
             : { blocks: [] };
           const buttonValue = JSON.stringify({ blocks: parsed.blocks || [parsed] });
-          
-          // Always hide the code block from the message for blockkit
-          processedContent = processedContent.replace(fullMatch, "");
           
           // Skip the button entirely if value exceeds 2000 chars (Slack limit)
           if (buttonValue.length > 2000) {
@@ -91,16 +91,26 @@ function processMarkdownAndBlockkit(content: string): {
             `[DEBUG] Added blockkit button - action: ${metadata.action}, actionId: ${actionId}`
           );
         } else {
+          // For non-blockkit actions (bash, python, etc.)
+          // Hide the code block unless show: true
+          if (metadata.show !== true) {
+            processedContent = processedContent.replace(fullMatch, "");
+          }
+          
+          // Skip entirely if show: false (no button)
+          if (metadata.show === false) {
+            console.log(
+              `[DEBUG] Skipping ${language} action with show:false - action: ${metadata.action}`
+            );
+            continue;
+          }
+          
           if (codeContent) {
             // Skip the button entirely if value exceeds 2000 chars (Slack limit)
             if (codeContent.length > 2000) {
               console.log(
                 `[DEBUG] Skipping ${language} button - exceeds 2000 char limit (${codeContent.length} chars), action: ${metadata.action}`
               );
-              // Still hide the code block if show:false
-              if (metadata.show === false) {
-                processedContent = processedContent.replace(fullMatch, "");
-              }
               continue;
             }
             
@@ -119,9 +129,6 @@ function processMarkdownAndBlockkit(content: string): {
               `[DEBUG] Added ${language} button - action: ${metadata.action}, actionId: ${language}_${actionId}`
             );
           }
-          if (metadata.show === false) {
-            processedContent = processedContent.replace(fullMatch, "");
-          }
         }
       }
 
@@ -138,13 +145,43 @@ function processMarkdownAndBlockkit(content: string): {
   const blocks: any[] = [];
 
   if (text) {
-    blocks.push({
-      type: "section",
-      text: {
-        type: "mrkdwn",
-        text: text,
-      },
-    });
+    // Slack has a 3000 character limit for text in section blocks
+    const MAX_TEXT_LENGTH = 3000;
+    
+    if (text.length <= MAX_TEXT_LENGTH) {
+      blocks.push({
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: text,
+        },
+      });
+    } else {
+      // Split long text into multiple blocks
+      let remainingText = text;
+      while (remainingText.length > 0) {
+        // Take up to MAX_TEXT_LENGTH characters, but try to break at a newline if possible
+        let chunk = remainingText.substring(0, MAX_TEXT_LENGTH);
+        
+        // If we're not at the end and we're cutting mid-text, try to find a better break point
+        if (remainingText.length > MAX_TEXT_LENGTH) {
+          const lastNewline = chunk.lastIndexOf('\n');
+          if (lastNewline > MAX_TEXT_LENGTH * 0.8) { // If there's a newline in the last 20% of the chunk
+            chunk = chunk.substring(0, lastNewline);
+          }
+        }
+        
+        blocks.push({
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: chunk,
+          },
+        });
+        
+        remainingText = remainingText.substring(chunk.length).trim();
+      }
+    }
   }
 
   if (actionButtons.length > 0) {
@@ -328,18 +365,32 @@ export function convertMarkdownToSlack(content: string): string {
 async function generateGitHubActionButtons(
   userId: string,
   gitBranch: string | undefined,
+  hasGitChanges: boolean | undefined,
+  pullRequestUrl: string | undefined,
   userMappings: Map<string, string>,
   repoManager: GitHubRepositoryManager,
   slackClient?: any
 ): Promise<any[] | undefined> {
   try {
     logger.debug(
-      `Generating GitHub action buttons for user ${userId}, gitBranch: ${gitBranch}`
+      `Generating GitHub action buttons for user ${userId}, gitBranch: ${gitBranch}, hasGitChanges: ${hasGitChanges}, pullRequestUrl: ${pullRequestUrl}`
     );
 
-    // If no git branch provided, don't show Edit button
+    // If no git branch provided, don't show buttons
     if (!gitBranch) {
-      logger.debug(`No git branch provided, skipping Edit button`);
+      logger.debug(`No git branch provided, skipping GitHub buttons`);
+      return undefined;
+    }
+
+    // Check if we're on a session branch (indicates work has been done)
+    const isSessionBranch = gitBranch.startsWith("claude/");
+
+    // Show buttons if:
+    // 1. There are uncommitted changes, OR
+    // 2. An existing PR exists, OR
+    // 3. We're on a session branch (even if all changes are committed)
+    if (!hasGitChanges && !pullRequestUrl && !isSessionBranch) {
+      logger.debug(`No git changes, no PR, and not a session branch, skipping GitHub buttons`);
       return undefined;
     }
 
@@ -392,13 +443,27 @@ async function generateGitHubActionButtons(
     const repoUrl = repository.repositoryUrl;
     const repoPath = repoUrl.replace("https://github.com/", "");
 
-    logger.info(`Showing action buttons for branch: ${gitBranch}`);
+    logger.info(`Showing action buttons for branch: ${gitBranch}, PR exists: ${!!pullRequestUrl}`);
     
-    // Return action button elements instead of text links
-    return [
-      {
+    const buttons: any[] = [];
+    
+    // Show appropriate PR button based on whether PR exists
+    if (pullRequestUrl) {
+      // PR exists - show view button with green checkmark
+      buttons.push({
         type: "button",
-        text: { type: "plain_text", text: "🔀 Pull Request" },
+        text: { type: "plain_text", text: "✅ View PR" },
+        url: pullRequestUrl,
+        action_id: generateDeterministicActionId(
+          `view_pr_${repoPath}_${gitBranch}`,
+          "github_view_pr"
+        )
+      });
+    } else if (hasGitChanges || isSessionBranch) {
+      // No PR but has changes OR on a session branch - show create PR button
+      buttons.push({
+        type: "button",
+        text: { type: "plain_text", text: "🔀 Create PR" },
         action_id: generateDeterministicActionId(
           `pr_${repoPath}_${gitBranch}`,
           "github_pr"
@@ -407,19 +472,42 @@ async function generateGitHubActionButtons(
           action: "create_pr",
           repo: repoPath,
           branch: gitBranch,
-          prompt: "Cleanup and create a pull request for me"
+          prompt: "Commit changes and create a pull request"
         })
-      },
-      {
+      });
+    }
+    
+    // View Code button
+    if (hasGitChanges) {
+      // Has uncommitted changes - show action button to commit/push first
+      buttons.push({
         type: "button",
-        text: { type: "plain_text", text: "Code" },
-        url: `https://github.dev/${repoPath}/tree/${gitBranch}`,
+        text: { type: "plain_text", text: "📝 View Code" },
         action_id: generateDeterministicActionId(
           `code_${repoPath}_${gitBranch}`,
           "github_code"
+        ),
+        value: JSON.stringify({
+          action: "view_code",
+          repo: repoPath,
+          branch: gitBranch,
+          prompt: "Commit and push changes, then view code"
+        })
+      });
+    } else {
+      // No uncommitted changes - show direct link to view code
+      buttons.push({
+        type: "button",
+        text: { type: "plain_text", text: "View Code" },
+        url: `https://github.dev/${repoPath}/tree/${gitBranch}`,
+        action_id: generateDeterministicActionId(
+          `code_${repoPath}_${gitBranch}`,
+          "github_code_link"
         )
-      }
-    ];
+      });
+    }
+    
+    return buttons.length > 0 ? buttons : undefined;
   } catch (_error) {
     // Return undefined on error - this will result in no action buttons being added
     return undefined;
@@ -440,6 +528,8 @@ interface ThreadResponsePayload {
   timestamp: number;
   originalMessageTs?: string; // User's original message timestamp for reactions
   gitBranch?: string; // Current git branch for Edit button URLs
+  hasGitChanges?: boolean; // Whether there are uncommitted/unpushed changes
+  pullRequestUrl?: string; // URL of existing PR if any
   botResponseTs?: string; // Bot's response message timestamp for updates
   claudeSessionId?: string; // Claude session ID for tracking bot messages per session
 }
@@ -784,6 +874,8 @@ export class ThreadResponseConsumer {
       const githubActionButtons = await generateGitHubActionButtons(
         userId,
         data.gitBranch,
+        data.hasGitChanges,
+        data.pullRequestUrl,
         this.userMappings,
         this.repoManager,
         this.slackClient
@@ -1002,6 +1094,8 @@ export class ThreadResponseConsumer {
       const githubActionButtons = await generateGitHubActionButtons(
         userId,
         data.gitBranch,
+        data.hasGitChanges,
+        data.pullRequestUrl,
         this.userMappings,
         this.repoManager,
         this.slackClient

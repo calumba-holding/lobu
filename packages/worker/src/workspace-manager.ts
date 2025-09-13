@@ -78,6 +78,24 @@ export class WorkspaceManager {
       // Setup git configuration
       await this.setupGitConfig(userDirectory, username);
 
+      // Setup GitHub CLI authentication if token is available
+      if (process.env.GITHUB_TOKEN) {
+        try {
+          logger.info("Setting up GitHub CLI authentication...");
+          await execAsync(
+            `echo "${process.env.GITHUB_TOKEN}" | gh auth login --with-token`,
+            {
+              cwd: userDirectory,
+              env: { ...process.env, GH_TOKEN: process.env.GITHUB_TOKEN },
+            }
+          );
+          logger.info("GitHub CLI authentication configured successfully");
+        } catch (error) {
+          logger.warn("Failed to setup GitHub CLI authentication:", error);
+          // Non-fatal - continue without gh CLI
+        }
+      }
+
       // Get repository info
       const repository = await this.getRepositoryInfo(
         userDirectory,
