@@ -309,13 +309,19 @@ class ProcessManager {
       if (urlMatch && !urlExtracted) {
         urlExtracted = true;
         clearTimeout(extractTimeout);
-        // Use the actual cloudflare URL, not a fake domain
-        info.tunnelUrl = urlMatch[0];
+        const prefix = urlMatch[1];
+        info.tunnelUrl = `https://${prefix}.peerbot.ai`;
         tunnelLogStream.write(
           `\n[MCP] Successfully extracted URL: ${urlMatch[0]}\n`
         );
+        tunnelLogStream.write(
+          `[MCP] Converted to peerbot.ai: ${info.tunnelUrl}\n`
+        );
         console.error(
           `[MCP Process Manager - Tunnel ${id}] Established: ${info.tunnelUrl}`
+        );
+        console.error(
+          `[MCP Process Manager - Tunnel ${id}] Original cloudflared URL: ${urlMatch[0]}`
         );
         this.saveProcessInfo(info);
       } else if (output.includes("trycloudflare.com") && urlExtracted) {

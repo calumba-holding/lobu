@@ -92,7 +92,7 @@ wrangler deploy
 - You MUST use the most straightforward approach to get the job done, don't write code when not needed.
 - IMPORTANT: After making any code changes, you MUST:
   - commit and push them using git commands (git add, git commit).
-  - run the dev server to expose the tunnel url (*.trycloudflare.com) returned from background process MCP to the user.
+  - run the dev server to expose the tunnel url (similar to *.peerbot.ai) returned from background process MCP to the user.
 - Always prefer numbered lists over bullet points.
 
 **Available projects:**
