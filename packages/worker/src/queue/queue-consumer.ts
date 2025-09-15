@@ -525,7 +525,7 @@ export class WorkerQueueConsumer {
       // - Subsequent messages: Continue the existing session
       if (!this.hasStartedSession) {
         // First message in this worker - create a new Claude session
-        const crypto = require("crypto");
+        const crypto = require("node:crypto");
         workerConfig.sessionId = crypto.randomUUID();
         logger.info(
           `Creating new Claude session ${workerConfig.sessionId} for first message in thread ${message.payload.threadId}`

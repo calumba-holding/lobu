@@ -1237,7 +1237,9 @@ Branch: ${branch}`;
           channel: im.channel.id,
           text: "❌ Failed to start GitHub login. Please try again.",
         });
-      } catch {}
+      } catch {
+        // Ignore error - already logged above
+      }
     }
   }
 
@@ -1269,7 +1271,9 @@ Branch: ${branch}`;
           channel: im.channel.id,
           text: "✅ Successfully disconnected from GitHub",
         });
-      } catch {}
+      } catch {
+        // Ignore error - already logged above
+      }
     } catch (error) {
       logger.error(`Failed to logout user ${userId}:`, error);
       try {
@@ -1278,7 +1282,9 @@ Branch: ${branch}`;
           channel: im.channel.id,
           text: "❌ Failed to disconnect from GitHub. Please try again.",
         });
-      } catch {}
+      } catch {
+        // Ignore error - already logged above
+      }
     }
   }
 
@@ -1515,7 +1521,9 @@ Branch: ${branch}`;
           channel: im.channel.id,
           text: "❌ Failed to select repository. Please try again.",
         });
-      } catch {}
+      } catch {
+        // Ignore error - already logged above
+      }
     }
   }
 

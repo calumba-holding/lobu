@@ -293,11 +293,11 @@ export function convertMarkdownToSlack(content: string): string {
 
   // First, handle raw triple backtick code blocks that might not be properly formatted
   // This handles cases where content has ```language\ncode\n``` format
-  let preprocessed = content.replace(
+  const preprocessed = content.replace(
     /```(\w*)\n?([\s\S]*?)```/g,
     (match, lang, code) => {
       // Convert to a format that marked can handle properly
-      if (code && code.trim()) {
+      if (code?.trim()) {
         // Use HTML pre/code tags that marked will process
         const langAttr = lang ? ` class="language-${lang}"` : "";
         return `<pre><code${langAttr}>${code.trim()}</code></pre>`;

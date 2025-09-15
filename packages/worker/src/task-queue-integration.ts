@@ -266,10 +266,10 @@ export class QueueIntegration {
         `Branch value: "${branch}", Type: ${typeof branch}, starts with claude/: ${branch?.startsWith("claude/")}`
       );
 
-      if (branch && branch.startsWith("claude/")) {
+      if (branch?.startsWith("claude/")) {
         logger.info(`Entering PR detection block for branch: ${branch}`);
         try {
-          const { execSync } = require("child_process");
+          const { execSync } = require("node:child_process");
           const workingDir = this.workspaceManager.getCurrentWorkingDirectory();
           logger.info(
             `About to check for PR in directory: ${workingDir}, branch: ${branch}`
