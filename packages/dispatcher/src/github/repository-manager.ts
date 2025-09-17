@@ -256,19 +256,20 @@ export class GitHubRepositoryManager {
       // Determine the owner(s) to check
       const possibleOwners: string[] = [];
 
-      if (this.config.organization && this.config.organization.trim() !== "") {
-        // If organization is specified, check there first
-        possibleOwners.push(this.config.organization);
-      }
-
-      // Always add authenticated user as fallback
+      // Always check authenticated user's space first
       try {
         const authUser = await this.octokit.rest.users.getAuthenticated();
-        if (!possibleOwners.includes(authUser.data.login)) {
-          possibleOwners.push(authUser.data.login);
-        }
+        possibleOwners.push(authUser.data.login);
       } catch (e) {
         logger.warn("Could not get authenticated user:", e);
+      }
+
+      // Optionally check organization if configured
+      if (this.config.organization && this.config.organization.trim() !== "") {
+        // Add organization as secondary option if specified
+        if (!possibleOwners.includes(this.config.organization)) {
+          possibleOwners.push(this.config.organization);
+        }
       }
 
       let foundRepo = false;
@@ -337,67 +338,22 @@ export class GitHubRepositoryManager {
 
       logger.info(`Creating repository for user ${username}...`);
 
-      // Try to create repository in organization first, fallback to authenticated user
-      let repoResponse;
-
-      if (this.config.organization && this.config.organization.trim() !== "") {
-        try {
-          // Try to create in organization first
-          repoResponse = await this.octokit.rest.repos.createInOrg({
-            org: this.config.organization,
-            name: repositoryName,
-            description: `Personal workspace for ${username} - Peerbot`,
-            private: false,
-            has_issues: true,
-            has_projects: false,
-            has_wiki: false,
-            auto_init: true,
-            gitignore_template: "Node",
-            license_template: "mit",
-          });
-          logger.info(
-            `Created repository for user ${username} in organization ${this.config.organization}`
-          );
-        } catch (orgError: any) {
-          if (orgError.status === 404) {
-            logger.info(
-              `Organization ${this.config.organization} not found, creating repository for authenticated user...`
-            );
-            repoResponse =
-              await this.octokit.rest.repos.createForAuthenticatedUser({
-                name: repositoryName,
-                description: `Personal workspace for ${username} - Peerbot`,
-                private: false,
-                has_issues: true,
-                has_projects: false,
-                has_wiki: false,
-                auto_init: true,
-                gitignore_template: "Node",
-                license_template: "mit",
-              });
-          } else {
-            throw orgError;
-          }
-        }
-      } else {
-        // No organization specified, create for authenticated user
-        logger.info(
-          `No organization specified, creating repository for authenticated user...`
-        );
-        repoResponse = await this.octokit.rest.repos.createForAuthenticatedUser(
-          {
-            name: repositoryName,
-            description: `Personal workspace for ${username} - Peerbot`,
-            private: false,
-            has_issues: true,
-            has_projects: false,
-            has_wiki: false,
-            auto_init: true,
-            gitignore_template: "Node",
-            license_template: "mit",
-          }
-        );
-      }
+      // Always create repository in authenticated user's space
+      const repoResponse = await this.octokit.rest.repos.createForAuthenticatedUser({
+        name: repositoryName,
+        description: `Personal workspace for ${username} - Peerbot`,
+        private: false,
+        has_issues: true,
+        has_projects: false,
+        has_wiki: false,
+        auto_init: true,
+        gitignore_template: "Node",
+        license_template: "mit",
+      });
+      
+      logger.info(
+        `Created repository for user ${username} in their GitHub account`
+      );
 
       // Use the actual owner from the response
       const owner = repoResponse.data.owner.login;
