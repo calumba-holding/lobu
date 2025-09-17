@@ -48,6 +48,18 @@ export class SlackDispatcher {
         logLevel: LogLevel.DEBUG,
       });
 
+      // Add URL verification challenge handler BEFORE Slack middleware
+      // This is needed for initial Slack app Event Subscription setup
+      receiver.router.use("/slack/events", (req, res, next) => {
+        // Check if this is a URL verification challenge
+        if (req.body && req.body.type === "url_verification") {
+          logger.info("Handling Slack URL verification challenge");
+          return res.status(200).json({ challenge: req.body.challenge });
+        }
+        // Otherwise, continue to normal Slack event handling
+        next();
+      });
+
       this.app = new App({
         token: config.slack.token,
         receiver,
