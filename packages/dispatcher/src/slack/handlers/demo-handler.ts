@@ -8,7 +8,8 @@ export async function handleTryDemo(
   userId: string,
   channelId: string,
   client: any,
-  threadTs?: string
+  threadTs?: string,
+  fromHomeTab: boolean = false
 ): Promise<void> {
   try {
     // Get demo repository from environment or use default
@@ -51,9 +52,13 @@ export async function handleTryDemo(
       [userDbId, demoRepo]
     );
 
-    // Send confirmation and instructions (in thread if available)
+    // If from home tab, always send as DM to ensure user sees it
+    // Otherwise use the provided channel (which might be the same thread)
+    const targetChannel = fromHomeTab ? userId : channelId;
+
+    // Send confirmation and instructions (in thread if available and not from home tab)
     const messagePayload: any = {
-      channel: channelId,
+      channel: targetChannel,
       text: "🎮 Demo mode activated!",
       blocks: [
         {
@@ -146,8 +151,8 @@ export async function handleTryDemo(
       ],
     };
 
-    // Add thread_ts if provided (to keep in same thread as welcome message)
-    if (threadTs) {
+    // Add thread_ts if provided and not from home tab (to keep in same thread as welcome message)
+    if (threadTs && !fromHomeTab) {
       messagePayload.thread_ts = threadTs;
     }
 

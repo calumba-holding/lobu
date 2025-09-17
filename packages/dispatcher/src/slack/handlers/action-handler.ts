@@ -66,9 +66,15 @@ export class ActionHandler {
         break;
 
       case "try_demo": {
-        // Get the message timestamp to keep demo response in same thread
+        // Check if this is from the home tab (view type will be 'home')
+        const fromHomeTab = body.view?.type === 'home';
+        
+        // Get the message timestamp to keep demo response in same thread (if not from home)
         const demoMessageTs = body.message?.ts;
-        await handleTryDemo(userId, channelId, client, demoMessageTs);
+        
+        // Pass the fromHomeTab flag to ensure DM is sent when clicked from home
+        await handleTryDemo(userId, channelId, client, demoMessageTs, fromHomeTab);
+        
         // Clear cache and update home tab after demo setup
         const username = await this.messageHandler.getOrCreateUserMapping(
           userId,
