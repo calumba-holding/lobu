@@ -95,14 +95,12 @@ export async function handleExecutableCodeBlock(
  */
 export async function handleBlockkitForm(
   actionId: string,
-  userId: string,
+  _userId: string, // Unused parameter, prefixed with underscore
   channelId: string,
   messageTs: string,
   body: any,
   client: any
 ): Promise<void> {
-  // userId is currently unused but kept for API compatibility
-  void userId;
   logger.info(`Handling blockkit form: ${actionId}`);
 
   let blocks: any[] = [];

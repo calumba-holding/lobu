@@ -709,7 +709,7 @@ export class ShortcutCommandHandler {
 
     for (const line of lines) {
       const trimmed = line.trim();
-      if (trimmed && trimmed.includes("=")) {
+      if (trimmed?.includes("=")) {
         const [key, ...valueParts] = trimmed.split("=");
         const value = valueParts.join("=");
         if (key && value) {

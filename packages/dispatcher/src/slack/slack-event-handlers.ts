@@ -28,13 +28,10 @@ export class SlackEventHandlers {
 
   constructor(
     private app: App,
-    private queueProducer: QueueProducer,
-    private repoManager: GitHubRepositoryManager,
+    queueProducer: QueueProducer,
+    repoManager: GitHubRepositoryManager,
     private config: DispatcherConfig
   ) {
-    // queueProducer and repoManager are currently unused but kept for API compatibility
-    void this.queueProducer;
-    void this.repoManager;
     // Initialize specialized handlers
     this.messageHandler = new MessageHandler(
       queueProducer,

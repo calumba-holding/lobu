@@ -20,12 +20,11 @@ import {
 export class ActionHandler {
   constructor(
     private repoManager: GitHubRepositoryManager,
-    private queueProducer: QueueProducer,
+    _queueProducer: QueueProducer, // Not used directly in ActionHandler
     private config: DispatcherConfig,
     private messageHandler: MessageHandler
   ) {
-    // queueProducer is currently unused but kept for API compatibility
-    void this.queueProducer;
+    // queueProducer passed for consistency but not used directly
   }
 
   /**
@@ -66,7 +65,7 @@ export class ActionHandler {
         await handleGitHubConnect(userId, channelId, client);
         break;
 
-      case "try_demo":
+      case "try_demo": {
         // Get the message timestamp to keep demo response in same thread
         const demoMessageTs = body.message?.ts;
         await handleTryDemo(userId, channelId, client, demoMessageTs);
@@ -78,12 +77,13 @@ export class ActionHandler {
         this.messageHandler.clearCacheForUser(username);
         await this.updateAppHome(userId, client);
         break;
+      }
 
       // Demo example buttons
       case "demo_example_1":
       case "demo_example_2":
       case "demo_example_3":
-      case "demo_example_4":
+      case "demo_example_4": {
         const demoAction = body.actions?.[0];
         const demoPrompt = demoAction?.value;
         if (demoPrompt) {
@@ -93,7 +93,7 @@ export class ActionHandler {
             userId,
             teamId: body.team?.id || "",
             threadTs: body.message?.thread_ts || body.message?.ts,
-            messageTs: body.message?.ts || new Date().getTime().toString(),
+            messageTs: body.message?.ts || Date.now().toString(),
             text: demoPrompt,
             userDisplayName: body.user?.username || "User",
           };
@@ -104,6 +104,7 @@ export class ActionHandler {
           );
         }
         break;
+      }
 
       default:
         // Handle blockkit form button clicks
@@ -580,87 +581,6 @@ export class ActionHandler {
     } catch (error) {
       logger.error(`Failed to send GitHub login message to ${userId}:`, error);
     }
-  }
-
-  /**
-   * Handle creating a personal repository
-   * Currently unused - keeping for potential future use
-   */
-  // @ts-ignore - Method preserved for potential future use
-  private async handleCreatePersonalRepo(
-    userId: string,
-    channelId: string,
-    client: any
-  ): Promise<void> {
-    // Method body commented out to avoid unused method warning
-    void userId;
-    void channelId;
-    void client;
-    return;
-    /*
-    try {
-      const username = await this.messageHandler.getOrCreateUserMapping(userId, client);
-      const repository = await this.repoManager.ensureUserRepository(username);
-
-      // Clear cache to force refresh
-      this.messageHandler.clearCacheForUser(username);
-
-      const blocks = [
-          {
-            type: "section",
-            text: {
-              type: "mrkdwn",
-              text: `✅ *Personal repository ready!*\n\n<${repository.repositoryUrl}|${repository.repositoryName}>`,
-            },
-          },
-          {
-            type: "context",
-            elements: [
-              {
-                type: "mrkdwn",
-                text: `Created at: ${new Date(repository.createdAt).toLocaleString()}`,
-              },
-            ],
-          },
-        ];
-
-      if (channelId) {
-        await client.chat.postMessage({
-          channel: channelId,
-          blocks,
-          text: "✅ Personal repository ready!",
-        });
-      } else {
-        const im = await client.conversations.open({ users: userId });
-        if (im.channel?.id) {
-          await client.chat.postMessage({
-            channel: im.channel.id,
-            blocks,
-            text: "✅ Personal repository ready!",
-          });
-        }
-      }
-
-      // Update app home
-      await this.updateAppHome(userId, client);
-    } catch (error) {
-      logger.error(`Failed to create personal repository for ${userId}:`, error);
-      if (channelId) {
-        await client.chat.postMessage({
-          channel: channelId,
-          text: `❌ Failed to create repository: ${error instanceof Error ? error.message : "Unknown error"}`,
-        });
-      } else {
-        const im = await client.conversations.open({ users: userId });
-        if (im.channel?.id) {
-          await client.chat.postMessage({
-            channel: im.channel.id,
-            text: `❌ Failed to create repository: ${error instanceof Error ? error.message : "Unknown error"}`,
-          });
-        }
-      }
-    }
-    */
   }
 
   /**

@@ -41,13 +41,11 @@ export function setupTeamJoinHandler(app: App, botId: string): void {
  */
 export async function sendWelcomeMessage(
   channelId: string,
-  botId: string,
+  _botId: string, // Unused parameter, prefixed with underscore
   client: any,
   threadTs?: string,
   userId?: string
 ): Promise<void> {
-  // botId is currently unused but kept for API compatibility
-  void botId;
   const blocks: any[] = [
     {
       type: "header",
