@@ -6,13 +6,9 @@ const IV_LENGTH = 12; // 96-bit nonce for AES-GCM
  * Get encryption key from environment, properly padded
  */
 function getEncryptionKey(): string {
-  const key = process.env.ENCRYPTION_KEY || "";
+  const key = process.env.ENCRYPTION_KEY;
   if (!key) {
-    // For backward compatibility, return a default key if not set
-    console.warn(
-      "ENCRYPTION_KEY not set, using default key (not secure for production)"
-    );
-    return "default-insecure-key-change-me!!".padEnd(32).slice(0, 32);
+    throw new Error("ENCRYPTION_KEY must be set in environment variables");
   }
   return key.padEnd(32).slice(0, 32);
 }

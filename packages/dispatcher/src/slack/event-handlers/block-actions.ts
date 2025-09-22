@@ -175,7 +175,7 @@ export async function handleBlockkitForm(
     });
 
     // Show the raw Block Kit content for troubleshooting
-    const rawBlocksJson = JSON.stringify(blocks, null, 2);
+    const rawBlocksJson = JSON.stringify(body, null, 2);
     const truncatedBlocks =
       rawBlocksJson.length > 2500
         ? `${rawBlocksJson.substring(0, 2500)}\n...[truncated]`

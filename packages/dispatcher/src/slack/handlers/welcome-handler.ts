@@ -7,7 +7,7 @@ import type { App } from "@slack/bolt";
  */
 export function setupTeamJoinHandler(
   app: App,
-  botId: string,
+  _botId: string,
   sendContextAwareWelcome: (
     userId: string,
     channelId: string,
