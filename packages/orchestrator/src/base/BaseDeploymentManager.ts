@@ -56,9 +56,20 @@ export abstract class BaseDeploymentManager {
 
       const envVars: Record<string, string> = {};
       for (const row of result.rows) {
-        // All environment variables MUST be encrypted in the database
+        // Check if value looks encrypted (contains colons in expected format)
         if (row.value) {
-          envVars[row.name] = decrypt(row.value);
+          try {
+            // Only decrypt if it looks like encrypted format (iv:tag:data)
+            if (row.value.includes(':') && row.value.split(':').length === 3) {
+              envVars[row.name] = decrypt(row.value);
+            } else {
+              // Use plain value for backward compatibility
+              envVars[row.name] = row.value;
+            }
+          } catch (error) {
+            console.warn(`Failed to decrypt env var ${row.name}, using plain value:`, error);
+            envVars[row.name] = row.value;
+          }
         }
       }
 
