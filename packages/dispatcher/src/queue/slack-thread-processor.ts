@@ -471,7 +471,7 @@ async function generateGitHubActionButtons(
       // PR exists - show view button with green checkmark
       buttons.push({
         type: "button",
-        text: { type: "plain_text", text: "✅ View PR" },
+        text: { type: "plain_text", text: "✅ View Pull Request" },
         url: pullRequestUrl,
         action_id: generateDeterministicActionId(
           `view_pr_${repoPath}_${gitBranch}`,
