@@ -42,76 +42,84 @@ export class MessageHandler {
   }
 
   /**
-   * Get user environment variables from database with channel precedence
+   * Get user environment variables from database with channel and repository precedence
+   * Priority: Channel+Repo > Channel > User+Repo > User
    */
   async getUserEnvironment(
     userId: string,
-    channelId?: string
+    channelId?: string,
+    repository?: string
   ): Promise<Record<string, string | undefined>> {
     const dbPool = getDbPool(process.env.DATABASE_URL!);
     const envVariables: Record<string, string | undefined> = {};
 
     try {
-      // First check channel_environ if channelId is provided and not a DM
-      if (channelId && !channelId.startsWith("D")) {
-        const channelResult = await dbPool.query(
-          `SELECT name, value FROM channel_environ WHERE channel_id = $1 AND platform = 'slack'`,
-          [channelId]
-        );
-
-        for (const row of channelResult.rows) {
-          // All environment variables MUST be encrypted in the database
-          if (row.value) {
-            envVariables[row.name] = decrypt(row.value);
-          }
-        }
-
-        if (channelResult.rows.length > 0) {
-          logger.info(
-            `Found ${channelResult.rows.length} channel environment variables for channel ${channelId}`
-          );
-        }
-      }
-
-      // Then check user_environ to fill in any missing variables
+      // Get user ID from database
       const userResult = await dbPool.query(
-        `SELECT ue.name, ue.value 
-         FROM user_environ ue
-         JOIN users u ON ue.user_id = u.id
-         WHERE u.platform = 'slack' AND u.platform_user_id = $1`,
+        `SELECT id FROM users WHERE platform = 'slack' AND platform_user_id = $1`,
         [userId.toUpperCase()]
       );
 
-      for (const row of userResult.rows) {
-        // Only set if not already set by channel_environ
-        if (!(row.name in envVariables) && row.value) {
-          // All environment variables MUST be encrypted in the database
+      if (userResult.rows.length === 0) {
+        logger.warn(`User ${userId} not found in database`);
+        return envVariables;
+      }
+
+      const userDbId = userResult.rows[0].id;
+      const isChannel = channelId && !channelId.startsWith("D");
+
+      // Query with priority ordering
+      const query = `
+        WITH prioritized AS (
+          SELECT 
+            name, 
+            value,
+            channel_id,
+            repository,
+            -- Priority ranking
+            CASE
+              WHEN channel_id = $2 AND repository = $3 THEN 1
+              WHEN channel_id = $2 AND repository IS NULL THEN 2
+              WHEN channel_id IS NULL AND repository = $3 THEN 3
+              WHEN channel_id IS NULL AND repository IS NULL THEN 4
+            END as priority
+          FROM user_environ
+          WHERE user_id = $1
+            AND (
+              (channel_id = $2 AND repository = $3) OR
+              (channel_id = $2 AND repository IS NULL) OR
+              (channel_id IS NULL AND repository = $3) OR
+              (channel_id IS NULL AND repository IS NULL)
+            )
+        )
+        SELECT DISTINCT ON (name) name, value, channel_id, repository
+        FROM prioritized
+        ORDER BY name, priority`;
+
+      const result = await dbPool.query(query, [
+        userDbId,
+        isChannel ? channelId : null,
+        repository || null
+      ]);
+
+      // Decrypt all values
+      for (const row of result.rows) {
+        if (row.value) {
           envVariables[row.name] = decrypt(row.value);
         }
       }
 
-      if (userResult.rows.length > 0) {
+      if (result.rows.length > 0) {
         logger.info(
-          `Found ${userResult.rows.length} user environment variables for user ${userId}`
+          `Found ${result.rows.length} environment variables for user ${userId}` +
+          (channelId ? ` in channel ${channelId}` : '') +
+          (repository ? ` for repository ${repository}` : '')
         );
       }
 
-      // Log which environment is being used
+      // Log which repository is being used
       if (envVariables.GITHUB_REPOSITORY) {
-        const source =
-          channelId &&
-          !channelId.startsWith("D") &&
-          (
-            await dbPool.query(
-              `SELECT 1 FROM channel_environ WHERE channel_id = $1 AND platform = 'slack' AND name = 'GITHUB_REPOSITORY'`,
-              [channelId]
-            )
-          ).rows.length > 0
-            ? "channel"
-            : "user";
-        logger.info(
-          `Using ${source} repository override: ${envVariables.GITHUB_REPOSITORY}`
-        );
+        logger.info(`Using repository: ${envVariables.GITHUB_REPOSITORY}`);
       }
     } catch (error) {
       logger.error(`Error fetching environment for user ${userId}:`, error);
@@ -165,12 +173,13 @@ export class MessageHandler {
       // Check if this is a new session
       const isNewSession = !context.threadTs;
 
-      // Check for environment overrides from database
-      const userEnv = await this.getUserEnvironment(
+      // First get a preliminary check for repository without context
+      const preliminaryEnv = await this.getUserEnvironment(
         context.userId,
-        context.channelId
+        context.channelId,
+        undefined // Don't pass repository yet as we need to determine it first
       );
-      const overrideRepo = userEnv.GITHUB_REPOSITORY as string | undefined;
+      const overrideRepo = preliminaryEnv.GITHUB_REPOSITORY as string | undefined;
 
       let repository;
       if (overrideRepo) {

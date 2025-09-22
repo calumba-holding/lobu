@@ -516,32 +516,6 @@ export class ShortcutCommandHandler {
     const dbPool = getDbPool(this.config.queues.connectionString);
 
     try {
-      // Check if we should save to channel or user environ
-      if (channelId && !channelId.startsWith("D")) {
-        // Check if user is admin
-        const isAdmin = await this.isUserChannelAdmin(userId, channelId);
-
-        if (isAdmin) {
-          // Save to channel_environ (encrypted)
-          const encryptedUrl = encrypt(repositoryUrl);
-          await dbPool.query(
-            `INSERT INTO channel_environ (channel_id, platform, name, value, set_by_user_id, created_at, updated_at)
-             VALUES ($1, 'slack', 'GITHUB_REPOSITORY', $2, $3, NOW(), NOW())
-             ON CONFLICT (channel_id, platform, name)
-             DO UPDATE SET value = EXCLUDED.value, 
-                          set_by_user_id = EXCLUDED.set_by_user_id,
-                          updated_at = NOW()`,
-            [channelId, encryptedUrl, userId.toUpperCase()]
-          );
-
-          logger.info(
-            `Saved channel repository for ${channelId}: ${repositoryUrl}`
-          );
-          return;
-        }
-      }
-
-      // Save to user_environ (default case or non-admin)
       // First ensure user exists
       await dbPool.query(
         `INSERT INTO users (platform, platform_user_id)
@@ -557,18 +531,38 @@ export class ShortcutCommandHandler {
       );
       const userDbId = userResult.rows[0]?.id;
 
-      if (userDbId) {
-        const encryptedUrl = encrypt(repositoryUrl);
-        await dbPool.query(
-          `INSERT INTO user_environ (user_id, name, value, type)
-           VALUES ($1, 'GITHUB_REPOSITORY', $2, 'user')
-           ON CONFLICT (user_id, name)
-           DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
-          [userDbId, encryptedUrl]
-        );
-
-        logger.info(`Saved user repository for ${userId}: ${repositoryUrl}`);
+      if (!userDbId) {
+        throw new Error(`Failed to get user ID for ${userId}`);
       }
+
+      const encryptedUrl = encrypt(repositoryUrl);
+      const isChannel = channelId && !channelId.startsWith("D");
+      
+      // Check if user is admin for channel-level save
+      let saveToChannel = false;
+      if (isChannel) {
+        saveToChannel = await this.isUserChannelAdmin(userId, channelId);
+      }
+
+      // Save with appropriate context
+      // Repository column stores the actual repo URL for context
+      // GITHUB_REPOSITORY env var stores the selected/active repository
+      await dbPool.query(
+        `INSERT INTO user_environ (user_id, channel_id, repository, name, value, type, updated_at)
+         VALUES ($1, $2, $3, 'GITHUB_REPOSITORY', $4, $5, NOW())
+         ON CONFLICT (user_id, channel_id, repository, name)
+         DO UPDATE SET value = EXCLUDED.value, type = EXCLUDED.type, updated_at = NOW()`,
+        [
+          userDbId,
+          saveToChannel ? channelId : null,  // Set channel_id if admin in channel
+          repositoryUrl,  // Store the repository in its own column
+          encryptedUrl,   // The encrypted value
+          saveToChannel ? 'channel' : 'user'
+        ]
+      );
+
+      const context = saveToChannel ? `channel ${channelId}` : `user ${userId}`;
+      logger.info(`Saved repository for ${context}: ${repositoryUrl}`);
     } catch (error) {
       logger.error(`Failed to save repository selection:`, error);
       throw error;
@@ -607,12 +601,13 @@ export class ShortcutCommandHandler {
 
       if (userDbId) {
         // Save each environment variable (encrypted)
+        // These are user-level environment variables without specific repository context
         for (const [key, value] of Object.entries(envVars)) {
           const encryptedValue = encrypt(value);
           await dbPool.query(
-            `INSERT INTO user_environ (user_id, name, value, type)
-             VALUES ($1, $2, $3, 'user')
-             ON CONFLICT (user_id, name)
+            `INSERT INTO user_environ (user_id, channel_id, repository, name, value, type, updated_at)
+             VALUES ($1, NULL, NULL, $2, $3, 'user', NOW())
+             ON CONFLICT (user_id, channel_id, repository, name)
              DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
             [userDbId, key, encryptedValue]
           );

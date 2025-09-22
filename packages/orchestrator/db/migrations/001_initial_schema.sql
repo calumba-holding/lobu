@@ -16,15 +16,19 @@ CREATE TABLE users (
 );
 
 -- Create user_environ table for environment variables
+-- Supports both user-level and channel-level variables with repository isolation
 CREATE TABLE user_environ (
     id SERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    channel_id VARCHAR(100) DEFAULT NULL,  -- NULL = user-level, NOT NULL = channel-level
+    repository VARCHAR(255) DEFAULT NULL,   -- Repository context for the env var
     name VARCHAR(255) NOT NULL,
-    value TEXT NOT NULL,
-    type VARCHAR(10) NOT NULL DEFAULT 'user' CHECK (type IN ('user', 'system')),
+    value TEXT NOT NULL,  -- Always encrypted
+    type VARCHAR(10) NOT NULL DEFAULT 'user' CHECK (type IN ('user', 'system', 'channel')),
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),
-    UNIQUE(user_id, name)
+    -- Unique constraint: one env var per user/channel/repo/name combination
+    UNIQUE(user_id, channel_id, repository, name)
 );
 
 -- Enable Row Level Security on all tables
@@ -57,9 +61,11 @@ WITH CHECK (
 -- Create indexes for performance
 CREATE INDEX idx_users_platform_user ON users(platform, platform_user_id);
 CREATE INDEX idx_user_environ_user_id ON user_environ(user_id);
+CREATE INDEX idx_user_environ_channel_id ON user_environ(channel_id);
+CREATE INDEX idx_user_environ_repository ON user_environ(repository);
 CREATE INDEX idx_user_environ_name ON user_environ(name);
 CREATE INDEX idx_user_environ_type ON user_environ(type);
-CREATE INDEX idx_user_environ_user_name ON user_environ(user_id, name);
+CREATE INDEX idx_user_environ_lookup ON user_environ(user_id, channel_id, repository, name);
 
 -- Create function to set user context for RLS
 CREATE FUNCTION set_user_context(user_identifier VARCHAR(100))
@@ -122,30 +128,63 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Create helper function to get all environment variables for a user
-CREATE FUNCTION get_user_environ(p_user_id INTEGER)
-RETURNS TABLE(name VARCHAR(255), value TEXT, type VARCHAR(10)) AS $$
+-- Create helper function to get environment variables with precedence
+-- Priority: Channel+Repo > Channel > User+Repo > User
+CREATE FUNCTION get_environ_for_context(
+    p_user_id INTEGER,
+    p_channel_id VARCHAR(100) DEFAULT NULL,
+    p_repository VARCHAR(255) DEFAULT NULL
+)
+RETURNS TABLE(name VARCHAR(255), value TEXT, type VARCHAR(10), source VARCHAR(20)) AS $$
 BEGIN
     RETURN QUERY
-    SELECT ue.name, ue.value, ue.type
-    FROM user_environ ue
-    WHERE ue.user_id = p_user_id
-    ORDER BY ue.type DESC, ue.name; -- System vars first, then user vars
+    WITH prioritized AS (
+        SELECT 
+            ue.name, 
+            ue.value, 
+            ue.type,
+            CASE 
+                WHEN ue.channel_id IS NOT NULL AND ue.repository IS NOT NULL THEN 'channel_repo'
+                WHEN ue.channel_id IS NOT NULL THEN 'channel'
+                WHEN ue.repository IS NOT NULL THEN 'user_repo'
+                ELSE 'user'
+            END as source,
+            -- Priority ranking
+            CASE
+                WHEN ue.channel_id = p_channel_id AND ue.repository = p_repository THEN 1
+                WHEN ue.channel_id = p_channel_id AND ue.repository IS NULL THEN 2
+                WHEN ue.channel_id IS NULL AND ue.repository = p_repository THEN 3
+                WHEN ue.channel_id IS NULL AND ue.repository IS NULL THEN 4
+            END as priority
+        FROM user_environ ue
+        WHERE ue.user_id = p_user_id
+          AND (
+              (ue.channel_id = p_channel_id AND ue.repository = p_repository) OR
+              (ue.channel_id = p_channel_id AND ue.repository IS NULL) OR
+              (ue.channel_id IS NULL AND ue.repository = p_repository) OR
+              (ue.channel_id IS NULL AND ue.repository IS NULL)
+          )
+    )
+    SELECT DISTINCT ON (name) name, value, type, source
+    FROM prioritized
+    ORDER BY name, priority;
 END;
 $$ LANGUAGE plpgsql;
 
--- Create helper function to set environment variable for a user
-CREATE FUNCTION set_user_environ(
+-- Create helper function to set environment variable with context
+CREATE FUNCTION set_environ(
     p_user_id INTEGER,
     p_name VARCHAR(255),
     p_value TEXT,
+    p_channel_id VARCHAR(100) DEFAULT NULL,
+    p_repository VARCHAR(255) DEFAULT NULL,
     p_type VARCHAR(10) DEFAULT 'user'
 )
 RETURNS VOID AS $$
 BEGIN
-    INSERT INTO user_environ (user_id, name, value, type, updated_at)
-    VALUES (p_user_id, p_name, p_value, p_type, NOW())
-    ON CONFLICT (user_id, name)
+    INSERT INTO user_environ (user_id, channel_id, repository, name, value, type, updated_at)
+    VALUES (p_user_id, p_channel_id, p_repository, p_name, p_value, p_type, NOW())
+    ON CONFLICT (user_id, channel_id, repository, name)
     DO UPDATE SET 
         value = EXCLUDED.value,
         type = EXCLUDED.type,

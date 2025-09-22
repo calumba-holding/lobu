@@ -37,22 +37,53 @@ export abstract class BaseDeploymentManager {
   }
 
   /**
-   * Get all environment variables for a user from database
+   * Get all environment variables for a user from database with context
+   * Priority: Channel+Repo > Channel > User+Repo > User
    */
   protected async getUserEnvironmentVariables(
-    userId: string
+    userId: string,
+    channelId?: string,
+    repository?: string
   ): Promise<Record<string, string>> {
     try {
       const platformUserId = userId.toUpperCase();
-      const result = await this.dbPool.query(
-        `SELECT name, value FROM user_environ
-         WHERE user_id = (
-           SELECT id FROM users
-           WHERE platform = 'slack' AND platform_user_id = $1
-         )
-         ORDER BY type DESC, name`, // System vars first, then user vars
-        [platformUserId]
-      );
+      
+      // Query with priority ordering
+      const query = `
+        WITH prioritized AS (
+          SELECT 
+            name, 
+            value,
+            channel_id,
+            repository,
+            -- Priority ranking
+            CASE
+              WHEN channel_id = $2 AND repository = $3 THEN 1
+              WHEN channel_id = $2 AND repository IS NULL THEN 2
+              WHEN channel_id IS NULL AND repository = $3 THEN 3
+              WHEN channel_id IS NULL AND repository IS NULL THEN 4
+            END as priority
+          FROM user_environ
+          WHERE user_id = (
+            SELECT id FROM users
+            WHERE platform = 'slack' AND platform_user_id = $1
+          )
+          AND (
+            (channel_id = $2 AND repository = $3) OR
+            (channel_id = $2 AND repository IS NULL) OR
+            (channel_id IS NULL AND repository = $3) OR
+            (channel_id IS NULL AND repository IS NULL)
+          )
+        )
+        SELECT DISTINCT ON (name) name, value
+        FROM prioritized
+        ORDER BY name, priority`;
+
+      const result = await this.dbPool.query(query, [
+        platformUserId,
+        channelId || null,
+        repository || null
+      ]);
 
       const envVars: Record<string, string> = {};
       for (const row of result.rows) {
@@ -151,8 +182,16 @@ export abstract class BaseDeploymentManager {
         }
       }
 
-      // Fetch user environment variables once
-      const userEnvVars = await this.getUserEnvironmentVariables(userId);
+      // Extract channel and repository from messageData
+      const channelId = messageData?.channelId;
+      const repository = messageData?.platformMetadata?.repositoryUrl;
+      
+      // Fetch user environment variables with context
+      const userEnvVars = await this.getUserEnvironmentVariables(
+        userId,
+        channelId,
+        repository
+      );
 
       await this.createDeployment(
         deploymentName,
