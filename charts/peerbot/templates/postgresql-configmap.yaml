@@ -7,79 +7,131 @@ metadata:
     {{- include "peerbot.labels" . | nindent 4 }}
     app.kubernetes.io/component: postgresql
 data:
-  03-setup-pgboss-post-init.sql: |
-    -- This script sets up pgboss RLS after pgboss initializes its tables
-    -- It will be automatically executed when pgboss tables are created
+  01-initial-schema.sql: |
+    -- Peerbot PostgreSQL schema initialization
+    -- This script is run on database initialization via docker-entrypoint-initdb.d
     
-    -- Function to set up pgboss RLS when called
-    CREATE OR REPLACE FUNCTION setup_pgboss_rls_on_demand()
+    -- Enable required extensions
+    CREATE EXTENSION IF NOT EXISTS pgcrypto;
+    CREATE EXTENSION IF NOT EXISTS hstore;
+    
+    -- Create users table
+    CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        platform_user_id VARCHAR(100) NOT NULL,
+        platform VARCHAR(50) NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(platform, platform_user_id)
+    );
+    
+    -- Create user_environ table with channel and repository context
+    CREATE TABLE IF NOT EXISTS user_environ (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        channel_id VARCHAR(100) DEFAULT NULL,
+        repository VARCHAR(255) DEFAULT NULL,
+        name VARCHAR(255) NOT NULL,
+        value TEXT NOT NULL,
+        type VARCHAR(10) NOT NULL DEFAULT 'user' CHECK (type IN ('user', 'system', 'channel')),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(user_id, channel_id, repository, name)
+    );
+    
+    -- Enable Row Level Security
+    ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE user_environ ENABLE ROW LEVEL SECURITY;
+    
+    -- Create RLS policies
+    DROP POLICY IF EXISTS user_data_isolation ON users;
+    CREATE POLICY user_data_isolation ON users
+    FOR ALL USING (
+        platform_user_id = current_setting('app.current_user_id', true)
+    )
+    WITH CHECK (
+        platform_user_id = current_setting('app.current_user_id', true)
+    );
+    
+    DROP POLICY IF EXISTS user_environ_isolation ON user_environ;
+    CREATE POLICY user_environ_isolation ON user_environ
+    FOR ALL USING (
+        user_id IN (
+            SELECT id FROM users
+            WHERE platform_user_id = current_setting('app.current_user_id', true)
+        )
+    )
+    WITH CHECK (
+        user_id IN (
+            SELECT id FROM users
+            WHERE platform_user_id = current_setting('app.current_user_id', true)
+        )
+    );
+    
+    -- Create indexes for performance
+    CREATE INDEX IF NOT EXISTS idx_users_platform_user ON users(platform, platform_user_id);
+    CREATE INDEX IF NOT EXISTS idx_user_environ_user_id ON user_environ(user_id);
+    CREATE INDEX IF NOT EXISTS idx_user_environ_channel_id ON user_environ(channel_id);
+    CREATE INDEX IF NOT EXISTS idx_user_environ_repository ON user_environ(repository);
+    CREATE INDEX IF NOT EXISTS idx_user_environ_name ON user_environ(name);
+    CREATE INDEX IF NOT EXISTS idx_user_environ_type ON user_environ(type);
+    CREATE INDEX IF NOT EXISTS idx_user_environ_lookup ON user_environ(user_id, channel_id, repository, name);
+    
+    -- Create helper functions
+    CREATE OR REPLACE FUNCTION set_user_context(user_identifier VARCHAR(100))
     RETURNS VOID AS $$
     BEGIN
-        -- Check if pgboss.job table exists
-        IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'pgboss' AND table_name = 'job') THEN
-            RAISE NOTICE 'pgboss.job table does not exist yet, skipping RLS setup';
-            RETURN;
+        PERFORM set_config('app.current_user_id', user_identifier, true);
+    END;
+    $$ LANGUAGE plpgsql;
+    
+    -- Create pgboss user isolation function
+    CREATE OR REPLACE FUNCTION create_isolated_pgboss_user(
+        user_identifier VARCHAR(100),
+        user_password VARCHAR(255) DEFAULT NULL
+    ) RETURNS VARCHAR(100) AS $$
+    DECLARE
+        role_name VARCHAR(100);
+        generated_password VARCHAR(255);
+    BEGIN
+        role_name := lower(user_identifier);
+        
+        IF user_password IS NULL THEN
+            generated_password := encode(gen_random_bytes(32), 'base64');
+        ELSE
+            generated_password := user_password;
         END IF;
         
-        -- Enable RLS on pgboss.job table
-        ALTER TABLE pgboss.job ENABLE ROW LEVEL SECURITY;
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = role_name) THEN
+            EXECUTE format('CREATE ROLE %I WITH LOGIN PASSWORD %L NOCREATEDB NOCREATEROLE', 
+                          role_name, generated_password);
+            
+            EXECUTE format('GRANT USAGE ON SCHEMA public TO %I', role_name);
+            EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO %I', role_name);
+            EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO %I', role_name);
+            
+            -- Grant pgboss permissions if schema exists
+            IF EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = 'pgboss') THEN
+                EXECUTE format('GRANT USAGE ON SCHEMA pgboss TO %I', role_name);
+                EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA pgboss TO %I', role_name);
+                EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA pgboss TO %I', role_name);
+                EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA pgboss GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO %I', role_name);
+                EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA pgboss GRANT USAGE, SELECT ON SEQUENCES TO %I', role_name);
+            END IF;
+            
+            RAISE NOTICE 'Created isolated user: %', role_name;
+        ELSE
+            EXECUTE format('ALTER ROLE %I WITH PASSWORD %L', role_name, generated_password);
+            RAISE NOTICE 'Updated password for user: %', role_name;
+        END IF;
         
-        -- Drop any existing policies
-        DROP POLICY IF EXISTS user_job_isolation ON pgboss.job;
+        -- Ensure current pgboss permissions
+        IF EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = 'pgboss') THEN
+            EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA pgboss TO %I', role_name);
+            EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA pgboss TO %I', role_name);
+        END IF;
         
-        -- Create case-insensitive RLS policy for pgboss jobs
-        CREATE POLICY user_job_isolation ON pgboss.job
-        FOR ALL 
-        USING (
-            -- Allow superusers and system accounts full access
-            current_user = 'postgres' 
-            OR pg_has_role(current_user, 'postgres', 'MEMBER')
-            OR current_user LIKE 'peerbot_%'
-            OR
-            -- User can access jobs with their user ID in data (case-insensitive)
-            (data ? 'userId' AND UPPER(data->>'userId') = UPPER(current_user))
-            OR
-            -- User can access thread messages for their deployments (case-insensitive)
-            (name LIKE 'thread_message_%' AND 
-             name LIKE 'thread_message_peerbot-worker-%' AND
-             data ? 'userId' AND 
-             UPPER(data->>'userId') = UPPER(current_user))
-            OR
-            -- Allow access to jobs without user context (system jobs)
-            (NOT (data ? 'userId'))
-        )
-        WITH CHECK (
-            -- Same conditions for INSERT/UPDATE
-            current_user = 'postgres' 
-            OR pg_has_role(current_user, 'postgres', 'MEMBER')
-            OR current_user LIKE 'peerbot_%'
-            OR
-            (data ? 'userId' AND UPPER(data->>'userId') = UPPER(current_user))
-            OR
-            (name LIKE 'thread_message_%' AND 
-             name LIKE 'thread_message_peerbot-worker-%' AND
-             data ? 'userId' AND 
-             UPPER(data->>'userId') = UPPER(current_user))
-            OR
-            (NOT (data ? 'userId'))
-        );
-
-        -- Create trigger to automatically set user context
-        DROP TRIGGER IF EXISTS ensure_user_context_trigger ON pgboss.job;
-        CREATE TRIGGER ensure_user_context_trigger
-            BEFORE INSERT OR UPDATE ON pgboss.job
-            FOR EACH ROW
-            EXECUTE FUNCTION ensure_job_user_context();
-
-        -- Add indexes for better RLS performance
-        CREATE INDEX IF NOT EXISTS idx_pgboss_job_user_id ON pgboss.job((data->>'userId')) WHERE data ? 'userId';
-        CREATE INDEX IF NOT EXISTS idx_pgboss_job_name_userid ON pgboss.job(name, (data->>'userId')) WHERE data ? 'userId';
-
-        -- Add comment explaining the RLS setup
-        COMMENT ON POLICY user_job_isolation ON pgboss.job IS 
-        'Case-insensitive RLS policy that compares job data userId directly with current database user';
-        
-        RAISE NOTICE 'pgboss RLS policies configured successfully';
+        RETURN role_name;
     END;
     $$ LANGUAGE plpgsql;
     
