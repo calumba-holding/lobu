@@ -187,7 +187,17 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
             message: pvcError.message,
             body: pvcError.body,
           });
-          throw new Error(`Failed to create PVC: ${pvcError.message || 'Unknown error'}`);
+          
+          // Extract meaningful error message
+          let errorMessage = pvcError.message || 'Unknown error';
+          if (pvcError.body?.message) {
+            errorMessage = pvcError.body.message;
+            // Check for quota exceeded
+            if (errorMessage.includes('exceeded quota')) {
+              errorMessage = `PVC quota exceeded: ${errorMessage}. Please clean up unused PVCs.`;
+            }
+          }
+          throw new Error(`Failed to create PVC: ${errorMessage}`);
         }
       } else {
         console.error(`❌ Failed to check PVC ${pvcName}:`, {
