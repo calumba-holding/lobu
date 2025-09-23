@@ -42,7 +42,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: buremba/helm-charts  # Create this public repository
-          token: ${{ secrets.GH_TOKEN_PEERBOT }}
+          token: ${{ secrets.GITHUB_TOKEN }}  # Use default GitHub Actions token
           path: helm-repo
           ref: main
 

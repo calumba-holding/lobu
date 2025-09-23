@@ -248,75 +248,33 @@ export class GitHubRepositoryManager {
         return cached;
       }
 
-      const repositoryName = username; // Repository name matches username
+      // If DEMO_REPOSITORY is configured and no user repository is set, use demo
+      const demoRepository = process.env.DEMO_REPOSITORY;
+      if (demoRepository) {
+        const { repositoryUrl, cloneUrl } =
+          this.normalizeRepoUrls(demoRepository);
+        const repository: UserRepository = {
+          username,
+          repositoryName: this.extractRepoNameFromUrl(demoRepository),
+          repositoryUrl,
+          cloneUrl,
+          createdAt: Date.now(),
+          lastUsed: Date.now(),
+        };
 
-      // Check if repository exists
-      let repository: UserRepository | undefined;
-
-      // Determine the owner(s) to check
-      const possibleOwners: string[] = [];
-
-      // Always check authenticated user's space first
-      try {
-        const authUser = await this.octokit.rest.users.getAuthenticated();
-        possibleOwners.push(authUser.data.login);
-      } catch (e) {
-        logger.warn("Could not get authenticated user:", e);
-      }
-
-      // Optionally check organization if configured
-      if (this.config.organization && this.config.organization.trim() !== "") {
-        // Add organization as secondary option if specified
-        if (!possibleOwners.includes(this.config.organization)) {
-          possibleOwners.push(this.config.organization);
-        }
-      }
-
-      let foundRepo = false;
-      for (const owner of possibleOwners) {
-        try {
-          const repoResponse = await this.octokit.rest.repos.get({
-            owner: owner,
-            repo: repositoryName,
-          });
-
-          // Repository exists, create repository info
-          repository = {
-            username,
-            repositoryName,
-            repositoryUrl: repoResponse.data.html_url,
-            cloneUrl: repoResponse.data.clone_url,
-            createdAt: new Date(repoResponse.data.created_at).getTime(),
-            lastUsed: Date.now(),
-          };
-
-          logger.info(
-            `Found existing repository for user ${username} under ${owner}: ${repository.repositoryUrl}`
-          );
-          foundRepo = true;
-          break;
-        } catch (error: any) {
-          if (error.status !== 404) {
-            throw error;
-          }
-          // Continue to next owner
-        }
-      }
-
-      if (!foundRepo) {
-        // Repository doesn't exist anywhere, create it
-        repository = await this.createUserRepository(username);
-      }
-
-      // Cache repository info
-      if (repository) {
-        this.repositories.set(username, repository);
-        return repository;
-      } else {
-        throw new Error(
-          `Failed to find or create repository for user ${username}`
+        logger.info(
+          `Using demo repository for user ${username}: ${repository.repositoryUrl}`
         );
+        // Don't cache demo repositories
+        return repository;
       }
+
+      // No user-specific repository configured and no demo repository
+      // Users must explicitly select or authenticate to use repositories
+      throw new Error(
+        `No repository configured for user ${username}. ` +
+          `Please select a repository or authenticate with GitHub to continue.`
+      );
     } catch (error) {
       throw new GitHubRepositoryError(
         "ensureUserRepository",
@@ -324,118 +282,6 @@ export class GitHubRepositoryManager {
         `Failed to ensure repository for user ${username}`,
         error as Error
       );
-    }
-  }
-
-  /**
-   * Create a new user repository
-   */
-  private async createUserRepository(
-    username: string
-  ): Promise<UserRepository> {
-    try {
-      const repositoryName = username;
-
-      logger.info(`Creating repository for user ${username}...`);
-
-      // Always create repository in authenticated user's space
-      const repoResponse =
-        await this.octokit.rest.repos.createForAuthenticatedUser({
-          name: repositoryName,
-          description: `Personal workspace for ${username} - Peerbot`,
-          private: false,
-          has_issues: true,
-          has_projects: false,
-          has_wiki: false,
-          auto_init: true,
-          gitignore_template: "Node",
-          license_template: "mit",
-        });
-
-      logger.info(
-        `Created repository for user ${username} in their GitHub account`
-      );
-
-      // Use the actual owner from the response
-      const owner = repoResponse.data.owner.login;
-
-      await this.octokit.rest.repos.createOrUpdateFileContents({
-        owner: owner,
-        repo: repositoryName,
-        path: "README.md",
-        message: "Initial setup by Peerbot",
-        content: `# ${repositoryName}`,
-      });
-
-      // Create initial directory structure
-      await this.createInitialStructure(owner, repositoryName);
-
-      const repository: UserRepository = {
-        username,
-        repositoryName,
-        repositoryUrl: repoResponse.data.html_url,
-        cloneUrl: repoResponse.data.clone_url,
-        createdAt: Date.now(),
-        lastUsed: Date.now(),
-      };
-
-      logger.info(
-        `Created repository for user ${username}: ${repository.repositoryUrl}`
-      );
-
-      return repository;
-    } catch (error) {
-      throw new GitHubRepositoryError(
-        "createUserRepository",
-        username,
-        `Failed to create repository for user ${username}`,
-        error as Error
-      );
-    }
-  }
-
-  /**
-   * Create initial directory structure
-   */
-  private async createInitialStructure(
-    owner: string,
-    repositoryName: string
-  ): Promise<void> {
-    const directories = [
-      {
-        path: "projects/examples/.gitkeep",
-        content:
-          "# Example projects directory\n\nThis directory will contain example projects created by Claude.",
-      },
-      {
-        path: "scripts/.gitkeep",
-        content:
-          "# Scripts directory\n\nThis directory will contain utility scripts.",
-      },
-      {
-        path: "docs/.gitkeep",
-        content:
-          "# Documentation directory\n\nThis directory will contain project documentation.",
-      },
-      {
-        path: "workspace/.gitkeep",
-        content:
-          "# Temporary workspace\n\nThis directory is used for temporary files during Claude sessions.",
-      },
-    ];
-
-    for (const dir of directories) {
-      try {
-        await this.octokit.rest.repos.createOrUpdateFileContents({
-          owner: owner,
-          repo: repositoryName,
-          path: dir.path,
-          message: `Create ${dir.path.split("/")[0]} directory`,
-          content: Buffer.from(dir.content).toString("base64"),
-        });
-      } catch (error) {
-        logger.warn(`Failed to create ${dir.path}:`, error);
-      }
     }
   }
 

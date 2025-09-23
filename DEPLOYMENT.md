@@ -31,7 +31,6 @@ Configure the following secrets in your GitHub repository (Settings → Secrets 
 - `SLACK_BOT_TOKEN`: Slack Bot User OAuth Token (xoxb-...)
 - `SLACK_APP_TOKEN`: Slack App-Level Token (xapp-...)
 - `SLACK_SIGNING_SECRET`: Slack Signing Secret
-- `GH_TOKEN_PEERBOT`: GitHub personal access token for bot operations
 - `CLAUDE_CODE_OAUTH_TOKEN`: Claude Code OAuth token
 - `POSTGRESQL_PASSWORD`: PostgreSQL database password
 
