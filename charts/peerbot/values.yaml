@@ -216,6 +216,6 @@ pgboss:
 spegel:
   enabled: true
   image:
-    tag: "v0.0.25"
+    tag: "v0.4.0"
   # Spegel automatically discovers other nodes via Kubernetes API
   # No additional configuration needed for basic P2P functionality

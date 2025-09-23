@@ -9,6 +9,10 @@ node_modules
 .tmp/*
 charts/peerbot/values-local.yaml
 
+# Helm dependency files
+charts/peerbot/charts/
+charts/peerbot/Chart.lock
+
 # Build output - compiled artifacts should not be committed
 dist/
 **/dist/

@@ -46,6 +46,6 @@ annotations:
       description: Kubernetes deployment with persistent volumes
 dependencies:
   - name: spegel
-    version: "0.0.25"
+    version: "0.4.0"
     repository: oci://ghcr.io/spegel-org/helm-charts
     condition: spegel.enabled
