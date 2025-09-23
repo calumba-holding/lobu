@@ -886,14 +886,33 @@ export class ThreadResponseConsumer {
     if (!content) return;
 
     try {
-      // Process markdown and blockkit content
-      console.log(
-        `[DEBUG] Processing content for Slack - content length: ${content?.length || 0}`
-      );
-      const result = processMarkdownAndBlockkit(content);
-      console.log(
-        `[DEBUG] processMarkdownAndBlockkit result - blocks: ${result.blocks?.length || 0}, has actions: ${result.blocks?.some((b) => b.type === "actions")}`
-      );
+      let result: { text: string; blocks: any[] };
+
+      // Check if content is JSON with blocks (from authentication prompt)
+      try {
+        const parsed = JSON.parse(content);
+        if (parsed.blocks && Array.isArray(parsed.blocks)) {
+          // Content is already formatted blocks from the worker
+          console.log(
+            `[DEBUG] Content is pre-formatted blocks - blocks count: ${parsed.blocks.length}`
+          );
+          result = {
+            text: parsed.blocks[0]?.text?.text || "Authentication required",
+            blocks: parsed.blocks,
+          };
+        } else {
+          throw new Error("Not blocks format");
+        }
+      } catch {
+        // Not JSON or not blocks format - process as markdown
+        console.log(
+          `[DEBUG] Processing content for Slack - content length: ${content?.length || 0}`
+        );
+        result = processMarkdownAndBlockkit(content);
+        console.log(
+          `[DEBUG] processMarkdownAndBlockkit result - blocks: ${result.blocks?.length || 0}, has actions: ${result.blocks?.some((b) => b.type === "actions")}`
+        );
+      }
 
       // Get GitHub action buttons for this session
       const githubActionButtons = await generateGitHubActionButtons(

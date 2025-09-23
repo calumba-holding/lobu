@@ -504,37 +504,41 @@ export class QueueIntegration {
     }
 
     try {
-      // Create detailed error message including stack trace and error type
-      let detailedError = `${error.message}`;
+      // Create user-friendly error message without stack trace
+      let userFriendlyError = error.message;
 
-      // Add error type if it's not a generic Error
-      if (error.constructor.name !== "Error") {
-        detailedError = `${error.constructor.name}: ${detailedError}`;
+      // Add error type if it's not a generic Error and not WorkspaceError
+      if (
+        error.constructor.name !== "Error" &&
+        error.constructor.name !== "WorkspaceError"
+      ) {
+        userFriendlyError = `${error.constructor.name}: ${userFriendlyError}`;
       }
 
-      // Add stack trace for better debugging (first few lines)
-      if (error.stack) {
-        const stackLines = error.stack.split("\n").slice(1, 4); // Get first 3 stack lines
-        if (stackLines.length > 0) {
-          detailedError += `\n\nStack trace:\n${stackLines.map((line) => line.trim()).join("\n")}`;
-        }
-      }
+      // Log the full error with stack trace for debugging
+      logger.error("Full error details:", error);
 
       // Check for common error patterns and add specific context
       if (
+        error.message.includes("repository") &&
+        error.message.includes("not found")
+      ) {
+        userFriendlyError =
+          "Repository not found. Please authenticate with GitHub or use the demo to continue.";
+      } else if (
         error.message.includes("Permission denied") ||
         error.message.includes("EACCES")
       ) {
-        detailedError +=
+        userFriendlyError +=
           "\n\n💡 This appears to be a permission error. Check file/directory permissions or authentication.";
       } else if (error.message.includes("git")) {
-        detailedError +=
+        userFriendlyError +=
           "\n\n💡 This appears to be a Git-related error. Check repository access, credentials, or branch state.";
       } else if (
         error.message.includes("timeout") ||
         error.message.includes("ETIMEDOUT")
       ) {
-        detailedError +=
+        userFriendlyError +=
           "\n\n💡 This appears to be a timeout error. The operation may need more time or there could be a network issue.";
       }
 
@@ -546,7 +550,7 @@ export class QueueIntegration {
         channelId: this.responseChannel,
         threadTs: this.responseTs,
         userId: process.env.USER_ID || "unknown",
-        error: detailedError,
+        error: userFriendlyError,
         timestamp: Date.now(),
         originalMessageTs: this.messageId, // User's original message for reactions - no fallback to avoid stuck values
         gitBranch: gitStatus.branch, // Current git branch
@@ -567,6 +571,92 @@ export class QueueIntegration {
     } catch (sendError: any) {
       logger.error("Failed to send error signal to queue:", sendError);
       // Don't throw here - we're already handling an error
+    }
+  }
+
+  /**
+   * Send authentication prompt with helpful buttons
+   */
+  async sendAuthenticationPrompt(message: string): Promise<void> {
+    if (!this.isConnected) {
+      logger.warn("Queue not connected, skipping authentication prompt");
+      return;
+    }
+
+    try {
+      // Generate GitHub OAuth URL for authentication
+      const authUrl = `${process.env.INGRESS_URL || "http://localhost:8080"}/api/github/oauth/authorize?userId=${process.env.USER_ID}`;
+
+      // Create a rich message with buttons
+      const blocks = [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: message,
+          },
+        },
+        {
+          type: "actions",
+          elements: [
+            {
+              type: "button",
+              text: {
+                type: "plain_text",
+                text: "🔐 Connect GitHub",
+              },
+              url: authUrl,
+              action_id: "github_login",
+            },
+            {
+              type: "button",
+              text: {
+                type: "plain_text",
+                text: "🎮 Try Demo",
+              },
+              action_id: "demo_mode",
+              value: "demo",
+            },
+            {
+              type: "button",
+              text: {
+                type: "plain_text",
+                text: "❓ Get Help",
+              },
+              action_id: "welcome",
+              value: "welcome",
+            },
+          ],
+        },
+      ];
+
+      // Send as a formatted message with blocks
+      const payload: ThreadResponsePayload = {
+        messageId: this.messageId,
+        channelId: this.responseChannel,
+        threadTs: this.responseTs,
+        userId: process.env.USER_ID || "unknown",
+        content: JSON.stringify({ blocks }), // Send blocks as JSON
+        timestamp: Date.now(),
+        originalMessageTs: this.messageId,
+        botResponseTs: this.botResponseTs,
+        claudeSessionId: this.claudeSessionId,
+      };
+
+      const jobId = await this.pgBoss.send("thread_response", payload, {
+        priority: 1,
+        retryLimit: 5,
+        retryDelay: 5,
+        expireInHours: 1,
+      });
+
+      logger.info(`Sent authentication prompt to queue with job id: ${jobId}`);
+    } catch (sendError: any) {
+      logger.error("Failed to send authentication prompt to queue:", sendError);
+      // Fall back to simple error message
+      await this.signalError(
+        new Error("Authentication required. Please type 'welcome' for help.")
+      );
     }
   }
 

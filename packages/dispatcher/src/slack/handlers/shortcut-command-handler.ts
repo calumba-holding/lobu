@@ -2,7 +2,6 @@ import type { App } from "@slack/bolt";
 import logger from "../../logger";
 import { getDbPool } from "../../db";
 import type { DispatcherConfig } from "../../types";
-import { generateGitHubAuthUrl } from "../../utils/github-utils";
 import { encrypt } from "../../utils/encryption";
 import type { MessageHandler } from "./message-handler";
 import type { ActionHandler } from "./action-handler";
@@ -193,8 +192,6 @@ export class ShortcutCommandHandler {
         {
           type: "actions",
           elements: (() => {
-            const authUrl = generateGitHubAuthUrl(userId);
-
             const elements = [
               {
                 type: "button",
@@ -204,7 +201,7 @@ export class ShortcutCommandHandler {
                   emoji: true,
                 },
                 style: "primary",
-                url: authUrl,
+                action_id: "open_github_login_modal",
               } as any,
             ];
 

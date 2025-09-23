@@ -114,12 +114,20 @@ export class WorkspaceManager {
         `Thread-specific workspace setup completed for ${username} (thread: ${threadId}) at ${userDirectory}`
       );
       return this.workspaceInfo;
-    } catch (error) {
-      throw new WorkspaceError(
+    } catch (error: any) {
+      const workspaceError = new WorkspaceError(
         "setupWorkspace",
         `Failed to setup workspace for ${username}`,
         error as Error
       );
+
+      // Propagate authentication error flag if it exists
+      if (error.isAuthenticationError || error.gitExitCode === 128) {
+        (workspaceError as any).isAuthenticationError = true;
+        (workspaceError as any).gitExitCode = error.gitExitCode;
+      }
+
+      throw workspaceError;
     }
   }
 
@@ -148,31 +156,31 @@ export class WorkspaceManager {
       }
 
       logger.info("Repository cloned successfully");
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      const isTimeout =
-        errorMessage.includes("killed") && errorMessage.includes("SIGTERM");
-      const is404 =
-        errorMessage.includes("Repository not found") ||
-        errorMessage.includes("not found");
+    } catch (error: any) {
+      // Git returns exit code 128 for authentication/permission errors
+      const isAuthError = error.code === 128;
+      const errorMessage = error.stderr || error.message || String(error);
 
-      let userFriendlyMessage = `Failed to clone repository ${repositoryUrl}.`;
-      if (isTimeout) {
-        userFriendlyMessage +=
-          " The repository took too long to clone (timeout after 3 minutes). This could indicate a very large repository or network issues.";
-      } else if (is404) {
-        userFriendlyMessage +=
-          " The repository does not exist or you do not have access to it.";
-      } else {
-        userFriendlyMessage += ` Error: ${errorMessage}`;
-      }
+      // Check specific git error patterns
+      const isNotFound = errorMessage.includes("Repository not found");
+      const isAuthenticationFailed = errorMessage.includes(
+        "Authentication failed"
+      );
+      const isPermissionDenied = errorMessage.includes("Permission denied");
 
-      throw new WorkspaceError(
+      const workspaceError = new WorkspaceError(
         "cloneRepository",
-        userFriendlyMessage,
+        `Failed to clone repository ${repositoryUrl}`,
         error as Error
       );
+
+      // Add metadata to the error for proper handling upstream
+      (workspaceError as any).isAuthenticationError =
+        isAuthError &&
+        (isNotFound || isAuthenticationFailed || isPermissionDenied);
+      (workspaceError as any).gitExitCode = error.code;
+
+      throw workspaceError;
     }
   }
 

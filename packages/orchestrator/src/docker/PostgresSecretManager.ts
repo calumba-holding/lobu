@@ -93,9 +93,9 @@ export class PostgresSecretManager extends BaseSecretManager {
       for (const cred of credentials) {
         await this.dbPool.query(
           `
-          INSERT INTO user_environ (user_id, name, value, type, created_at, updated_at) 
-          VALUES ($1, $2, $3, $4, NOW(), NOW())
-          ON CONFLICT (user_id, name) 
+          INSERT INTO user_environ (user_id, channel_id, repository, name, value, type, created_at, updated_at) 
+          VALUES ($1, NULL, NULL, $2, $3, $4, NOW(), NOW())
+          ON CONFLICT (user_id, channel_id, repository, name) 
           DO UPDATE SET 
             value = EXCLUDED.value,
             type = EXCLUDED.type,

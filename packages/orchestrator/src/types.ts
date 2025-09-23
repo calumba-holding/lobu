@@ -90,6 +90,13 @@ export interface SimpleDeployment {
       };
       spec: {
         serviceAccountName?: string;
+        securityContext?: {
+          fsGroup?: number;
+          fsGroupChangePolicy?: "Always" | "OnRootMismatch";
+          runAsUser?: number;
+          runAsGroup?: number;
+          runAsNonRoot?: boolean;
+        };
         initContainers?: Array<{
           name: string;
           image: string;

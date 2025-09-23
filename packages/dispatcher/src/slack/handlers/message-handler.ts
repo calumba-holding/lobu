@@ -333,7 +333,7 @@ export class MessageHandler {
         error
       );
 
-      // Try to update reaction to error
+      // Handle all errors the same way - let the worker decide what to show
       try {
         await client.reactions.remove({
           channel: context.channelId,
@@ -350,14 +350,16 @@ export class MessageHandler {
         logger.error("Failed to update error reaction:", reactionError);
       }
 
-      const errorMessage = `❌ *Error:* ${error instanceof Error ? error.message : "Unknown error occurred"}`;
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      const errorMsg = `❌ *Error:* ${errorMessage || "Unknown error occurred"}`;
 
       // Post error message in thread
       const threadTs = context.threadTs || context.messageTs;
       await client.chat.postMessage({
         channel: context.channelId,
         thread_ts: threadTs,
-        text: errorMessage,
+        text: errorMsg,
         mrkdwn: true,
       });
 
@@ -503,5 +505,9 @@ export class MessageHandler {
 
   clearCacheForUser(username: string): void {
     this.repositoryCache.delete(username);
+  }
+
+  setShortcutCommandHandler(_handler: any): void {
+    // Reference to ShortcutCommandHandler - currently not used
   }
 }

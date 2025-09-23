@@ -153,14 +153,11 @@ export class ClaudeWorker {
       );
       logger.info(`User prompt: ${userPrompt.substring(0, 100)}...`);
 
-      // Check if this is a resumed session to show appropriate message
+      // Check if this is a resumed session
       const isResumedSession = !!this.config.resumeSessionId;
-      const workspaceMessage = isResumedSession
-        ? "💻 Resuming workspace..."
-        : "💻 Setting up new workspace...";
 
-      // Update initial message with appropriate status
-      await this.queueIntegration.updateProgress(workspaceMessage);
+      // Note: We don't send a progress update here because workspace setup might fail
+      // with an authentication error, and we don't want to send two messages
 
       // Setup workspace
       logger.info(
@@ -190,6 +187,13 @@ export class ClaudeWorker {
           );
         }
       );
+
+      // Now that workspace is successfully set up, send a progress update
+      const workspaceMessage = isResumedSession
+        ? "💻 Workspace resumed, processing your request..."
+        : "💻 Workspace ready, processing your request...";
+      await this.queueIntegration.updateProgress(workspaceMessage);
+
       // Prepare session context
       const sessionContext = {
         platform: "slack" as const,
@@ -316,30 +320,71 @@ export class ClaudeWorker {
         // Hide stop button before showing error
         this.queueIntegration.hideStopButton();
 
-        // Create more informative error message
-        let errorMessage = `💥 Worker crashed`;
-        if (error instanceof Error) {
-          errorMessage += `: ${error.message}`;
-          // Add error type if it's not generic
-          if (error.constructor.name !== "Error") {
-            errorMessage = `💥 Worker crashed (${error.constructor.name}): ${error.message}`;
-          }
-        } else {
-          errorMessage += ": Unknown error";
-        }
+        // Check if this is a repository access/authentication issue
+        const isRepoAccessError =
+          (error as any)?.isAuthenticationError === true ||
+          (error as any)?.cause?.isAuthenticationError === true ||
+          (error as any)?.gitExitCode === 128;
 
-        await this.queueIntegration.updateProgress(errorMessage);
-        await this.queueIntegration.signalError(
-          error instanceof Error ? error : new Error(String(error))
-        );
+        let userMessage: string;
+
+        if (isRepoAccessError) {
+          // This is a repository access issue - provide helpful guidance
+          const isDM = this.config.channelId?.startsWith("D");
+
+          if (isDM) {
+            // In DM, provide authentication options
+            userMessage = `🔐 **Authentication Required**
+
+I need access to a GitHub repository to help you. You have two options:
+
+**Option 1: Authenticate with GitHub**
+• Type \`login\` or click the button below to connect your GitHub account
+• This gives you full access to your repositories
+
+**Option 2: Try the Demo**
+• Type \`demo\` to use a sample repository
+• Great for exploring what I can do
+
+Type \`welcome\` for more information about getting started.`;
+          } else {
+            // In channel, be more concise
+            userMessage = `🔐 Repository access required. Please authenticate with GitHub or use the demo. Type \`welcome\` for help.`;
+          }
+
+          // Send the helpful message with buttons
+          await this.queueIntegration.sendAuthenticationPrompt(userMessage);
+        } else {
+          // Other errors - show generic error message
+          let errorMsg = `💥 Worker crashed`;
+          if (error instanceof Error) {
+            errorMsg += `: ${error.message}`;
+            // Add error type if it's not generic
+            if (
+              error.constructor.name !== "Error" &&
+              error.constructor.name !== "WorkspaceError"
+            ) {
+              errorMsg = `💥 Worker crashed (${error.constructor.name}): ${error.message}`;
+            }
+          } else {
+            errorMsg += ": Unknown error";
+          }
+
+          await this.queueIntegration.updateProgress(errorMsg);
+          await this.queueIntegration.signalError(
+            error instanceof Error ? error : new Error(String(error))
+          );
+        }
 
         // Reactions are now handled by dispatcher based on error status
       } catch (queueError) {
         logger.error("Failed to send error via queue:", queueError);
+        // Still throw the original error if we couldn't send it via queue
+        throw error;
       }
 
-      // Re-throw to ensure container exits with error code
-      throw error;
+      // Don't re-throw here - we've already handled the error via signalError
+      // This prevents the queue-consumer from sending duplicate error signals
     }
   }
 

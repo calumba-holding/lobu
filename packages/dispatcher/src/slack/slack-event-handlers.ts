@@ -51,6 +51,9 @@ export class SlackEventHandlers {
       this.actionHandler
     );
 
+    // Set the ShortcutCommandHandler reference in MessageHandler so it can use sendContextAwareWelcome
+    this.messageHandler.setShortcutCommandHandler(this.shortcutCommandHandler);
+
     // Setup all event handlers
     this.setupEventHandlers();
     // Setup options handlers for dropdowns/selects

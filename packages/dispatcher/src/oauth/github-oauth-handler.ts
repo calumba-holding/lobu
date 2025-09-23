@@ -140,17 +140,17 @@ export class GitHubOAuthHandler {
       // Store GitHub token and username (token encrypted at rest)
       const encToken = encrypt(accessToken);
       await this.dbPool.query(
-        `INSERT INTO user_environ (user_id, name, value, type) 
-         VALUES ($1, 'GITHUB_TOKEN', $2, 'user') 
-         ON CONFLICT (user_id, name) 
+        `INSERT INTO user_environ (user_id, channel_id, repository, name, value, type) 
+         VALUES ($1, NULL, NULL, 'GITHUB_TOKEN', $2, 'user') 
+         ON CONFLICT (user_id, channel_id, repository, name) 
          DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
         [userDbId, encToken]
       );
 
       await this.dbPool.query(
-        `INSERT INTO user_environ (user_id, name, value, type) 
-         VALUES ($1, 'GITHUB_USER', $2, 'user') 
-         ON CONFLICT (user_id, name) 
+        `INSERT INTO user_environ (user_id, channel_id, repository, name, value, type) 
+         VALUES ($1, NULL, NULL, 'GITHUB_USER', $2, 'user') 
+         ON CONFLICT (user_id, channel_id, repository, name) 
          DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
         [userDbId, githubUsername]
       );

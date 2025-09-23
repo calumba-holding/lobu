@@ -95,7 +95,7 @@ export async function handleExecutableCodeBlock(
  */
 export async function handleBlockkitForm(
   actionId: string,
-  _userId: string, // Unused parameter, prefixed with underscore
+  _userId: string,
   channelId: string,
   messageTs: string,
   body: any,

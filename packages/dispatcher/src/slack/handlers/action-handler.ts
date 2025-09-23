@@ -62,6 +62,83 @@ export class ActionHandler {
         });
         break;
 
+      case "open_github_login_modal": {
+        // Open modal with GitHub OAuth link
+        const authUrl = generateGitHubAuthUrl(userId);
+        await client.views.open({
+          trigger_id: body.trigger_id,
+          view: {
+            type: "modal",
+            callback_id: "github_login_modal",
+            title: {
+              type: "plain_text",
+              text: "Connect GitHub",
+            },
+            blocks: [
+              {
+                type: "header",
+                text: {
+                  type: "plain_text",
+                  text: "🔗 Connect Your GitHub Account",
+                  emoji: true,
+                },
+              },
+              {
+                type: "section",
+                text: {
+                  type: "mrkdwn",
+                  text:
+                    "Connect your GitHub account to:\n\n" +
+                    "• Access your repositories\n" +
+                    "• Create new projects\n" +
+                    "• Manage code with AI assistance\n\n" +
+                    "*Your connection is secure and encrypted.*",
+                },
+              },
+              {
+                type: "divider",
+              },
+              {
+                type: "section",
+                text: {
+                  type: "mrkdwn",
+                  text: "Click the button below to authenticate with GitHub:",
+                },
+              },
+              {
+                type: "actions",
+                elements: [
+                  {
+                    type: "button",
+                    text: {
+                      type: "plain_text",
+                      text: "🚀 Connect with GitHub",
+                      emoji: true,
+                    },
+                    url: authUrl,
+                    style: "primary",
+                  },
+                ],
+              },
+              {
+                type: "context",
+                elements: [
+                  {
+                    type: "mrkdwn",
+                    text: "💡 *Note:* After connecting, you can select which repositories to work with.",
+                  },
+                ],
+              },
+            ],
+            close: {
+              type: "plain_text",
+              text: "Cancel",
+            },
+          },
+        });
+        break;
+      }
+
       case "github_connect":
         await handleGitHubConnect(userId, channelId, client);
         break;
@@ -89,33 +166,6 @@ export class ActionHandler {
         );
         this.messageHandler.clearCacheForUser(username);
         await this.updateAppHome(userId, client);
-        break;
-      }
-
-      // Demo example buttons
-      case "demo_example_1":
-      case "demo_example_2":
-      case "demo_example_3":
-      case "demo_example_4": {
-        const demoAction = body.actions?.[0];
-        const demoPrompt = demoAction?.value;
-        if (demoPrompt) {
-          // Process as a user message
-          const context: SlackContext = {
-            channelId,
-            userId,
-            teamId: body.team?.id || "",
-            threadTs: body.message?.thread_ts || body.message?.ts,
-            messageTs: body.message?.ts || Date.now().toString(),
-            text: demoPrompt,
-            userDisplayName: body.user?.username || "User",
-          };
-          await this.messageHandler.handleUserRequest(
-            context,
-            demoPrompt,
-            client
-          );
-        }
         break;
       }
 

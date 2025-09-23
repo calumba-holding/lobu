@@ -96,9 +96,18 @@ export async function handleTryDemo(
                 type: "plain_text",
                 text: "📄 Show landing page structure",
               },
-              action_id: "demo_example_1",
-              value:
-                "Show me the structure of the landing page and what technologies it uses",
+              action_id: "blockkit_form_demo_1",
+              value: JSON.stringify({
+                blocks: [
+                  {
+                    type: "section",
+                    text: {
+                      type: "mrkdwn",
+                      text: "Show me the structure of the landing page and what technologies it uses",
+                    },
+                  },
+                ],
+              }),
             },
             {
               type: "button",
@@ -106,9 +115,18 @@ export async function handleTryDemo(
                 type: "plain_text",
                 text: "🎨 Improve hero section",
               },
-              action_id: "demo_example_2",
-              value:
-                "Analyze the hero section and suggest improvements for better conversion",
+              action_id: "blockkit_form_demo_2",
+              value: JSON.stringify({
+                blocks: [
+                  {
+                    type: "section",
+                    text: {
+                      type: "mrkdwn",
+                      text: "Analyze the hero section and suggest improvements for better conversion",
+                    },
+                  },
+                ],
+              }),
             },
           ],
         },
@@ -121,9 +139,18 @@ export async function handleTryDemo(
                 type: "plain_text",
                 text: "✨ Add new feature",
               },
-              action_id: "demo_example_3",
-              value:
-                "Add a testimonials section to the landing page with animated cards",
+              action_id: "blockkit_form_demo_3",
+              value: JSON.stringify({
+                blocks: [
+                  {
+                    type: "section",
+                    text: {
+                      type: "mrkdwn",
+                      text: "Add a testimonials section to the landing page with animated cards",
+                    },
+                  },
+                ],
+              }),
             },
             {
               type: "button",
@@ -131,9 +158,18 @@ export async function handleTryDemo(
                 type: "plain_text",
                 text: "🔍 SEO analysis",
               },
-              action_id: "demo_example_4",
-              value:
-                "Analyze the SEO of this landing page and suggest improvements",
+              action_id: "blockkit_form_demo_4",
+              value: JSON.stringify({
+                blocks: [
+                  {
+                    type: "section",
+                    text: {
+                      type: "mrkdwn",
+                      text: "Analyze the SEO of this landing page and suggest improvements",
+                    },
+                  },
+                ],
+              }),
             },
           ],
         },

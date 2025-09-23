@@ -290,36 +290,10 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
           },
           spec: {
             serviceAccountName: "peerbot-worker",
-            initContainers: [
-              {
-                name: "fix-permissions",
-                image: "busybox:1.36",
-                command: ["sh", "-c"],
-                args: [
-                  "chown -R 1001:1001 /workspace && chmod -R 755 /workspace",
-                ],
-                securityContext: {
-                  runAsUser: 0,
-                  runAsNonRoot: false,
-                },
-                resources: {
-                  requests: {
-                    cpu: "10m",
-                    memory: "32Mi",
-                  },
-                  limits: {
-                    cpu: "50m",
-                    memory: "64Mi",
-                  },
-                },
-                volumeMounts: [
-                  {
-                    name: "workspace",
-                    mountPath: "/workspace",
-                  },
-                ],
-              },
-            ],
+            securityContext: {
+              fsGroup: 1001,
+              fsGroupChangePolicy: "OnRootMismatch",
+            },
             containers: [
               {
                 name: "worker",

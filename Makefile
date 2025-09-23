@@ -121,21 +121,21 @@ deploy:
 	if [ -n "$$GITHUB_ACTIONS" ]; then \
 		IMAGE_REPO="$${DOCKER_NAMESPACE:-peerbot}"; \
 		IMAGE_TAG="$${IMAGE_TAG:-latest}"; \
+		IMAGE_OVERRIDES="--set dispatcher.image.repository=$$IMAGE_REPO/peerbot-dispatcher \
+			--set dispatcher.image.tag=$$IMAGE_TAG \
+			--set orchestrator.image.repository=$$IMAGE_REPO/peerbot-orchestrator \
+			--set orchestrator.image.tag=$$IMAGE_TAG \
+			--set worker.image.repository=$$IMAGE_REPO/peerbot-worker \
+			--set worker.image.tag=$$IMAGE_TAG"; \
 	else \
-		IMAGE_REPO="peerbot"; \
-		IMAGE_TAG="latest"; \
+		IMAGE_OVERRIDES=""; \
 	fi; \
 	helm upgrade --install "$${DEPLOYMENT_NAME:-peerbot}" charts/peerbot/ \
 		--dependency-update \
 		--create-namespace \
 		--namespace "$${NAMESPACE:-peerbot}" \
 		-f "$$VALUES_FILE" \
-		--set dispatcher.image.repository="$$IMAGE_REPO/peerbot-dispatcher" \
-		--set dispatcher.image.tag="$$IMAGE_TAG" \
-		--set orchestrator.image.repository="$$IMAGE_REPO/peerbot-orchestrator" \
-		--set orchestrator.image.tag="$$IMAGE_TAG" \
-		--set worker.image.repository="$$IMAGE_REPO/peerbot-worker" \
-		--set worker.image.tag="$$IMAGE_TAG" \
+		$$IMAGE_OVERRIDES \
 		--set config.githubClientId="$$GITHUB_CLIENT_ID" \
 		--set secrets.githubClientSecret="$$GITHUB_CLIENT_SECRET" \
 		--set secrets.encryptionKey="$$ENCRYPTION_KEY" \
@@ -145,6 +145,7 @@ deploy:
 		--set secrets.githubToken="$$GITHUB_TOKEN" \
 		--set secrets.claudeCodeOAuthToken="$$CLAUDE_CODE_OAUTH_TOKEN" \
 		--set secrets.postgresqlPassword="$$POSTGRESQL_PASSWORD" \
+		--set config.demoRepository="$$DEMO_REPOSITORY" \
 		--wait \
 		--timeout "$${HELM_TIMEOUT:-10m}"
 	@# Migrations are handled by orchestrator on startup, so just verify it's running
