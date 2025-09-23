@@ -1,6 +1,11 @@
 #!/usr/bin/env bun
 
 import logger from "../../logger";
+import {
+  extractEnvVariables,
+  hasEnvVariables,
+  storeEnvVariables,
+} from "../utils/env-storage";
 
 /**
  * Form submission handlers and utilities
@@ -35,6 +40,75 @@ export async function handleBlockkitFormSubmission(
     return;
   }
 
+  // Check if this form contains environment variables (action_ids with "env:" prefix)
+  if (hasEnvVariables(view.state.values)) {
+    logger.info("Form contains environment variables, storing directly");
+
+    const envVars = extractEnvVariables(view.state.values);
+    if (envVars.length > 0) {
+      const repository = metadata.repository || null;
+      const result = await storeEnvVariables(
+        userId,
+        envVars,
+        channelId,
+        repository
+      );
+
+      if (result.stored.length > 0) {
+        logger.info(
+          `Stored ${result.stored.length} env variables: ${result.stored.join(", ")}`
+        );
+
+        // Send confirmation message
+        await client.chat.postMessage({
+          channel: channelId,
+          thread_ts: threadTs,
+          text: `✅ Successfully stored ${result.stored.length} environment variable(s):\n${result.stored.map((v) => `• ${v}`).join("\n")}\n\nThese are now available in your Claude sessions.`,
+          blocks: [
+            {
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                text: `✅ *Environment Variables Stored*`,
+              },
+            },
+            {
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                text: `Successfully stored ${result.stored.length} environment variable(s):\n${result.stored.map((v) => `• \`${v}\``).join("\n")}`,
+              },
+            },
+            {
+              type: "context",
+              elements: [
+                {
+                  type: "mrkdwn",
+                  text: "🔒 Values are encrypted and will be available in your next Claude session",
+                },
+              ],
+            },
+          ],
+        });
+      }
+
+      if (result.failed.length > 0) {
+        logger.error(
+          `Failed to store ${result.failed.length} env variables: ${result.failed.join(", ")}`
+        );
+        await client.chat.postMessage({
+          channel: channelId,
+          thread_ts: threadTs,
+          text: `⚠️ Failed to store some environment variables: ${result.failed.join(", ")}`,
+        });
+      }
+
+      // Return early - don't post the form content to thread
+      return;
+    }
+  }
+
+  // Normal form processing (non-env variables)
   // Extract input fields from state values
   const inputFieldsData = extractViewInputs(view.state.values);
 

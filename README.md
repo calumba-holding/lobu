@@ -10,7 +10,7 @@ A powerful [Claude Code](https://claude.ai/code) Slack application that brings A
 - Run `make setup` to generate `.env` file
 - Run `mave dev`
 
--- If you need to run QA tests (`.claude/commands/slack-qa-bot.js`), add these variables to your `.env` file:
+-- If you need to run QA tests (`./slack-qa-bot.js`), add these variables to your `.env` file:
 
 ```
 QA_SLACK_BOT_TOKEN=your_qa_bot_token_here

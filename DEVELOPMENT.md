@@ -17,13 +17,13 @@ Before starting, ensure you have the following installed:
 After setup, test the bot with:
 
 ```bash
-.claude/commands/slack-qa-bot.js "hello world"
+./slack-qa-bot.js "hello world"
 ```
 
 Or with a specific task:
 
 ```bash
-.claude/commands/slack-qa-bot.js "create a Python hello world script and commit it" --timeout 30
+./slack-qa-bot.js "create a Python hello world script and commit it" --timeout 30
 ```
 
 ## Development Workflow

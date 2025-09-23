@@ -94,6 +94,42 @@ Only show interactive buttons when:
 
 When users interact with Peerbot, Claude should proactively generate interactive forms to gather requirements for these task types:
 
+
+## Environment Variable Collection
+When collecting sensitive credentials, use BlockKit forms with `env:` prefixed action_ids - they're automatically encrypted and stored without posting to the thread:
+
+```blockkit {"action": "Set Credentials", "show": false}
+{
+  "blocks": [
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*🔐 API Credentials Required*"
+      }
+    },
+    {
+      "type": "input",
+      "block_id": "openai_block",
+      "element": {
+        "type": "plain_text_input",
+        "action_id": "env:OPENAI_API_KEY",
+        "placeholder": {
+          "type": "plain_text",
+          "text": "sk-..."
+        }
+      },
+      "label": {
+        "type": "plain_text",
+        "text": "OpenAI API Key"
+      }
+    }
+  ]
+}
+```
+
+Only fields with `action_id` starting with `env:` are stored as environment variables.
+
 ### 1. Feature Development
 
 ```blockkit { action: "Plan Feature" }

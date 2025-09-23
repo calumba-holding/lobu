@@ -6,12 +6,12 @@
 
 ## Instructions
 - You MUST only do what has been asked; nothing more, nothing less.
-- For comprehensive QA and E2E testing, see `.claude/commands/qa.md` for detailed testing procedures and examples. You can directly run `.claude/commands/slack-qa-bot.sh "Your prompt"` if there is no specific testing asked, otherwise use `.claude/commands/slack-qa-bot.js` to test the bot.
+- For comprehensive QA and E2E testing, see `.claude/commands/qa.md` for detailed testing procedures and examples. You can directly run `.claude/commands/slack-qa-bot.sh "Your prompt"` if there is no specific testing asked, otherwise use `./slack-qa-bot.js` to test the bot.
 - When you make changes to worker code (`packages/worker/*`), run `make clean-workers` to ensure new workers use the updated code.
 - Anytime you make changes in the code, you MUST:
 
 1. Have the bot running via `make dev` running in the background for development. This uses Docker Compose with hot reload enabled when NODE_ENV=development.
-2. Run .claude/commands/slack-qa-bot.js "Relevant prompt" --timeout [based on complexity change by default 10] and make sure it works properly. If the script fails (including getting stuck at "Starting environment setup"), you MUST fix it.
+2. Run ./slack-qa-bot.js "Relevant prompt" --timeout [based on complexity change by default 10] and make sure it works properly. If the script fails (including getting stuck at "Starting environment setup"), you MUST fix it.
 3. Check logs using `docker compose logs` or `make logs` to verify the bot works properly.
 
 - If you create ephemeral files, you MUST delete them when you're done with them.
@@ -59,11 +59,11 @@ Basic usage:
 
 ```bash
 # Simple test
-.claude/commands/slack-qa-bot.js "Hello bot"
+./slack-qa-bot.js "Hello bot"
 
 # JSON output for automation
-.claude/commands/slack-qa-bot.js --json "Create a function" | jq -r .thread_ts
+./slack-qa-bot.js --json "Create a function" | jq -r .thread_ts
 
 # Comprehensive E2E testing
-./.claude/commands/slack-qa-bot.sh
+./slack-qa-bot.js
 ```
