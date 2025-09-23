@@ -12,7 +12,6 @@ Brief description of the changes in this PR.
 ## Testing
 - [ ] Ran `bun test` and all tests pass
 - [ ] Ran `bun run format` and `bun run lint` 
-- [ ] Tested bot functionality with `./slack-qa-bot.js` (if applicable)
 - [ ] Verified changes work in Docker Compose (`make dev`)
 
 ## Checklist

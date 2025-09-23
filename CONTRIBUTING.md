@@ -26,7 +26,7 @@ All changes must go through pull requests. Direct pushes to main are disabled.
    bun run lint
    
    # Test bot functionality
-   ./slack-qa-bot.js "Your test prompt"
+   .claude/commands/slack-qa-bot.js "Your test prompt"
    
    # Verify in Docker Compose
    make dev

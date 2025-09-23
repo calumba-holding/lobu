@@ -87,7 +87,6 @@ This is a development environment for the Peerbot running in a VS Code DevContai
 - `make dev` - Start Docker development mode with hot reload
 - `make k3s-setup` - Setup k3s cluster (if needed)
 - `make k3s-install` - Install the application to k3s
-- `./slack-qa-bot.js "message"` - Test the bot with a message
 
 ## Environment
 
@@ -117,7 +116,6 @@ echo ""
 echo "📚 Quick Start Guide:"
 echo "  1. Configure your .env file with Slack and GitHub tokens"
 echo "  2. Run 'make dev' to start development with Docker"
-echo "  3. Use './slack-qa-bot.js \"your message\"' to test the bot"
 echo ""
 echo "🛠️ Available Tools:"
 echo "  - Claude Code CLI: $(claude --version 2>/dev/null || echo 'Run: bun install -g @anthropic-ai/claude-code')"

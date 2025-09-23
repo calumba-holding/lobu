@@ -85,16 +85,6 @@ make dev
 - `dc` → docker compose
 - `dps` → docker ps
 
-### Testing
-
-```bash
-# Test the bot with a message
-./slack-qa-bot.js "Hello, test message"
-
-# Test with timeout
-./slack-qa-bot.js "Complex task" --timeout 30
-```
-
 ### Development
 
 ```bash
