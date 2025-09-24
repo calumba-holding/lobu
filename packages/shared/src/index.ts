@@ -9,3 +9,6 @@ export type {
   ConversationMessage,
   SessionContext,
 } from "./types";
+
+// Export error classes
+export * from "./errors";
