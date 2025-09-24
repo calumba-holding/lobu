@@ -1,5 +1,5 @@
 import logger from "../../logger";
-import { getDbPool } from "../../db";
+import { getDbPool } from "@peerbot/shared";
 
 /**
  * Handle Try Demo action - sets up demo repository for user

@@ -1,7 +1,7 @@
 import logger from "../../logger";
-import { getDbPool } from "../../db";
+import { getDbPool } from "@peerbot/shared";
 import { ErrorHandler } from "../../utils/error-handler";
-import { decrypt } from "../../utils/encryption";
+import { decrypt } from "@peerbot/shared";
 import { generateGitHubAuthUrl } from "../../utils/github-utils";
 
 /**

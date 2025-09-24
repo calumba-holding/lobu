@@ -1,8 +1,8 @@
 import type { App } from "@slack/bolt";
 import logger from "../../logger";
-import { getDbPool } from "../../db";
+import { getDbPool } from "@peerbot/shared";
 import type { DispatcherConfig } from "../../types";
-import { encrypt } from "../../utils/encryption";
+import { encrypt } from "@peerbot/shared";
 import type { MessageHandler } from "./message-handler";
 import type { ActionHandler } from "./action-handler";
 import { openRepositoryModal } from "./repository-modal-utils";

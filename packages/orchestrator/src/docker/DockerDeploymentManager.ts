@@ -4,7 +4,7 @@ import {
   BaseDeploymentManager,
   type DeploymentInfo,
 } from "../base/BaseDeploymentManager";
-import type { DatabasePool } from "../db-connection-pool";
+import type { DatabasePool } from "@peerbot/shared";
 import {
   ErrorCode,
   type OrchestratorConfig,

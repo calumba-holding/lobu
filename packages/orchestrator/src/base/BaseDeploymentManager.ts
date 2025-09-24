@@ -1,12 +1,12 @@
-import type { DatabasePool } from "../db-connection-pool";
-import { DatabaseManager } from "../db-operations";
+import type { DatabasePool } from "@peerbot/shared";
+import { DatabaseManager } from "@peerbot/shared";
 import {
   ErrorCode,
   type OrchestratorConfig,
   OrchestratorError,
 } from "../types";
 import type { BaseSecretManager } from "./BaseSecretManager";
-import { decrypt } from "../utils/encryption";
+import { decrypt } from "@peerbot/shared";
 
 export interface DeploymentInfo {
   deploymentName: string;

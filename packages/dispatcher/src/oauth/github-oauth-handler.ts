@@ -2,9 +2,9 @@
 
 import axios from "axios";
 import type { Request, Response } from "express";
-import { getDbPool } from "../db";
+import { getDbPool } from "@peerbot/shared";
 import logger from "../logger";
-import { encrypt, decrypt } from "../utils/encryption";
+import { encrypt, decrypt } from "@peerbot/shared";
 
 export class GitHubOAuthHandler {
   private dbPool: any;

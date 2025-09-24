@@ -1,15 +1,47 @@
 import { Pool, type PoolClient } from "pg";
-import { type OrchestratorConfig, OrchestratorError } from "./types";
+
+export interface DatabaseConfig {
+  connectionString: string;
+  max?: number;
+  idleTimeoutMillis?: number;
+  connectionTimeoutMillis?: number;
+}
+
+/**
+ * Generic database error for shared utilities
+ */
+export class DatabaseError extends Error {
+  constructor(
+    message: string,
+    public originalError?: any,
+    public shouldRetry: boolean = false
+  ) {
+    super(message);
+    this.name = "DatabaseError";
+  }
+
+  static fromError(error: any): DatabaseError {
+    return new DatabaseError(
+      `Database error: ${error instanceof Error ? error.message : String(error)}`,
+      error,
+      true
+    );
+  }
+}
 
 export class DatabasePool {
   private pool: Pool;
 
-  constructor(config: OrchestratorConfig["database"]) {
+  constructor(config: DatabaseConfig | string) {
+    const dbConfig = typeof config === 'string' 
+      ? { connectionString: config }
+      : config;
+      
     this.pool = new Pool({
-      connectionString: config.connectionString,
-      max: 20,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 10000,
+      connectionString: dbConfig.connectionString,
+      max: dbConfig.max ?? 20,
+      idleTimeoutMillis: dbConfig.idleTimeoutMillis ?? 30000,
+      connectionTimeoutMillis: dbConfig.connectionTimeoutMillis ?? 10000,
     });
 
     this.pool.on("error", (err) => {
@@ -21,7 +53,7 @@ export class DatabasePool {
     try {
       return await this.pool.connect();
     } catch (error) {
-      throw OrchestratorError.fromDatabaseError(error);
+      throw DatabaseError.fromError(error);
     }
   }
 
@@ -30,7 +62,7 @@ export class DatabasePool {
       const result = await this.pool.query(text, params);
       return result;
     } catch (error) {
-      throw OrchestratorError.fromDatabaseError(error);
+      throw DatabaseError.fromError(error);
     }
   }
 
@@ -49,7 +81,7 @@ export class DatabasePool {
       const result = await client.query(text, params);
       return result;
     } catch (error) {
-      throw OrchestratorError.fromDatabaseError(error);
+      throw DatabaseError.fromError(error);
     } finally {
       client.release();
     }
@@ -72,7 +104,7 @@ export class DatabasePool {
       return result;
     } catch (error) {
       await client.query("ROLLBACK");
-      throw OrchestratorError.fromDatabaseError(error);
+      throw DatabaseError.fromError(error);
     } finally {
       client.release();
     }
@@ -103,4 +135,23 @@ export class DatabasePool {
   async close(): Promise<void> {
     await this.pool.end();
   }
+
+  /**
+   * Get the underlying pg.Pool instance for compatibility
+   */
+  getPool(): Pool {
+    return this.pool;
+  }
+}
+
+// Simple factory function for backward compatibility with dispatcher
+let globalPool: Pool | null = null;
+
+export function getDbPool(connectionString?: string): Pool {
+  if (!globalPool) {
+    globalPool = new Pool({
+      connectionString: connectionString || process.env.DATABASE_URL,
+    });
+  }
+  return globalPool;
 }

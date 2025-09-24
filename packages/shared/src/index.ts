@@ -10,6 +10,13 @@ export type {
   SessionContext,
 } from "./types";
 
+// Export database utilities
+export * from "./database/connection-pool";
+export * from "./database/operations";
+
+// Export encryption utilities
+export * from "./utils/encryption";
+
 // Export testing utilities
 export * from "./testing";
 // Export error classes

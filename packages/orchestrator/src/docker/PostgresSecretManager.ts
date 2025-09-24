@@ -1,5 +1,5 @@
 import { BaseSecretManager } from "../base/BaseSecretManager";
-import type { DatabasePool } from "../db-connection-pool";
+import type { DatabasePool } from "@peerbot/shared";
 import {
   ErrorCode,
   type OrchestratorConfig,

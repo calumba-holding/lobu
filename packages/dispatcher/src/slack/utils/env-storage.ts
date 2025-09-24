@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
-import { encrypt } from "../../utils/encryption";
-import { getDbPool } from "../../db";
+import { encrypt } from "@peerbot/shared";
+import { getDbPool } from "@peerbot/shared";
 import logger from "../../logger";
 
 const ENV_PREFIX = "env:";

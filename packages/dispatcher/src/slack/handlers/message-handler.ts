@@ -1,6 +1,6 @@
 import { SessionUtils } from "@peerbot/shared";
 import logger from "../../logger";
-import { decrypt } from "../../utils/encryption";
+import { decrypt } from "@peerbot/shared";
 import type {
   QueueProducer,
   ThreadMessagePayload,
@@ -12,7 +12,7 @@ import type {
   ThreadSession,
 } from "../../types";
 import type { GitHubRepositoryManager } from "../../github/repository-manager";
-import { getDbPool } from "../../db";
+import { getDbPool } from "@peerbot/shared";
 
 export class MessageHandler {
   private activeSessions = new Map<string, ThreadSession>();

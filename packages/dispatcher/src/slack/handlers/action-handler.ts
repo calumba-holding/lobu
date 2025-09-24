@@ -1,5 +1,5 @@
 import logger from "../../logger";
-// import { getDbPool } from "../../db"; // Currently unused
+// import { getDbPool } from "@peerbot/shared"; // Currently unused
 import type { GitHubRepositoryManager } from "../../github/repository-manager";
 import type { QueueProducer } from "../../queue/task-queue-producer";
 import type { DispatcherConfig, SlackContext } from "../../types";
