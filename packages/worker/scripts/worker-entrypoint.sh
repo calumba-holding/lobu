@@ -176,16 +176,15 @@ echo "  - Recovery: ${RECOVERY_MODE:-false}"
 # Make scripts executable
 chmod +x /app/scripts/*.sh 2>/dev/null || true
 
-# Setup MCP server
-/app/packages/worker/scripts/setup-mcp-server.sh || echo "⚠️  MCP server setup failed or not found"
+# Always build the MCP server to ensure we have the latest version
+# This is needed because the Docker image may have stale compiled JS
+echo "Building packages to ensure MCP server is up to date..."
+cd /app/packages/shared && bun run build
+cd /app/packages/worker && bun run build
+chmod +x /app/packages/worker/dist/mcp/process-manager-server.mjs 2>/dev/null || true
 
-# Check if we need to build (dev mode only)
-if [ "${NODE_ENV}" = "development" ]; then
-    echo "Building packages in development mode..."
-    cd /app/packages/shared && bun run build
-    cd /app/packages/worker && bun run build
-    chmod +x /app/packages/worker/dist/mcp/process-manager-server.mjs 2>/dev/null || true
-fi
+# Setup MCP server AFTER building
+/app/packages/worker/scripts/setup-mcp-server.sh || echo "⚠️  MCP server setup failed or not found"
 
 # Start the worker process
 echo "🚀 Executing Claude Worker..."

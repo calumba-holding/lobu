@@ -127,10 +127,18 @@ export abstract class BaseDeploymentManager {
     threadId: string,
     messageData?: any
   ): Promise<void> {
-    // Create a more readable deployment name using user ID and last 6 chars of thread ID
+    // CRITICAL: Create deployment name using user ID and thread ID
+    // This name MUST be consistent for all messages in the same thread
+    // Thread ID should ALWAYS be the Slack thread_ts (root message timestamp)
+    // DO NOT use individual message timestamps - that creates multiple workers per thread!
+    // Example: peerbot-worker-u095zlhk-297-164169 (one worker for entire thread)
     const shortThreadId = threadId.replace(".", "-").slice(-10); // Last 10 chars, replace dot with dash
     const shortUserId = userId.toLowerCase().slice(0, 8); // First 8 chars of user ID
     const deploymentName = `peerbot-worker-${shortUserId}-${shortThreadId}`;
+
+    console.log(
+      `Worker deployment - threadId: ${threadId}, deploymentName: ${deploymentName}`
+    );
 
     try {
       // Always ensure user credentials exist first
@@ -220,9 +228,6 @@ export abstract class BaseDeploymentManager {
       USERNAME: username,
       DEPLOYMENT_NAME: deploymentName,
       CHANNEL_ID: messageData?.channelId || "",
-      REPOSITORY_URL:
-        messageData?.platformMetadata?.repositoryUrl ||
-        process.env.GITHUB_REPOSITORY,
       ORIGINAL_MESSAGE_TS:
         messageData?.platformMetadata?.originalMessageTs ||
         messageData?.messageId ||
@@ -237,6 +242,9 @@ export abstract class BaseDeploymentManager {
     };
 
     // Add optional environment variables only if they exist
+    if (messageData?.platformMetadata?.repositoryUrl) {
+      envVars.REPOSITORY_URL = messageData.platformMetadata.repositoryUrl;
+    }
     if (messageData?.platformMetadata?.botResponseTs) {
       envVars.BOT_RESPONSE_TS = messageData.platformMetadata.botResponseTs;
     }

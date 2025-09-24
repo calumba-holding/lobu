@@ -169,7 +169,7 @@ export class ClaudeWorker {
           op: "worker.setup",
           attributes: {
             "user.id": this.config.userId,
-            "repository.url": this.config.repositoryUrl,
+            "repository.url": this.config.repositoryUrl || undefined,
             "session.key": this.config.sessionKey,
           },
         },
@@ -202,7 +202,7 @@ export class ClaudeWorker {
         userDisplayName: this.config.userId,
         threadTs: this.config.threadTs,
         messageTs: this.config.slackResponseTs,
-        repositoryUrl: this.config.repositoryUrl,
+        repositoryUrl: this.config.repositoryUrl || undefined,
         workingDirectory: this.workspaceManager.getCurrentWorkingDirectory(),
         customInstructions: this.generateCustomInstructions(),
       };
@@ -401,7 +401,10 @@ Type \`welcome\` for more information about getting started.`;
       // Replace placeholders with actual values
       const processed = template
         .replace(/{{userId}}/g, this.config.userId)
-        .replace(/{{repositoryUrl}}/g, this.config.repositoryUrl)
+        .replace(
+          /{{repositoryUrl}}/g,
+          this.config.repositoryUrl || "No repository"
+        )
         .replace(/{{sessionKey}}/g, this.config.sessionKey)
         .replace(
           /{{sessionKeyFormatted}}/g,

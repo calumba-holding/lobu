@@ -17,24 +17,19 @@ interface ProcessInfo {
   startedAt: string;
   completedAt?: string;
   exitCode?: number;
-  restartCount: number;
   process?: ChildProcess;
   port?: number;
   tunnelUrl?: string;
   tunnelProcess?: ChildProcess;
+  workingDirectory?: string;
 }
 
 class ProcessManager {
   private processes: Map<string, ProcessInfo> = new Map();
   private processDir = "/tmp/agent-processes";
   private logsDir = "/tmp/claude-logs";
-  private monitorInterval?: NodeJS.Timeout;
-  private autoRestart = true; // Enabled by default
-
   constructor() {
     this.init();
-    // Start monitoring by default with 30 second interval
-    this.startMonitoring(30000);
   }
 
   private async init() {
@@ -74,7 +69,7 @@ class ProcessManager {
     command: string,
     description: string,
     port?: number,
-    isRestart: boolean = false
+    workingDirectory?: string
   ): Promise<ProcessInfo> {
     if (this.processes.has(id)) {
       const existing = this.processes.get(id)!;
@@ -85,18 +80,14 @@ class ProcessManager {
       }
     }
 
-    // Preserve existing process info on restart, including tunnel URL
-    const existingInfo = this.processes.get(id);
     const info: ProcessInfo = {
       id,
       command,
       description,
       status: "starting",
       startedAt: new Date().toISOString(),
-      restartCount: existingInfo?.restartCount || 0,
       port,
-      // Preserve tunnel URL on restart to avoid creating new tunnels
-      tunnelUrl: isRestart ? existingInfo?.tunnelUrl : undefined,
+      workingDirectory: workingDirectory,
     };
 
     const logPath = this.getLogPath(id);
@@ -104,8 +95,14 @@ class ProcessManager {
       fs.createWriteStream(logPath, { flags: "a" })
     );
 
-    // Determine the working directory - use workspace if available
-    const workingDir = process.env.WORKSPACE_DIR || process.cwd();
+    // Determine the working directory - use provided directory, then workspace, then cwd
+    const workingDir =
+      workingDirectory || process.env.WORKSPACE_DIR || process.cwd();
+
+    // Validate working directory exists
+    if (!existsSync(workingDir)) {
+      throw new Error(`Working directory does not exist: ${workingDir}`);
+    }
 
     logStream.write(`Process ${id} starting at ${info.startedAt}\n`);
     logStream.write(`Command: ${command}\n`);
@@ -156,29 +153,27 @@ class ProcessManager {
 
       await this.saveProcessInfo(info);
 
-      if (
-        this.autoRestart &&
-        info.status === "failed" &&
-        info.restartCount < 5
-      ) {
-        console.error(
-          `[Process Manager] Process ${id} failed, attempting restart...`
+      // Kill tunnel if main process dies
+      if (info.tunnelProcess?.pid) {
+        console.log(
+          `[Process Manager] Stopping tunnel for ${id} since main process exited`
         );
-        setTimeout(() => this.restartProcess(id), 5000);
+        try {
+          process.kill(info.tunnelProcess.pid, "SIGTERM");
+        } catch (_e) {
+          // Tunnel already dead
+        }
+        delete info.tunnelProcess;
+        info.tunnelUrl = undefined;
       }
     });
 
     this.processes.set(id, info);
     await this.saveProcessInfo(info);
 
-    // Start cloudflared tunnel if port is specified
-    // Skip if we already have a tunnel URL (from restart)
-    if (port && !info.tunnelUrl) {
+    // Start tunnel if port is specified
+    if (port) {
       this.startTunnel(id, port, 0);
-    } else if (port && info.tunnelUrl) {
-      console.log(
-        `[Process Manager] Reusing existing tunnel URL for ${id}: ${info.tunnelUrl}`
-      );
     }
 
     return info;
@@ -437,44 +432,27 @@ class ProcessManager {
     }
   }
 
-  async restartProcess(id: string): Promise<ProcessInfo> {
+  async restartProcess(
+    id: string,
+    workingDirectory?: string
+  ): Promise<ProcessInfo> {
     const info = this.processes.get(id);
     if (!info) {
       throw new Error(`Process ${id} not found`);
     }
 
-    // Preserve tunnel URL and process before stopping
-    const preservedTunnelUrl = info.tunnelUrl;
-    const preservedTunnelProcess = info.tunnelProcess;
-
-    // Stop the main process but NOT the tunnel
-    if (info.status === "running" && info.pid) {
-      try {
-        process.kill(info.pid, "SIGTERM");
-        // Give process time to terminate gracefully
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        try {
-          process.kill(info.pid!, "SIGKILL");
-        } catch (_e) {
-          // Process already terminated
-        }
-      } catch (_error) {
-        // Process already terminated
-      }
+    // Stop the process completely (including tunnel)
+    if (info.status === "running") {
+      await this.stopProcess(id);
     }
 
-    info.restartCount++;
-
-    // Restore tunnel information before restarting
-    info.tunnelUrl = preservedTunnelUrl;
-    info.tunnelProcess = preservedTunnelProcess;
-
+    // Start fresh
     return this.startProcess(
       id,
       info.command,
       info.description,
       info.port,
-      true
+      workingDirectory
     );
   }
 
@@ -500,46 +478,6 @@ class ProcessManager {
       return `Error reading logs for process ${id}: ${error}`;
     }
   }
-
-  startMonitoring(interval: number = 30000) {
-    if (this.monitorInterval) {
-      clearInterval(this.monitorInterval);
-    }
-
-    this.autoRestart = true;
-    this.monitorInterval = setInterval(() => {
-      this.checkProcesses();
-    }, interval);
-  }
-
-  stopMonitoring() {
-    this.autoRestart = false;
-    if (this.monitorInterval) {
-      clearInterval(this.monitorInterval);
-      this.monitorInterval = undefined;
-    }
-  }
-
-  private checkProcesses() {
-    const entries = Array.from(this.processes.entries());
-    for (const [id, info] of entries) {
-      if (info.status === "running" && info.pid) {
-        try {
-          process.kill(info.pid, 0); // Check if process exists
-        } catch (_e) {
-          // Process is dead
-          console.error(`Process ${id} died unexpectedly`);
-          info.status = "failed";
-          info.completedAt = new Date().toISOString();
-          this.saveProcessInfo(info);
-
-          if (this.autoRestart && info.restartCount < 5) {
-            setTimeout(() => this.restartProcess(id), 5000);
-          }
-        }
-      }
-    }
-  }
 }
 
 // Initialize MCP server
@@ -561,10 +499,22 @@ server.tool(
       .number()
       .optional()
       .describe("Optional port to expose via cloudflared tunnel"),
+    workingDirectory: z
+      .string()
+      .optional()
+      .describe(
+        "Optional working directory for the process (defaults to workspace directory)"
+      ),
   },
-  async ({ id, command, description, port }) => {
+  async ({ id, command, description, port, workingDirectory }) => {
     try {
-      const info = await manager.startProcess(id, command, description, port);
+      const info = await manager.startProcess(
+        id,
+        command,
+        description,
+        port,
+        workingDirectory
+      );
 
       // If port is specified, wait for tunnel URL and verify service health
       if (port) {
@@ -582,9 +532,17 @@ server.tool(
         while (!serviceHealthy && healthCheckAttempts < maxHealthChecks) {
           healthCheckAttempts++;
 
-          // Check if we have a tunnel URL yet
-          const updatedInfo = manager.getStatus(id) as ProcessInfo | null;
-          tunnelUrl = updatedInfo?.tunnelUrl;
+          // Check if the process is still running
+          const currentInfo = manager.getStatus(id) as ProcessInfo | null;
+          if (!currentInfo || currentInfo.status !== "running") {
+            // Process died, stop health checks immediately
+            console.error(
+              `[MCP Process Manager] Process ${id} exited with code ${currentInfo?.exitCode}, stopping health checks`
+            );
+            break;
+          }
+
+          tunnelUrl = currentInfo.tunnelUrl;
 
           // Try to make an HTTP request to the local service
           // Try both localhost and 0.0.0.0 in case the service only binds to one
@@ -604,7 +562,15 @@ server.tool(
                 break;
               }
             } catch (_error: any) {
-              // Try next host
+              // Connection refused or timeout - service not ready yet
+              if (
+                _error.cause?.code === "ECONNREFUSED" &&
+                healthCheckAttempts === 1
+              ) {
+                console.error(
+                  `[MCP Process Manager] Port ${port} not ready yet (connection refused)`
+                );
+              }
             }
           }
 
@@ -763,15 +729,19 @@ server.tool(
   "Restart a process",
   {
     id: z.string().describe("Process ID to restart"),
+    workingDirectory: z
+      .string()
+      .optional()
+      .describe("Optional new working directory for the process"),
   },
-  async ({ id }) => {
+  async ({ id, workingDirectory }) => {
     try {
-      const info = await manager.restartProcess(id);
+      const info = await manager.restartProcess(id, workingDirectory);
       return {
         content: [
           {
             type: "text",
-            text: `Restarted process ${id} (PID: ${info.pid}, restart count: ${info.restartCount})`,
+            text: `Restarted process ${id} (PID: ${info.pid})`,
           },
         ],
       };
@@ -818,7 +788,7 @@ server.tool(
   Started: ${p.startedAt}${p.completedAt ? `\n  Completed: ${p.completedAt}` : ""}${
     p.exitCode !== undefined ? `\n  Exit code: ${p.exitCode}` : ""
   }${p.port ? `\n  Port: ${p.port}` : ""}${p.tunnelUrl ? `\n  Tunnel URL: ${p.tunnelUrl}` : ""}
-  Restart count: ${p.restartCount}`
+`
       )
       .join("\n\n");
 
@@ -857,8 +827,7 @@ server.tool(
   }
 );
 
-// Process monitoring is enabled by default with 30 second interval
-// It will automatically restart failed processes up to 5 times
+// Processes are not auto-restarted - the agent should handle retries
 
 // Register resources
 server.resource(

@@ -155,7 +155,7 @@ async function waitForBotResponse(
   return foundResponse;
 }
 
-async function runTest(messages, timeout = 45000, options = {}) {
+async function runTest(testMessage, timeout = 45000, options = {}) {
   const { jsonOutput = false, threadTs = null, noWait = false } = options;
   const quiet = jsonOutput;
 
@@ -170,48 +170,44 @@ async function runTest(messages, timeout = 45000, options = {}) {
   let messageTs = threadTs;
 
   try {
-    for (let i = 0; i < messages.length; i++) {
-      const prompt = messages[i];
-      const message = `<@${TARGET_BOT_USERNAME}> ${prompt}`;
+    const prompt = testMessage;
+    const message = `<@${TARGET_BOT_USERNAME}> ${prompt}`;
 
-      if (!quiet) {
-        console.log("📨 Sending test message...");
+    if (!quiet) {
+      console.log("📨 Sending test message...");
+    }
+
+    const requestBody = {
+      channel: targetChannel,
+      text: message,
+    };
+
+    if (threadTs) {
+      requestBody.thread_ts = threadTs;
+    }
+
+    const msg = await makeSlackRequest("chat.postMessage", requestBody);
+
+    messageTs = msg.ts;
+
+    if (!quiet) {
+      console.log(`✅ Sent: "${message}"`);
+      console.log(`   Timestamp: ${msg.ts}`);
+      console.log("");
+    }
+
+    if (noWait) {
+      if (jsonOutput) {
+        console.log(
+          JSON.stringify({
+            success: true,
+            thread_ts: messageTs,
+            message_ts: msg.ts,
+            channel: targetChannel,
+          })
+        );
       }
-
-      const requestBody = {
-        channel: targetChannel,
-        text: message,
-      };
-
-      if (threadTs) {
-        requestBody.thread_ts = threadTs;
-      }
-
-      const msg = await makeSlackRequest("chat.postMessage", requestBody);
-
-      if (i === 0) {
-        messageTs = msg.ts;
-      }
-
-      if (!quiet) {
-        console.log(`✅ Sent: "${message}"`);
-        console.log(`   Timestamp: ${msg.ts}`);
-        console.log("");
-      }
-
-      if (noWait && i === 0) {
-        if (jsonOutput) {
-          console.log(
-            JSON.stringify({
-              success: true,
-              thread_ts: messageTs,
-              message_ts: msg.ts,
-              channel: targetChannel,
-            })
-          );
-        }
-        process.exit(0);
-      }
+      process.exit(0);
     }
 
     // Wait a moment for processing to start
@@ -281,29 +277,31 @@ async function runTest(messages, timeout = 45000, options = {}) {
 
 // Parse command line arguments
 const args = process.argv.slice(2);
-let messages = [];
+let message = null;
 let timeout = 45000;
 let jsonOutput = false;
 let threadTs = null;
 let noWait = false;
 
 for (let i = 0; i < args.length; i++) {
-  if (args[i] === "--timeout" && args[i + 1]) {
+  if (args[i] === "--timeout") {
+    if (!args[i + 1]) {
+      console.error(`❌ Error: --timeout requires a value`);
+      process.exit(1);
+    }
     timeout = parseInt(args[i + 1], 10) * 1000;
-    args.splice(i, 2);
-    i--;
+    i++; // Skip next arg
   } else if (args[i] === "--json") {
     jsonOutput = true;
-    args.splice(i, 1);
-    i--;
   } else if (args[i] === "--no-wait") {
     noWait = true;
-    args.splice(i, 1);
-    i--;
-  } else if (args[i] === "--thread-ts" && args[i + 1]) {
+  } else if (args[i] === "--thread-ts") {
+    if (!args[i + 1]) {
+      console.error(`❌ Error: --thread-ts requires a value`);
+      process.exit(1);
+    }
     threadTs = args[i + 1];
-    args.splice(i, 2);
-    i--;
+    i++; // Skip next arg
   } else if (args[i] === "--help" || args[i] === "-h") {
     console.log("Usage: slack-qa-bot.js [options] [message]");
     console.log("");
@@ -320,13 +318,25 @@ for (let i = 0; i < args.length; i++) {
     console.log('  ./slack-qa-bot.js "Hello bot"');
     console.log('  ./slack-qa-bot.js --json "Create a function"');
     process.exit(0);
+  } else if (args[i].startsWith("--") || args[i].startsWith("-")) {
+    // Unrecognized option
+    console.error(`❌ Error: Unrecognized option: ${args[i]}`);
+    console.error("Use --help for available options");
+    process.exit(1);
+  } else {
+    // This should be the message
+    if (message !== null) {
+      console.error(
+        `❌ Error: Multiple messages not supported. Already have: "${message}", got: "${args[i]}"`
+      );
+      process.exit(1);
+    }
+    message = args[i];
   }
 }
 
-messages = args.filter((arg) => arg.trim().length > 0);
-
-if (messages.length > 0) {
-  runTest(messages, timeout, { jsonOutput, threadTs, noWait });
+if (message) {
+  runTest(message, timeout, { jsonOutput, threadTs, noWait });
 } else {
-  runTest(["Hello bot - simple test"], timeout, { jsonOutput });
+  runTest("Hello bot - simple test", timeout, { jsonOutput });
 }

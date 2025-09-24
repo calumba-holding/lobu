@@ -113,15 +113,21 @@ export class QueueConsumer {
     );
 
     try {
-      // For consistent worker naming, always use the targetThreadId if available, otherwise use threadId
-      // This ensures the first message and subsequent messages in a thread use the same worker
+      // CRITICAL: For consistent worker naming, always use the targetThreadId if available
+      // This ensures ALL messages in a Slack thread use the SAME worker
+      // Thread ID must be the thread_ts (root message timestamp), NOT individual message timestamps!
       const effectiveThreadId =
         data.routingMetadata?.targetThreadId || data.threadId;
 
-      // Create a more readable deployment name using user ID and last 10 chars of thread ID
+      // Create deployment name - MUST be consistent for entire thread
+      // DO NOT use message timestamps - that creates multiple workers per thread!
       const shortThreadId = effectiveThreadId.replace(".", "-").slice(-10); // Last 10 chars, replace dot with dash
       const shortUserId = data.userId.toLowerCase().slice(0, 8); // First 8 chars of user ID
       const deploymentName = `peerbot-worker-${shortUserId}-${shortThreadId}`;
+
+      console.log(
+        `Thread routing - effectiveThreadId: ${effectiveThreadId}, deploymentName: ${deploymentName}`
+      );
 
       // 1) Send to thread queue immediately (pgboss persists; worker will drain on attach)
       await Sentry.startSpan(

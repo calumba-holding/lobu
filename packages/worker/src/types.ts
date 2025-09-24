@@ -5,7 +5,7 @@ export interface WorkerConfig {
   userId: string;
   channelId: string;
   threadTs?: string;
-  repositoryUrl: string;
+  repositoryUrl: string | null;
   userPrompt: string; // Base64 encoded
   slackResponseChannel: string;
   slackResponseTs: string;
@@ -34,7 +34,7 @@ export interface GitRepository {
 export interface WorkspaceInfo {
   baseDirectory: string;
   userDirectory: string;
-  repository: GitRepository;
+  repository?: GitRepository;
   setupComplete: boolean;
 }
 

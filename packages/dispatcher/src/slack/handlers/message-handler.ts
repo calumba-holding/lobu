@@ -141,8 +141,16 @@ export class MessageHandler {
       `[TIMING] handleUserRequest started at: ${new Date(requestStartTime).toISOString()}`
     );
 
-    // Normalize threadTs BEFORE session key generation to ensure consistency
+    // CRITICAL: Always use thread_ts for thread identification
+    // For root messages: thread_ts is undefined, so we use message_ts
+    // For replies in thread: thread_ts points to the root message
+    // This ensures all messages in a thread share the same worker
     const normalizedThreadTs = context.threadTs || context.messageTs;
+
+    // Log for debugging thread routing
+    logger.info(
+      `Thread routing - messageTs: ${context.messageTs}, threadTs: ${context.threadTs}, normalizedThreadTs: ${normalizedThreadTs}`
+    );
 
     // Generate session key with normalized threadTs
     const sessionKey = SessionUtils.generateSessionKey({
@@ -223,7 +231,7 @@ export class MessageHandler {
         channelId: context.channelId,
         userId: context.userId,
         username,
-        repositoryUrl: repository.repositoryUrl,
+        repositoryUrl: repository?.repositoryUrl || "",
         lastActivity: Date.now(),
         status: "pending",
         createdAt: Date.now(),
@@ -266,7 +274,7 @@ export class MessageHandler {
           platformMetadata: {
             teamId: context.teamId,
             userDisplayName: context.userDisplayName,
-            repositoryUrl: repository.repositoryUrl,
+            repositoryUrl: repository?.repositoryUrl || null,
             slackResponseChannel: context.channelId,
             slackResponseTs: context.messageTs,
             originalMessageTs: context.messageTs,
@@ -303,7 +311,7 @@ export class MessageHandler {
           platformMetadata: {
             teamId: context.teamId,
             userDisplayName: context.userDisplayName,
-            repositoryUrl: repository.repositoryUrl,
+            repositoryUrl: repository?.repositoryUrl || null,
             slackResponseChannel: context.channelId,
             slackResponseTs: context.messageTs,
             originalMessageTs: context.messageTs,

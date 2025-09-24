@@ -380,7 +380,7 @@ export class WorkerQueueConsumer {
       userId: payload.userId,
       channelId: payload.channelId,
       threadTs: payload.threadId,
-      repositoryUrl: platformMetadata.repositoryUrl || "",
+      repositoryUrl: platformMetadata.repositoryUrl || null,
       userPrompt: Buffer.from(payload.messageText).toString("base64"), // Base64 encode for consistency
       slackResponseChannel:
         platformMetadata.slackResponseChannel || payload.channelId,
@@ -574,6 +574,7 @@ export class WorkerQueueConsumer {
       throw error;
     } finally {
       // Cleanup worker instance
+      // The workspace directory will persist and be reused by the next message
       if (this.currentWorker) {
         try {
           await this.currentWorker.cleanup();

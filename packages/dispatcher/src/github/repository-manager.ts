@@ -206,7 +206,7 @@ export class GitHubRepositoryManager {
   /**
    * Ensure user repository exists, create if needed
    */
-  async ensureUserRepository(username: string): Promise<UserRepository> {
+  async ensureUserRepository(username: string): Promise<UserRepository | null> {
     try {
       // If a global repository override is configured, use it (highest priority)
       if (this.config.repository) {
@@ -248,33 +248,13 @@ export class GitHubRepositoryManager {
         return cached;
       }
 
-      // If DEMO_REPOSITORY is configured and no user repository is set, use demo
-      const demoRepository = process.env.DEMO_REPOSITORY;
-      if (demoRepository) {
-        const { repositoryUrl, cloneUrl } =
-          this.normalizeRepoUrls(demoRepository);
-        const repository: UserRepository = {
-          username,
-          repositoryName: this.extractRepoNameFromUrl(demoRepository),
-          repositoryUrl,
-          cloneUrl,
-          createdAt: Date.now(),
-          lastUsed: Date.now(),
-        };
-
-        logger.info(
-          `Using demo repository for user ${username}: ${repository.repositoryUrl}`
-        );
-        // Don't cache demo repositories
-        return repository;
-      }
-
-      // No user-specific repository configured and no demo repository
-      // Users must explicitly select or authenticate to use repositories
-      throw new Error(
-        `No repository configured for user ${username}. ` +
-          `Please select a repository or authenticate with GitHub to continue.`
+      // No user-specific repository configured
+      // Return null to indicate no repository is set
+      // The worker will create a local workspace without git operations
+      logger.info(
+        `No repository configured for user ${username}. Will use local workspace only.`
       );
+      return null;
     } catch (error) {
       throw new GitHubRepositoryError(
         "ensureUserRepository",

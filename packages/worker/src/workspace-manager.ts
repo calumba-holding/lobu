@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { exec } from "node:child_process";
-import { mkdir, rm, stat } from "node:fs/promises";
+import { mkdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import logger from "./logger";
@@ -23,10 +23,10 @@ export class WorkspaceManager {
   }
 
   /**
-   * Setup workspace by cloning repository
+   * Setup workspace by cloning repository or creating local workspace
    */
   async setupWorkspace(
-    repositoryUrl: string,
+    repositoryUrl: string | null,
     username: string,
     sessionKey?: string
   ): Promise<WorkspaceInfo> {
@@ -49,6 +49,30 @@ export class WorkspaceManager {
       // Ensure base directory exists
       await this.ensureDirectory(this.config.baseDirectory);
 
+      // Check if no repository URL is provided
+      logger.info(`Repository URL received: "${repositoryUrl}"`);
+      if (!repositoryUrl || repositoryUrl === "") {
+        logger.info(
+          `No repository URL provided. Creating local workspace at ${userDirectory}...`
+        );
+
+        // Ensure user directory exists
+        await this.ensureDirectory(userDirectory);
+
+        // Create workspace info without repository
+        this.workspaceInfo = {
+          baseDirectory: this.config.baseDirectory,
+          userDirectory,
+          repository: undefined,
+          setupComplete: true,
+        };
+
+        logger.info(
+          `Local workspace setup completed for ${username} (thread: ${threadId}) at ${userDirectory}`
+        );
+        return this.workspaceInfo;
+      }
+
       // Check if user directory already exists
       const userDirExists = await this.directoryExists(userDirectory);
 
@@ -64,11 +88,23 @@ export class WorkspaceManager {
           logger.info("Existing git repository found, updating...");
           await this.updateRepository(userDirectory, sessionKey);
         } else {
+          // Directory exists but is not a git repository
+          // This is expected for local workspaces - just reuse it
           logger.info(
-            "Directory exists but is not a git repository, removing and re-cloning..."
+            "Directory exists but is not a git repository, reusing existing workspace..."
           );
-          await rm(userDirectory, { recursive: true, force: true });
-          await this.cloneRepository(repositoryUrl, userDirectory);
+          // Set workspace info for existing non-git directory
+          this.workspaceInfo = {
+            baseDirectory: this.config.baseDirectory,
+            userDirectory,
+            repository: {
+              url: repositoryUrl,
+              branch: "main",
+              directory: userDirectory,
+            },
+            setupComplete: true,
+          };
+          return this.workspaceInfo;
         }
       } else {
         logger.info("User directory does not exist, cloning repository...");
@@ -424,6 +460,14 @@ export class WorkspaceManager {
       throw new WorkspaceError("createSessionBranch", "Workspace not setup");
     }
 
+    // Skip git operations if no repository is configured
+    if (!this.workspaceInfo.repository) {
+      logger.info(
+        `No repository configured, skipping branch creation for session ${sessionKey}`
+      );
+      return "local";
+    }
+
     try {
       // Use the thread timestamp directly in the branch name
       // Replace dots with dashes for git branch naming conventions
@@ -530,6 +574,12 @@ export class WorkspaceManager {
   async commitAndPush(message: string): Promise<void> {
     if (!this.workspaceInfo) {
       throw new WorkspaceError("commitAndPush", "Workspace not setup");
+    }
+
+    // Skip git operations if no repository is configured
+    if (!this.workspaceInfo.repository) {
+      logger.info("No repository configured, skipping commit and push");
+      return;
     }
 
     try {
