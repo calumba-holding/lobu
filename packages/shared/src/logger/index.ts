@@ -35,19 +35,30 @@ export function createLogger(serviceName: string): Logger {
               try {
                 metaStr = ` ${JSON.stringify(meta, null, 0)}`;
               } catch (_err) {
-                // Handle circular structures by using a replacer function
-                metaStr = ` ${JSON.stringify(meta, (_, value) => {
-                  if (typeof value === "object" && value !== null) {
-                    if (value instanceof Error) {
-                      return {
-                        name: value.name,
-                        message: value.message,
-                        stack: value.stack?.split("\n")[0], // Only first line of stack
-                      };
+                // Handle circular structures with a safer approach
+                try {
+                  const seen = new WeakSet();
+                  metaStr = ` ${JSON.stringify(meta, (key, value) => {
+                    if (typeof value === "object" && value !== null) {
+                      if (seen.has(value)) {
+                        return "[Circular Reference]";
+                      }
+                      seen.add(value);
+                      
+                      if (value instanceof Error) {
+                        return {
+                          name: value.name,
+                          message: value.message,
+                          stack: value.stack?.split("\n")[0], // Only first line of stack
+                        };
+                      }
                     }
-                  }
-                  return value;
-                })}`;
+                    return value;
+                  })}`;
+                } catch (_err2) {
+                  // Final fallback if even the circular handler fails
+                  metaStr = " [Object too complex to serialize]";
+                }
               }
             }
             return `[${timestamp}] [${level}] [${service}] ${message}${metaStr}`;
