@@ -17,6 +17,7 @@ const logger = createLogger("orchestrator");
 
 export class DockerDeploymentManager extends BaseDeploymentManager {
   private docker: Docker;
+  private gvisorAvailable = false;
 
   constructor(config: OrchestratorConfig, dbPool: DatabasePool) {
     const secretManager = new PostgresSecretManager(config, dbPool);
@@ -24,6 +25,31 @@ export class DockerDeploymentManager extends BaseDeploymentManager {
 
     // Explicitly use the Unix socket for Docker connection
     this.docker = new Docker({ socketPath: "/var/run/docker.sock" });
+
+    // Check for gvisor availability on initialization
+    this.checkGvisorAvailability();
+  }
+
+  private async checkGvisorAvailability(): Promise<void> {
+    try {
+      const info = await this.docker.info();
+      const runtimes = info.Runtimes || {};
+
+      if (runtimes.runsc || runtimes.gvisor) {
+        this.gvisorAvailable = true;
+        logger.info(
+          "✅ gVisor runtime detected and will be used for worker isolation"
+        );
+      } else {
+        logger.info(
+          "ℹ️  gVisor runtime not available, using default runc runtime"
+        );
+      }
+    } catch (error) {
+      logger.warn(
+        `⚠️  Failed to check Docker runtime availability: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
 
   async listDeployments(): Promise<DeploymentInfo[]> {
@@ -178,6 +204,10 @@ export class DockerDeploymentManager extends BaseDeploymentManager {
           NanoCpus: this.parseCpuLimit(this.config.worker.resources.limits.cpu),
           // Connect to the Docker Compose network
           NetworkMode: `${composeProjectName}_peerbot-network`,
+          // Use gVisor runtime if available for enhanced isolation
+          ...(this.gvisorAvailable && {
+            Runtime: "runsc",
+          }),
         },
         WorkingDir: "/workspace",
       };
