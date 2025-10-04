@@ -21,7 +21,6 @@ import { setupHealthEndpoints } from "./simple-http";
 import { SlackEventHandlers } from "./slack/slack-event-handlers";
 import type { DispatcherConfig } from "./types";
 import { moduleRegistry } from "../../../modules";
-import { GitHubModule } from "../../../modules/github";
 
 export class SlackDispatcher {
   private app: App;
@@ -33,9 +32,6 @@ export class SlackDispatcher {
 
   constructor(config: DispatcherConfig) {
     this.config = config;
-
-    // Register modules
-    moduleRegistry.register(new GitHubModule());
 
     if (!config.queues?.connectionString) {
       throw new Error("Queue connection string is required");
@@ -301,7 +297,6 @@ export class SlackDispatcher {
 
       // Log configuration
       logger.info("Configuration:");
-      logger.info(`- GitHub Organization: ${this.config.github.organization}`);
       logger.info(
         `- Session Timeout: ${this.config.sessionTimeoutMinutes} minutes`
       );
@@ -521,14 +516,6 @@ async function main() {
         allowedUsers: process.env.SLACK_ALLOWED_USERS?.split(","),
         allowedChannels: process.env.SLACK_ALLOWED_CHANNELS?.split(","),
       },
-      github: {
-        token: process.env.GITHUB_TOKEN || "", // Optional - users can use OAuth instead
-        organization: process.env.GITHUB_ORGANIZATION || "", // Empty string means use authenticated user
-        repository: process.env.GITHUB_REPOSITORY, // Optional override repository URL
-        clientId: process.env.GITHUB_CLIENT_ID, // GitHub OAuth App Client ID
-        clientSecret: process.env.GITHUB_CLIENT_SECRET, // GitHub OAuth App Client Secret
-        ingressUrl: process.env.INGRESS_URL, // Public URL for OAuth callbacks
-      },
       claude: {
         allowedTools: process.env.ALLOWED_TOOLS?.split(","),
         model: process.env.AGENT_DEFAULT_MODEL,
@@ -570,12 +557,6 @@ async function main() {
     // Validate required configuration
     if (!config.slack.token) {
       throw new Error("SLACK_BOT_TOKEN is required");
-    }
-    // GITHUB_TOKEN is optional - users can login with OAuth instead
-    if (!config.github.token) {
-      logger.warn(
-        "GITHUB_TOKEN not provided - users must login with GitHub OAuth to access repositories"
-      );
     }
     if (!config.queues.connectionString) {
       throw new Error("DATABASE_URL is required");

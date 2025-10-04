@@ -24,14 +24,6 @@ export const SlackConfigSchema = z.object({
     .default("INFO"),
 });
 
-// GitHub configuration schema
-export const GitHubConfigSchema = z.object({
-  appId: z.string().optional(),
-  privateKey: z.string().optional(),
-  clientId: z.string().optional(),
-  clientSecret: z.string().optional(),
-  installationId: z.string().optional(),
-});
 
 // Claude configuration schema
 export const ClaudeConfigSchema = z.object({
@@ -77,7 +69,6 @@ export const KubernetesConfigSchema = z.object({
 export const AppConfigSchema = z.object({
   database: DatabaseConfigSchema,
   slack: SlackConfigSchema,
-  github: GitHubConfigSchema.optional(),
   claude: ClaudeConfigSchema.optional(),
   queue: QueueConfigSchema,
   kubernetes: KubernetesConfigSchema.optional(),
@@ -85,7 +76,6 @@ export const AppConfigSchema = z.object({
 
 export type DatabaseConfig = z.infer<typeof DatabaseConfigSchema>;
 export type SlackConfig = z.infer<typeof SlackConfigSchema>;
-export type GitHubConfig = z.infer<typeof GitHubConfigSchema>;
 export type ClaudeConfig = z.infer<typeof ClaudeConfigSchema>;
 export type QueueConfig = z.infer<typeof QueueConfigSchema>;
 export type KubernetesConfig = z.infer<typeof KubernetesConfigSchema>;
@@ -122,18 +112,6 @@ export function loadSlackConfig(): SlackConfig {
   return SlackConfigSchema.parse(config);
 }
 
-/**
- * Loads GitHub configuration from environment variables
- */
-export function loadGitHubConfig(): GitHubConfig {
-  return GitHubConfigSchema.parse({
-    appId: process.env.GITHUB_APP_ID,
-    privateKey: process.env.GITHUB_PRIVATE_KEY,
-    clientId: process.env.GITHUB_CLIENT_ID,
-    clientSecret: process.env.GITHUB_CLIENT_SECRET,
-    installationId: process.env.GITHUB_INSTALLATION_ID,
-  });
-}
 
 /**
  * Loads Claude configuration from environment variables
@@ -194,7 +172,6 @@ export function loadConfig(): AppConfig {
   return AppConfigSchema.parse({
     database: loadDatabaseConfig(),
     slack: loadSlackConfig(),
-    github: loadGitHubConfig(),
     claude: loadClaudeConfig(),
     queue: loadQueueConfig(),
     kubernetes: loadKubernetesConfig(),

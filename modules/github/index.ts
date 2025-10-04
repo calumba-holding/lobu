@@ -1,7 +1,40 @@
+import { z } from 'zod';
 import type { HomeTabModule, WorkerModule, OrchestratorModule, SessionContext, ActionButton } from '../types';
 import { GitHubRepositoryManager } from './repository-manager';
 import { handleGitHubConnect, handleGitHubLogout, getUserGitHubInfo } from './handlers';
 import { generateGitHubAuthUrl } from './utils';
+
+// GitHub configuration schema (module-specific)
+export const GitHubConfigSchema = z.object({
+  appId: z.string().optional(),
+  privateKey: z.string().optional(),
+  clientId: z.string().optional(),
+  clientSecret: z.string().optional(),
+  installationId: z.string().optional(),
+  token: z.string().optional(),
+  organization: z.string().optional(),
+  repository: z.string().optional(),
+  ingressUrl: z.string().optional(),
+});
+
+export type GitHubConfig = z.infer<typeof GitHubConfigSchema>;
+
+/**
+ * Loads GitHub configuration from environment variables
+ */
+export function loadGitHubConfig(): GitHubConfig {
+  return GitHubConfigSchema.parse({
+    appId: process.env.GITHUB_APP_ID,
+    privateKey: process.env.GITHUB_PRIVATE_KEY,
+    clientId: process.env.GITHUB_CLIENT_ID,
+    clientSecret: process.env.GITHUB_CLIENT_SECRET,
+    installationId: process.env.GITHUB_INSTALLATION_ID,
+    token: process.env.GITHUB_TOKEN,
+    organization: process.env.GITHUB_ORGANIZATION,
+    repository: process.env.GITHUB_REPOSITORY,
+    ingressUrl: process.env.INGRESS_URL,
+  });
+}
 
 export class GitHubModule implements HomeTabModule, WorkerModule, OrchestratorModule {
   name = 'github';
@@ -14,15 +47,9 @@ export class GitHubModule implements HomeTabModule, WorkerModule, OrchestratorMo
   async init(): Promise<void> {
     if (!this.isEnabled()) return;
     
+    const config = loadGitHubConfig();
     this.repoManager = new GitHubRepositoryManager(
-      {
-        clientId: process.env.GITHUB_CLIENT_ID!,
-        clientSecret: process.env.GITHUB_CLIENT_SECRET!,
-        token: process.env.GITHUB_TOKEN || '',
-        organization: process.env.GITHUB_ORGANIZATION || '',
-        repository: process.env.GITHUB_REPOSITORY,
-        ingressUrl: process.env.INGRESS_URL,
-      },
+      config,
       process.env.DATABASE_URL
     );
   }

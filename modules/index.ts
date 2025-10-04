@@ -1,4 +1,5 @@
 import type { ModuleInterface, HomeTabModule, WorkerModule, OrchestratorModule } from './types';
+import { GitHubModule } from './github';
 
 export class ModuleRegistry {
   private modules: Map<string, ModuleInterface> = new Map();
@@ -10,10 +11,21 @@ export class ModuleRegistry {
   }
 
   async initAll(): Promise<void> {
+    // Auto-register available modules if not already registered
+    this.autoRegisterModules();
+    
     for (const module of this.modules.values()) {
       if (module.init) {
         await module.init();
       }
+    }
+  }
+
+  private autoRegisterModules(): void {
+    // Auto-register GitHub module
+    const gitHubModule = new GitHubModule();
+    if (!this.modules.has(gitHubModule.name)) {
+      this.register(gitHubModule);
     }
   }
 
