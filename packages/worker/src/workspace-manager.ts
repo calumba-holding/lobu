@@ -116,20 +116,17 @@ export class WorkspaceManager {
       // Setup git configuration
       await this.setupGitConfig(userDirectory, username);
 
-      // Setup GitHub CLI authentication if token is available
-      if (process.env.GITHUB_TOKEN) {
+      // Setup GitHub CLI authentication through module if available
+      if (process.env.GITHUB_TOKEN && repositoryUrl.includes('github.com')) {
         try {
-          logger.info("Setting up GitHub CLI authentication...");
-          await execAsync(
-            `echo "${process.env.GITHUB_TOKEN}" | gh auth login --with-token`,
-            {
-              cwd: userDirectory,
-              env: { ...process.env, GH_TOKEN: process.env.GITHUB_TOKEN },
-            }
-          );
-          logger.info("GitHub CLI authentication configured successfully");
+          const { moduleRegistry } = await import('../../../modules');
+          const githubModule = moduleRegistry.getModule('github');
+          if (githubModule && 'init' in githubModule) {
+            // GitHub module will handle CLI authentication during its own setup
+            logger.info("GitHub module will handle CLI authentication");
+          }
         } catch (error) {
-          logger.warn("Failed to setup GitHub CLI authentication:", error);
+          logger.warn("Failed to setup GitHub CLI authentication through module:", error);
           // Non-fatal - continue without gh CLI
         }
       }
@@ -181,8 +178,15 @@ export class WorkspaceManager {
         `Cloning repository ${repositoryUrl} to ${targetDirectory}...`
       );
 
-      // Use GitHub token for authentication
-      const authenticatedUrl = this.addGitHubAuth(repositoryUrl);
+      // Use GitHub token for authentication through module
+      let authenticatedUrl = repositoryUrl;
+      if (this.config.githubToken && repositoryUrl.includes('github.com')) {
+        const { moduleRegistry } = await import('../../../modules');
+        const githubModule = moduleRegistry.getModule('github');
+        if (githubModule && 'addGitHubAuth' in githubModule) {
+          authenticatedUrl = (githubModule as any).addGitHubAuth(repositoryUrl, this.config.githubToken);
+        }
+      }
 
       const { stderr } = await execAsync(
         `git clone "${authenticatedUrl}" "${targetDirectory}"`,
@@ -389,26 +393,6 @@ export class WorkspaceManager {
     }
   }
 
-  /**
-   * Add GitHub authentication to URL
-   */
-  private addGitHubAuth(repositoryUrl: string): string {
-    try {
-      const url = new URL(repositoryUrl);
-
-      if (url.hostname === "github.com") {
-        // Convert to authenticated HTTPS URL
-        url.username = "x-access-token";
-        url.password = this.config.githubToken;
-        return url.toString();
-      }
-
-      return repositoryUrl;
-    } catch (error) {
-      logger.warn("Failed to parse repository URL, using as-is:", error);
-      return repositoryUrl;
-    }
-  }
 
   /**
    * Check if directory exists

@@ -50,19 +50,7 @@ export class GitHubWorkspaceManager {
 
       // Setup GitHub CLI authentication if token is available
       if (this.config.githubToken) {
-        try {
-          logger.info("Setting up GitHub CLI authentication...");
-          await execAsync(
-            `echo "${this.config.githubToken}" | gh auth login --with-token`,
-            {
-              cwd: userDirectory,
-              env: { ...process.env, GH_TOKEN: this.config.githubToken },
-            }
-          );
-          logger.info("GitHub CLI authentication configured successfully");
-        } catch (error) {
-          logger.warn("Failed to setup GitHub CLI authentication:", error);
-        }
+        await this.setupGitHubCLI(userDirectory);
       }
 
       // Get repository info
@@ -76,6 +64,26 @@ export class GitHubWorkspaceManager {
       };
     } catch (error) {
       logger.error(`Failed to setup GitHub workspace: ${error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Setup GitHub CLI authentication
+   */
+  async setupGitHubCLI(userDirectory: string): Promise<void> {
+    try {
+      logger.info("Setting up GitHub CLI authentication...");
+      await execAsync(
+        `echo "${this.config.githubToken}" | gh auth login --with-token`,
+        {
+          cwd: userDirectory,
+          env: { ...process.env, GH_TOKEN: this.config.githubToken },
+        }
+      );
+      logger.info("GitHub CLI authentication configured successfully");
+    } catch (error) {
+      logger.warn("Failed to setup GitHub CLI authentication:", error);
       throw error;
     }
   }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import type { ClaudeExecutionOptions } from "@peerbot/shared";
+import type { ClaudeExecutionOptions, GitHubConfig } from "@peerbot/shared";
 import type { LogLevel } from "@slack/bolt";
 
 export interface SlackConfig {
@@ -36,8 +36,16 @@ export interface AnthropicProxyConfig {
   anthropicBaseUrl?: string;
 }
 
+export interface DispatcherGitHubConfig extends GitHubConfig {
+  token?: string;
+  organization?: string;
+  repository?: string;
+  ingressUrl?: string;
+}
+
 export interface DispatcherConfig {
   slack: SlackConfig;
+  github: DispatcherGitHubConfig;
   claude: Partial<ClaudeExecutionOptions>;
   sessionTimeoutMinutes: number;
   logLevel?: LogLevel;

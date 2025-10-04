@@ -16,11 +16,11 @@ export class GitHubModule implements HomeTabModule, WorkerModule, OrchestratorMo
     
     this.repoManager = new GitHubRepositoryManager(
       {
+        clientId: process.env.GITHUB_CLIENT_ID!,
+        clientSecret: process.env.GITHUB_CLIENT_SECRET!,
         token: process.env.GITHUB_TOKEN || '',
         organization: process.env.GITHUB_ORGANIZATION || '',
         repository: process.env.GITHUB_REPOSITORY,
-        clientId: process.env.GITHUB_CLIENT_ID!,
-        clientSecret: process.env.GITHUB_CLIENT_SECRET!,
         ingressUrl: process.env.INGRESS_URL,
       },
       process.env.DATABASE_URL
@@ -180,6 +180,51 @@ export class GitHubModule implements HomeTabModule, WorkerModule, OrchestratorMo
     }
     
     return baseEnv;
+  }
+
+  /**
+   * Add GitHub authentication to repository URL
+   */
+  addGitHubAuth(repositoryUrl: string, token: string): string {
+    try {
+      const url = new URL(repositoryUrl);
+      if (url.hostname === "github.com") {
+        // Convert to authenticated HTTPS URL
+        url.username = "x-access-token";
+        url.password = token;
+        return url.toString();
+      }
+      return repositoryUrl;
+    } catch (error) {
+      console.warn(`Failed to parse repository URL: ${repositoryUrl}`, error);
+      return repositoryUrl;
+    }
+  }
+
+  /**
+   * Generate GitHub OAuth URL for authentication
+   */
+  generateOAuthUrl(userId: string): string {
+    const baseUrl = process.env.INGRESS_URL || "http://localhost:8080";
+    return `${baseUrl}/api/github/oauth/authorize?userId=${userId}`;
+  }
+
+  /**
+   * Check if GitHub CLI is authenticated
+   */
+  async isGitHubCLIAuthenticated(workingDir: string): Promise<boolean> {
+    try {
+      const { execSync } = await import('child_process');
+      execSync("gh auth status", {
+        cwd: workingDir,
+        stdio: "pipe",
+        timeout: 3000,
+      });
+      return true;
+    } catch (error) {
+      // If GH_TOKEN is set, authentication is available even if gh auth status fails
+      return !!(process.env.GH_TOKEN || process.env.GITHUB_TOKEN);
+    }
   }
 
   private extractRepoName(url: string): string {

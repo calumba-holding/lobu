@@ -21,6 +21,7 @@ import { setupHealthEndpoints } from "./simple-http";
 import { SlackEventHandlers } from "./slack/slack-event-handlers";
 import type { DispatcherConfig } from "./types";
 import { moduleRegistry } from "../../../modules";
+import { GitHubModule } from "../../../modules/github";
 
 export class SlackDispatcher {
   private app: App;

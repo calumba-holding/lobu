@@ -6,14 +6,12 @@ import { createLogger } from "@peerbot/shared";
 const logger = createLogger("github-module");
 
 // Import from shared package
-import { GitHubRepositoryError, getDbPool } from "@peerbot/shared";
+import { GitHubRepositoryError, getDbPool, type GitHubConfig } from "@peerbot/shared";
 
-export interface GitHubConfig {
-  token: string;
-  organization: string;
+export interface GitHubModuleConfig extends GitHubConfig {
+  token?: string;
+  organization?: string;
   repository?: string;
-  clientId: string;
-  clientSecret: string;
   ingressUrl?: string;
 }
 
@@ -28,11 +26,11 @@ export interface UserRepository {
 
 export class GitHubRepositoryManager {
   private octokit: Octokit;
-  private config: GitHubConfig;
+  private config: GitHubModuleConfig;
   private repositories = new Map<string, UserRepository>(); // username -> repository info
   private databaseUrl?: string;
 
-  constructor(config: GitHubConfig, databaseUrl?: string) {
+  constructor(config: GitHubModuleConfig, databaseUrl?: string) {
     this.config = config;
     this.databaseUrl = databaseUrl;
 
