@@ -14,33 +14,34 @@ services:
     profiles:
       - build-only
 
-  dispatcher:
+  gateway:
     build:
       context: .
-      dockerfile: Dockerfile.dispatcher
+      dockerfile: Dockerfile.gateway
     environment:
       NODE_ENV: development
       AGENT_DEFAULT_MODEL: ${AGENT_DEFAULT_MODEL}
-      DATABASE_URL: postgresql://postgres:${POSTGRESQL_PASSWORD:-password}@postgres:5432/peerbot?sslmode=disable
+      QUEUE_URL: redis://redis:6379/0
       SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN}
       SLACK_APP_TOKEN: ${SLACK_APP_TOKEN}
       SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET}
-      GITHUB_TOKEN: ${GITHUB_TOKEN}
-      GITHUB_ORGANIZATION: ${GITHUB_ORGANIZATION}
-      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
-      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
       INGRESS_URL: ${INGRESS_URL:-http://localhost:8080}
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN}
       DEPLOYMENT_MODE: ${DEPLOYMENT_MODE:-docker}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      ENV_STORAGE_DIR: /app/.peerbot/env
     volumes:
       # Mount source code for hot reload
       - ./packages:/app/packages:cached
       - ./tsconfig.json:/app/tsconfig.json:cached
       - ./package.json:/app/package.json:cached
       # Use named volume for node_modules to avoid conflicts
-      - dispatcher_node_modules:/app/node_modules
-    working_dir: /app/packages/dispatcher
+      - gateway_node_modules:/app/node_modules
+      # Mount Docker socket for Docker mode
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Persistent env storage
+      - env_storage:/app/.peerbot/env
+    working_dir: /app/packages/gateway
     command: bun run dev
     ports:
       - "3000:3000"
@@ -48,48 +49,15 @@ services:
     networks:
       - peerbot-network
     depends_on:
-      - postgres
+      - redis
 
-  orchestrator:
-    build:
-      context: .
-      dockerfile: Dockerfile.orchestrator
-    environment:
-      NODE_ENV: development
-      DATABASE_URL: postgresql://postgres:${POSTGRESQL_PASSWORD:-password}@postgres:5432/peerbot?sslmode=disable
-      GITHUB_TOKEN: ${GITHUB_TOKEN}
-      DEPLOYMENT_MODE: ${DEPLOYMENT_MODE:-docker}
-      DOCKER_HOST: unix:///var/run/docker.sock
-      HOST_PROJECT_PATH: /Users/burakemre/Code/ai-experiments/peerbot
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
     volumes:
-      # Mount source code for hot reload
-      - ./packages:/app/packages:cached
-      - ./tsconfig.json:/app/tsconfig.json:cached
-      - ./package.json:/app/package.json:cached
-      # Use named volume for node_modules to avoid conflicts
-      - orchestrator_node_modules:/app/node_modules
-      # Mount Docker socket for Docker mode (needs Docker Desktop running)
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    working_dir: /app/packages/orchestrator
-    command: bun run dev
+      - redis_data:/data
     ports:
-      - "3001:3001"
-    networks:
-      - peerbot-network
-    depends_on:
-      - postgres
-
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRESQL_PASSWORD:-password}
-      POSTGRES_DB: peerbot
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+      - "6379:6379"
     networks:
       - peerbot-network
 
@@ -98,6 +66,6 @@ networks:
     driver: bridge
 
 volumes:
-  dispatcher_node_modules:
-  orchestrator_node_modules:
-  postgres_data:
+  gateway_node_modules:
+  redis_data:
+  env_storage:

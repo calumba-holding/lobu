@@ -34,7 +34,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: {{ include "peerbot.fullname" $ }}-dispatcher
+                name: {{ include "peerbot.fullname" $ }}-gateway
                 port:
                   number: 8080
           # Route /health to port 8080
@@ -42,7 +42,7 @@ spec:
             pathType: Exact
             backend:
               service:
-                name: {{ include "peerbot.fullname" $ }}-dispatcher
+                name: {{ include "peerbot.fullname" $ }}-gateway
                 port:
                   number: 8080
           # Route everything else to port 3000 (Slack)
@@ -51,7 +51,7 @@ spec:
             pathType: {{ .pathType }}
             backend:
               service:
-                name: {{ include "peerbot.fullname" $ }}-dispatcher
+                name: {{ include "peerbot.fullname" $ }}-gateway
                 port:
                   number: {{ $.Values.slack.port }}
           {{- end }}

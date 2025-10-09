@@ -1,13 +1,13 @@
 import {
-  describe,
-  it,
-  expect,
-  beforeAll,
   afterAll,
+  beforeAll,
   beforeEach,
+  describe,
+  expect,
+  it,
 } from "bun:test";
-import { MockSlackServer } from "../mocks/slack-server";
 import { MockClaudeServer } from "../mocks/claude-server";
+import { MockSlackServer } from "../mocks/slack-server";
 
 describe("Mock Servers Test", () => {
   let slackServer: MockSlackServer;

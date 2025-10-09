@@ -6,15 +6,14 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc && cp src/custom-instructions.md dist/ && tsc mcp/process-manager-server.ts --outDir dist/mcp --module esnext --moduleResolution bundler --allowImportingTsExtensions false --downlevelIteration --skipLibCheck && cp dist/mcp/process-manager-server.js dist/mcp/process-manager-server.mjs",
+    "build": "tsc && cp src/custom-instructions.md dist/",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@peerbot/shared": "workspace:*",
-    "pg-boss": "^10.0.2"
+    "@peerbot/core": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

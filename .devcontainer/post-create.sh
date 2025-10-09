@@ -12,9 +12,9 @@ sudo -u node bun install
 
 # Build packages as node user
 echo "🔨 Building packages..."
-sudo -u node bash -c "cd packages/shared && bun run build"
+sudo -u node bash -c "cd packages/core && bun run build"
 sudo -u node bash -c "cd packages/worker && bun run build"
-sudo -u node bash -c "cd packages/dispatcher && bun run build"
+sudo -u node bash -c "cd packages/gateway && bun run build"
 sudo -u node bash -c "cd packages/orchestrator && bun run build"
 
 # Setup shell environment
@@ -93,7 +93,6 @@ This is a development environment for the Peerbot running in a VS Code DevContai
 - Bun package manager installed
 - Claude Code CLI available globally
 - Kubernetes tools (kubectl, helm) and Docker installed
-- PostgreSQL client available
 - MCP Process Manager server configured
 
 ## MCP Server
@@ -127,5 +126,5 @@ echo ""
 echo "💡 Tips:"
 echo "  - The MCP process manager is configured for Claude Code"
 echo "  - Use 'k' as alias for kubectl (k get pods, k logs, etc.)"
-echo "  - Ports 3000-3002, 5432-5433, 8080-8081 are forwarded"
+echo "  - Ports 3000-3002, 8080-8081 are forwarded"
 echo ""

@@ -38,7 +38,7 @@
   },
 
   // Port forwarding
-  "forwardPorts": [3000, 3001, 3002, 5432, 5433, 8080, 8081],
+  "forwardPorts": [3000, 3001, 3002, 8080, 8081],
   "portsAttributes": {
     "3000": {
       "label": "Slack App",
@@ -50,14 +50,6 @@
     },
     "3002": {
       "label": "Dispatcher Service",
-      "onAutoForward": "notify"
-    },
-    "5432": {
-      "label": "PostgreSQL (Internal)",
-      "onAutoForward": "silent"
-    },
-    "5433": {
-      "label": "PostgreSQL (Forwarded)",
       "onAutoForward": "notify"
     },
     "8080": {

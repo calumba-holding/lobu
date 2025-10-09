@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     
     outputs:
-      dispatcher-image: ${{ steps.meta-dispatcher.outputs.tags }}
+      gateway-image: ${{ steps.meta-gateway.outputs.tags }}
       orchestrator-image: ${{ steps.meta-orchestrator.outputs.tags }}
       worker-image: ${{ steps.meta-worker.outputs.tags }}
       image-tag: ${{ steps.tag.outputs.tag }}
@@ -53,29 +53,29 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Extract metadata for Dispatcher
-        id: meta-dispatcher
+      - name: Extract metadata for Gateway
+        id: meta-gateway
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.DOCKER_NAMESPACE }}/peerbot-dispatcher
+          images: ${{ env.DOCKER_NAMESPACE }}/peerbot-gateway
           tags: |
             type=sha,prefix={{branch}}-
             type=raw,value=latest,enable={{is_default_branch}}
             type=raw,value=${{ steps.tag.outputs.tag }}
 
-      - name: Build and push Dispatcher
+      - name: Build and push Gateway
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./Dockerfile.dispatcher
+          file: ./Dockerfile.gateway
           push: true
-          tags: ${{ steps.meta-dispatcher.outputs.tags }}
+          tags: ${{ steps.meta-gateway.outputs.tags }}
           cache-from: |
             type=gha
-            type=registry,ref=${{ env.DOCKER_NAMESPACE }}/peerbot-dispatcher:buildcache
+            type=registry,ref=${{ env.DOCKER_NAMESPACE }}/peerbot-gateway:buildcache
           cache-to: |
             type=gha,mode=max
-            type=registry,ref=${{ env.DOCKER_NAMESPACE }}/peerbot-dispatcher:buildcache,mode=max
+            type=registry,ref=${{ env.DOCKER_NAMESPACE }}/peerbot-gateway:buildcache,mode=max
           platforms: linux/amd64
 
       - name: Extract metadata for Orchestrator

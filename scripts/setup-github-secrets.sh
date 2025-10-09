@@ -90,7 +90,6 @@ set_secret "SLACK_BOT_TOKEN" "$SLACK_BOT_TOKEN" "community"
 set_secret "SLACK_APP_TOKEN" "$SLACK_APP_TOKEN" "community"
 set_secret "SLACK_SIGNING_SECRET" "$SLACK_SIGNING_SECRET" "community"
 set_secret "CLAUDE_CODE_OAUTH_TOKEN" "$CLAUDE_CODE_OAUTH_TOKEN" "community"
-set_secret "POSTGRESQL_PASSWORD" "${POSTGRESQL_PASSWORD:-peerbot123}" "community"
 
 # Optional: GitHub OAuth (if configured)
 if [ -n "$GITHUB_CLIENT_ID" ]; then

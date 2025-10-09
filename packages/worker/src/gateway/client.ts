@@ -1,0 +1,796 @@
+#!/usr/bin/env bun
+
+import { createLogger } from "@peerbot/core";
+import type { WorkerConfig } from "../types";
+import type {
+  WorkerExecutor,
+  GatewayIntegrationInterface,
+} from "../interfaces";
+
+const logger = createLogger("gateway");
+
+// ============================================================================
+// TYPES & INTERFACES
+// ============================================================================
+
+export interface QueuedMessage {
+  payload: any;
+  timestamp: number;
+}
+
+export interface BatcherConfig {
+  idleThreshold?: number;
+  initialCollectionWindow?: number;
+  subsequentCollectionWindow?: number;
+  quietPeriodMs?: number;
+  onBatchReady?: (messages: QueuedMessage[]) => Promise<void>;
+}
+
+interface ThreadMessagePayload {
+  botId: string;
+  userId: string;
+  threadId: string;
+  platform: string;
+  channelId: string;
+  messageId: string;
+  messageText: string;
+  platformMetadata: Record<string, any>;
+  claudeOptions: Record<string, any>;
+  routingMetadata?: {
+    targetThreadId: string;
+    userId: string;
+  };
+}
+
+// ============================================================================
+// MESSAGE BATCHER
+// ============================================================================
+
+/**
+ * Handles intelligent message batching with adaptive timing
+ */
+export class MessageBatcher {
+  private collectionTimer: NodeJS.Timeout | null = null;
+  private collectionQuietTimer: NodeJS.Timeout | null = null;
+  private isFinalizingCollection = false;
+  private collectingMessages: QueuedMessage[] = [];
+  private lastActivityTime = 0;
+  private hasStartedSession = false;
+  private isProcessing = false;
+  private messageQueue: QueuedMessage[] = [];
+
+  // Configurable timing parameters
+  private idleThreshold: number;
+  private initialCollectionWindow: number;
+  private subsequentCollectionWindow: number;
+  private quietPeriodMs: number;
+  private onBatchReady?: (messages: QueuedMessage[]) => Promise<void>;
+
+  constructor(config: BatcherConfig = {}) {
+    this.idleThreshold = config.idleThreshold ?? 5000;
+    this.initialCollectionWindow = config.initialCollectionWindow ?? 5000;
+    this.subsequentCollectionWindow = config.subsequentCollectionWindow ?? 5000;
+    this.quietPeriodMs = config.quietPeriodMs ?? 3000;
+    this.onBatchReady = config.onBatchReady;
+  }
+
+  async addMessage(message: QueuedMessage): Promise<void> {
+    const now = Date.now();
+    const timeSinceLastActivity = now - this.lastActivityTime;
+
+    if (this.collectionTimer) {
+      logger.info(
+        `Adding message to ongoing collection (${this.collectingMessages.length + 1} messages)`
+      );
+      this.collectingMessages.push(message);
+      this.resetQuietTimer();
+    } else if (!this.hasStartedSession && !this.isProcessing) {
+      logger.info(
+        `Starting initial ${this.initialCollectionWindow}ms collection window for first message`
+      );
+      this.startCollectionWindow(this.initialCollectionWindow, message);
+    } else if (this.isProcessing) {
+      logger.info(
+        `Queueing message for processing after current batch completes`
+      );
+      this.messageQueue.push(message);
+    } else if (timeSinceLastActivity > this.idleThreshold) {
+      logger.info(
+        `Starting ${this.subsequentCollectionWindow}ms collection window after ${timeSinceLastActivity}ms idle`
+      );
+      this.startCollectionWindow(this.subsequentCollectionWindow, message);
+    } else {
+      logger.info(
+        `Processing message immediately (${timeSinceLastActivity}ms since last activity)`
+      );
+      this.messageQueue.push(message);
+      await this.processQueueSequentially();
+    }
+  }
+
+  private startCollectionWindow(
+    duration: number,
+    firstMessage: QueuedMessage
+  ): void {
+    this.collectingMessages = [firstMessage];
+
+    const finalizeCollection = async () => {
+      if (this.isFinalizingCollection) return;
+      this.isFinalizingCollection = true;
+
+      logger.info(
+        `Collection window ended, processing ${this.collectingMessages.length} message(s)`
+      );
+
+      this.messageQueue.push(...this.collectingMessages);
+      this.collectingMessages = [];
+
+      if (this.collectionTimer) {
+        clearTimeout(this.collectionTimer);
+        this.collectionTimer = null;
+      }
+      if (this.collectionQuietTimer) {
+        clearTimeout(this.collectionQuietTimer);
+        this.collectionQuietTimer = null;
+      }
+
+      this.isFinalizingCollection = false;
+
+      if (!this.isProcessing) {
+        await this.processQueueSequentially();
+      }
+    };
+
+    this.collectionTimer = setTimeout(finalizeCollection, duration);
+    this.scheduleQuietTimer(finalizeCollection);
+  }
+
+  private scheduleQuietTimer(finalizeCallback: () => Promise<void>): void {
+    if (this.collectionQuietTimer) {
+      clearTimeout(this.collectionQuietTimer);
+    }
+    this.collectionQuietTimer = setTimeout(
+      finalizeCallback,
+      this.quietPeriodMs
+    );
+  }
+
+  private resetQuietTimer(): void {
+    const finalizeCollection = async () => {
+      if (this.isFinalizingCollection) return;
+      this.isFinalizingCollection = true;
+
+      logger.info(
+        `Quiet period ended, processing ${this.collectingMessages.length} message(s)`
+      );
+
+      this.messageQueue.push(...this.collectingMessages);
+      this.collectingMessages = [];
+
+      if (this.collectionTimer) {
+        clearTimeout(this.collectionTimer);
+        this.collectionTimer = null;
+      }
+      if (this.collectionQuietTimer) {
+        clearTimeout(this.collectionQuietTimer);
+        this.collectionQuietTimer = null;
+      }
+
+      this.isFinalizingCollection = false;
+
+      if (!this.isProcessing) {
+        await this.processQueueSequentially();
+      }
+    };
+
+    this.scheduleQuietTimer(finalizeCollection);
+  }
+
+  private async processQueueSequentially(): Promise<void> {
+    this.isProcessing = true;
+    this.lastActivityTime = Date.now();
+
+    try {
+      while (this.messageQueue.length > 0) {
+        const messagesToProcess = [...this.messageQueue];
+        this.messageQueue = [];
+
+        logger.info(
+          `Processing batch of ${messagesToProcess.length} messages sequentially`
+        );
+
+        messagesToProcess.sort((a, b) => a.timestamp - b.timestamp);
+
+        if (this.onBatchReady) {
+          await this.onBatchReady(messagesToProcess);
+        }
+
+        this.lastActivityTime = Date.now();
+      }
+    } catch (error) {
+      logger.error("Error during sequential message processing:", error);
+      throw error;
+    } finally {
+      this.isProcessing = false;
+      this.lastActivityTime = Date.now();
+      this.hasStartedSession = true;
+    }
+  }
+
+  stop(): void {
+    if (this.collectionTimer) {
+      clearTimeout(this.collectionTimer);
+      this.collectionTimer = null;
+    }
+    if (this.collectionQuietTimer) {
+      clearTimeout(this.collectionQuietTimer);
+      this.collectionQuietTimer = null;
+    }
+
+    if (this.collectingMessages.length > 0) {
+      this.messageQueue.push(...this.collectingMessages);
+      this.collectingMessages = [];
+    }
+  }
+
+  isCurrentlyProcessing(): boolean {
+    return this.isProcessing;
+  }
+
+  getPendingCount(): number {
+    return this.messageQueue.length + this.collectingMessages.length;
+  }
+}
+
+// ============================================================================
+// GATEWAY INTEGRATION
+// ============================================================================
+
+/**
+ * Gateway integration for sending worker responses to dispatcher via HTTP
+ */
+export class GatewayIntegration implements GatewayIntegrationInterface {
+  private dispatcherUrl: string;
+  private workerToken: string;
+  private userId: string;
+  private channelId: string;
+  private threadId: string;
+  private originalMessageTs: string;
+  private claudeSessionId?: string;
+  private botResponseTs?: string;
+  private processedMessageIds: string[] = [];
+  private jobId?: string;
+  private moduleData?: Record<string, unknown>;
+
+  constructor(
+    dispatcherUrl: string,
+    workerToken: string,
+    userId: string,
+    channelId: string,
+    threadId: string,
+    originalMessageTs: string,
+    claudeSessionId: string | undefined = undefined,
+    botResponseTs: string | undefined = undefined
+  ) {
+    this.dispatcherUrl = dispatcherUrl;
+    this.workerToken = workerToken;
+    this.userId = userId;
+    this.channelId = channelId;
+    this.threadId = threadId;
+    this.originalMessageTs = originalMessageTs;
+    this.claudeSessionId = claudeSessionId;
+    this.botResponseTs = botResponseTs;
+  }
+
+  setJobId(jobId: string): void {
+    this.jobId = jobId;
+  }
+
+  setProcessedMessages(messageIds: string[]): void {
+    this.processedMessageIds = messageIds;
+  }
+
+  setBotResponseTs(botResponseTs: string): void {
+    this.botResponseTs = botResponseTs;
+  }
+
+  setModuleData(moduleData: Record<string, unknown>): void {
+    this.moduleData = moduleData;
+  }
+
+  async signalDone(content: string): Promise<void> {
+    await this.sendContent(content);
+    await this.signalCompletion();
+  }
+
+  async sendContent(content: string): Promise<void> {
+    await this.sendResponse({
+      messageId: this.originalMessageTs,
+      channelId: this.channelId,
+      threadTs: this.threadId,
+      userId: this.userId,
+      content,
+      timestamp: Date.now(),
+      originalMessageTs: this.originalMessageTs,
+      claudeSessionId: this.claudeSessionId,
+      botResponseTs: this.botResponseTs,
+      moduleData: this.moduleData,
+    });
+  }
+
+  async signalCompletion(): Promise<void> {
+    await this.sendResponse({
+      messageId: this.originalMessageTs,
+      channelId: this.channelId,
+      threadTs: this.threadId,
+      userId: this.userId,
+      timestamp: Date.now(),
+      originalMessageTs: this.originalMessageTs,
+      processedMessageIds: this.processedMessageIds,
+      claudeSessionId: this.claudeSessionId,
+      botResponseTs: this.botResponseTs,
+      moduleData: this.moduleData,
+    });
+  }
+
+  async signalError(error: Error): Promise<void> {
+    await this.sendResponse({
+      messageId: this.originalMessageTs,
+      channelId: this.channelId,
+      threadTs: this.threadId,
+      userId: this.userId,
+      error: error.message,
+      timestamp: Date.now(),
+      originalMessageTs: this.originalMessageTs,
+      claudeSessionId: this.claudeSessionId,
+      botResponseTs: this.botResponseTs,
+    });
+  }
+
+  private async sendResponse(data: any): Promise<void> {
+    const maxRetries = 3;
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const responseUrl = `${this.dispatcherUrl}/worker/response`;
+        const payload = this.jobId ? { _jobId: this.jobId, ...data } : data;
+
+        const response = await fetch(responseUrl, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${this.workerToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+          throw new Error(
+            `Failed to send response to dispatcher: ${response.status} ${response.statusText}`
+          );
+        }
+
+        logger.debug("Response sent to dispatcher successfully");
+        return;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        logger.warn(
+          `Failed to send response (attempt ${attempt + 1}/${maxRetries}):`,
+          error
+        );
+
+        if (attempt < maxRetries - 1) {
+          const delay = 1000 * 2 ** attempt;
+          logger.debug(`Retrying in ${delay}ms...`);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+      }
+    }
+
+    logger.error(
+      "All retry attempts failed for sending response to dispatcher"
+    );
+    throw lastError;
+  }
+}
+
+// ============================================================================
+// GATEWAY CLIENT
+// ============================================================================
+
+/**
+ * Gateway client for workers - connects to dispatcher via SSE
+ * Receives jobs via SSE stream, sends responses via HTTP POST
+ */
+export class GatewayClient {
+  private dispatcherUrl: string;
+  private workerToken: string;
+  private userId: string;
+  private deploymentName: string;
+  private isRunning = false;
+  private currentWorker: WorkerExecutor | null = null;
+  private hasStartedSession = false;
+  private abortController?: AbortController;
+  private currentJobId?: string;
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 10;
+  private messageBatcher: MessageBatcher;
+
+  constructor(
+    dispatcherUrl: string,
+    workerToken: string,
+    userId: string,
+    deploymentName: string
+  ) {
+    this.dispatcherUrl = dispatcherUrl;
+    this.workerToken = workerToken;
+    this.userId = userId;
+    this.deploymentName = deploymentName;
+
+    this.messageBatcher = new MessageBatcher({
+      onBatchReady: async (messages) => {
+        await this.processBatchedMessages(messages);
+      },
+    });
+  }
+
+  async start(): Promise<void> {
+    this.isRunning = true;
+
+    while (this.isRunning) {
+      try {
+        await this.connectAndListen();
+        if (!this.isRunning) break;
+        await this.handleReconnect();
+      } catch (error) {
+        if ((error as any).name === "AbortError") {
+          logger.info("SSE connection aborted");
+          break;
+        }
+        logger.error("SSE connection error:", error);
+        if (!this.isRunning) break;
+        await this.handleReconnect();
+      }
+    }
+  }
+
+  private async connectAndListen(): Promise<void> {
+    this.abortController = new AbortController();
+    const streamUrl = `${this.dispatcherUrl}/worker/stream`;
+
+    logger.info(
+      `Connecting to dispatcher at ${streamUrl} (attempt ${this.reconnectAttempts + 1})`
+    );
+
+    const response = await fetch(streamUrl, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${this.workerToken}`,
+        Accept: "text/event-stream",
+      },
+      signal: this.abortController.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to connect to dispatcher: ${response.status} ${response.statusText}`
+      );
+    }
+
+    logger.info("✅ Connected to dispatcher via SSE");
+    this.reconnectAttempts = 0;
+
+    const reader = response.body?.getReader();
+    const decoder = new TextDecoder();
+
+    if (!reader) {
+      throw new Error("No response body");
+    }
+
+    let buffer = "";
+
+    while (this.isRunning) {
+      const { done, value } = await reader.read();
+
+      if (done) {
+        logger.info("SSE stream ended");
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+
+      const events = buffer.split("\n\n");
+      buffer = events.pop() || "";
+
+      for (const event of events) {
+        if (!event.trim()) continue;
+
+        const lines = event.split("\n");
+        let eventType = "message";
+        let eventData = "";
+
+        for (const line of lines) {
+          if (line.startsWith("event:")) {
+            eventType = line.substring(6).trim();
+          } else if (line.startsWith("data:")) {
+            eventData = line.substring(5).trim();
+          }
+        }
+
+        if (eventData) {
+          await this.handleEvent(eventType, eventData);
+        }
+      }
+    }
+  }
+
+  private async handleReconnect(): Promise<void> {
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      logger.error("Max reconnection attempts reached, giving up");
+      this.isRunning = false;
+      return;
+    }
+
+    this.reconnectAttempts++;
+    const delay = Math.min(1000 * 2 ** (this.reconnectAttempts - 1), 60000);
+
+    logger.info(
+      `Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})...`
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+
+  async stop(): Promise<void> {
+    try {
+      this.isRunning = false;
+
+      if (this.abortController) {
+        this.abortController.abort();
+      }
+
+      this.messageBatcher.stop();
+
+      if (this.currentWorker) {
+        await this.currentWorker.cleanup();
+        this.currentWorker = null;
+      }
+
+      logger.info("✅ Gateway client stopped");
+    } catch (error) {
+      logger.error("Error stopping gateway client:", error);
+      throw error;
+    }
+  }
+
+  private async handleEvent(eventType: string, data: string): Promise<void> {
+    try {
+      if (eventType === "connected") {
+        const connData = JSON.parse(data);
+        logger.info(
+          `Connected to dispatcher for deployment ${connData.deploymentName}`
+        );
+        return;
+      }
+
+      if (eventType === "ping") {
+        logger.debug("Received heartbeat ping from dispatcher");
+        return;
+      }
+
+      if (eventType === "job") {
+        const jobData = JSON.parse(data);
+        await this.handleThreadMessage(jobData);
+      }
+    } catch (error) {
+      logger.error(`Error handling event ${eventType}:`, error);
+    }
+  }
+
+  private async handleThreadMessage(data: any): Promise<void> {
+    const { jobId, ...payload } = data;
+    if (jobId) {
+      this.currentJobId = jobId;
+      logger.debug(`Received job ${jobId}`);
+    }
+
+    if (payload.userId.toLowerCase() !== this.userId.toLowerCase()) {
+      logger.warn(
+        `Received message for user ${payload.userId}, but this worker is for user ${this.userId}`
+      );
+      return;
+    }
+
+    const now = Date.now();
+    const queuedMessage: QueuedMessage = {
+      payload: payload as ThreadMessagePayload,
+      timestamp: now,
+    };
+
+    await this.messageBatcher.addMessage(queuedMessage);
+    logger.info("Message successfully handled");
+  }
+
+  private async processBatchedMessages(
+    messages: QueuedMessage[]
+  ): Promise<void> {
+    if (messages.length === 0) return;
+
+    if (messages.length === 1) {
+      const singleMessage = messages[0];
+      if (singleMessage) {
+        await this.processSingleMessage(singleMessage, [
+          singleMessage.payload.messageId,
+        ]);
+      }
+      return;
+    }
+
+    logger.info(`Batching ${messages.length} messages for combined processing`);
+
+    const firstMessage = messages[0];
+    if (!firstMessage) return;
+
+    const combinedPrompt = messages
+      .map((msg, index) => `Message ${index + 1}: ${msg.payload.messageText}`)
+      .join("\n\n");
+
+    const batchedMessage: QueuedMessage = {
+      timestamp: firstMessage.timestamp,
+      payload: {
+        ...firstMessage.payload,
+        messageText: combinedPrompt,
+        claudeOptions: firstMessage.payload.claudeOptions,
+      },
+    };
+
+    const processedIds = messages
+      .map((m) => m.payload.messageId)
+      .filter(Boolean);
+    await this.processSingleMessage(batchedMessage, processedIds);
+  }
+
+  private async processSingleMessage(
+    message: QueuedMessage,
+    processedIds?: string[]
+  ): Promise<void> {
+    // Dynamic import to avoid circular dependency
+    const { ClaudeWorker } = await import("../worker");
+
+    try {
+      if (!process.env.USER_ID) {
+        logger.warn(
+          `USER_ID not set in environment, using userId from payload: ${message.payload.userId}`
+        );
+        process.env.USER_ID = message.payload.userId;
+      }
+
+      const workerConfig = this.payloadToWorkerConfig(message.payload);
+
+      if (!this.hasStartedSession) {
+        const crypto = require("node:crypto");
+        workerConfig.sessionId = crypto.randomUUID();
+        logger.info(
+          `Creating new Claude session ${workerConfig.sessionId} for first message in thread ${message.payload.threadId}`
+        );
+        this.hasStartedSession = true;
+      } else {
+        workerConfig.resumeSessionId = "continue";
+        logger.info(
+          `Continuing existing Claude session for message in thread ${message.payload.threadId}`
+        );
+      }
+
+      this.currentWorker = new ClaudeWorker(workerConfig);
+
+      const gatewayIntegration = this.currentWorker.getGatewayIntegration();
+
+      if (gatewayIntegration) {
+        if (this.currentJobId) {
+          gatewayIntegration.setJobId(this.currentJobId);
+        }
+
+        if (processedIds && processedIds.length > 0) {
+          gatewayIntegration.setProcessedMessages(processedIds);
+        } else if (message?.payload?.messageId) {
+          gatewayIntegration.setProcessedMessages([message.payload.messageId]);
+        }
+      }
+
+      await this.currentWorker.execute();
+
+      this.currentJobId = undefined;
+
+      logger.info(
+        `✅ Successfully processed message ${message.payload.messageId} in thread ${message.payload.threadId}`
+      );
+    } catch (error) {
+      logger.error(
+        `❌ Failed to process message ${message.payload.messageId}:`,
+        error
+      );
+
+      const gatewayIntegration = this.currentWorker?.getGatewayIntegration();
+      if (gatewayIntegration) {
+        try {
+          const enhancedError =
+            error instanceof Error ? error : new Error(String(error));
+          await gatewayIntegration.signalError(enhancedError);
+        } catch (errorSendError) {
+          logger.error("Failed to send error to dispatcher:", errorSendError);
+        }
+      }
+
+      throw error;
+    } finally {
+      if (this.currentWorker) {
+        try {
+          await this.currentWorker.cleanup();
+        } catch (cleanupError) {
+          logger.error("Error during worker cleanup:", cleanupError);
+        }
+        this.currentWorker = null;
+      }
+    }
+  }
+
+  private payloadToWorkerConfig(payload: ThreadMessagePayload): WorkerConfig {
+    const platformMetadata = payload.platformMetadata;
+
+    const claudeOptions = {
+      ...(payload.claudeOptions || {}),
+      ...(process.env.CLAUDE_ALLOWED_TOOLS
+        ? { allowedTools: process.env.CLAUDE_ALLOWED_TOOLS }
+        : payload.claudeOptions?.allowedTools
+          ? { allowedTools: payload.claudeOptions.allowedTools }
+          : {}),
+      ...(process.env.CLAUDE_DISALLOWED_TOOLS
+        ? { disallowedTools: process.env.CLAUDE_DISALLOWED_TOOLS }
+        : payload.claudeOptions?.disallowedTools
+          ? { disallowedTools: payload.claudeOptions.disallowedTools }
+          : {}),
+      ...(process.env.CLAUDE_TIMEOUT_MINUTES
+        ? { timeoutMinutes: process.env.CLAUDE_TIMEOUT_MINUTES }
+        : payload.claudeOptions?.timeoutMinutes
+          ? { timeoutMinutes: payload.claudeOptions.timeoutMinutes }
+          : {}),
+    };
+
+    return {
+      sessionKey: `session-${payload.threadId}`,
+      userId: payload.userId,
+      channelId: payload.channelId,
+      threadTs: payload.threadId,
+      userPrompt: Buffer.from(payload.messageText).toString("base64"),
+      slackResponseChannel:
+        platformMetadata.slackResponseChannel || payload.channelId,
+      slackResponseTs: platformMetadata.slackResponseTs || payload.messageId,
+      botResponseTs: platformMetadata.botResponseTs,
+      claudeOptions: JSON.stringify(claudeOptions),
+      workspace: {
+        baseDirectory: "/workspace",
+      },
+    };
+  }
+
+  isHealthy(): boolean {
+    return this.isRunning && !this.messageBatcher.isCurrentlyProcessing();
+  }
+
+  getStatus(): {
+    isRunning: boolean;
+    isProcessing: boolean;
+    userId: string;
+    deploymentName: string;
+    pendingMessages: number;
+  } {
+    return {
+      isRunning: this.isRunning,
+      isProcessing: this.messageBatcher.isCurrentlyProcessing(),
+      userId: this.userId,
+      deploymentName: this.deploymentName,
+      pendingMessages: this.messageBatcher.getPendingCount(),
+    };
+  }
+}

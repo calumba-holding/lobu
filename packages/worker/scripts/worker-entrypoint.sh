@@ -125,21 +125,7 @@ if command -v claude >/dev/null 2>&1; then
         echo "  ⚠️ Warning: Claude CLI help test failed"
     fi
     
-    # Setup MCP server configuration for Claude Code
-    echo "🔧 Configuring MCP servers for Claude Code..."
-    if [ -f "/app/packages/worker/mcp-config.json" ]; then
-        mkdir -p /home/claude/.claude
-        cp /app/packages/worker/mcp-config.json /home/claude/.claude/settings.mcp.json
-        echo "  ✅ MCP server configuration deployed to /home/claude/.claude/settings.mcp.json"
-        
-        # Also ensure the MCP server is executable
-        if [ -f "/app/packages/worker/dist/mcp/process-manager-server.mjs" ]; then
-            chmod +x /app/packages/worker/dist/mcp/process-manager-server.mjs
-            echo "  ✅ MCP server made executable"
-        fi
-    else
-        echo "  ⚠️ Warning: MCP config file not found"
-    fi
+    echo "  ✅ MCP server will be started automatically by worker process"
 else
     echo "  ❌ Error: Claude CLI not found in PATH"
     echo "  PATH: $PATH"
@@ -175,16 +161,6 @@ echo "  - Recovery: ${RECOVERY_MODE:-false}"
 
 # Make scripts executable
 chmod +x /app/scripts/*.sh 2>/dev/null || true
-
-# Always build the MCP server to ensure we have the latest version
-# This is needed because the Docker image may have stale compiled JS
-echo "Building packages to ensure MCP server is up to date..."
-cd /app/packages/shared && bun run build
-cd /app/packages/worker && bun run build
-chmod +x /app/packages/worker/dist/mcp/process-manager-server.mjs 2>/dev/null || true
-
-# Setup MCP server AFTER building
-/app/packages/worker/scripts/setup-mcp-server.sh || echo "⚠️  MCP server setup failed or not found"
 
 # Start the worker process
 echo "🚀 Executing Claude Worker..."

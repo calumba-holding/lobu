@@ -1,5 +1,5 @@
-import express from "express";
 import { EventEmitter } from "node:events";
+import express from "express";
 
 interface SlackMessage {
   ts: string;

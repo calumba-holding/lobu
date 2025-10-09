@@ -2,22 +2,22 @@
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: {{ include "peerbot.fullname" . }}-dispatcher-pdb
+  name: {{ include "peerbot.fullname" . }}-gateway-pdb
   namespace: {{ .Values.kubernetes.namespace }}
   labels:
     {{- include "peerbot.labels" . | nindent 4 }}
-    component: dispatcher
+    component: gateway
 spec:
-  # Ensure at least one dispatcher pod is always available
-  {{- if .Values.podDisruptionBudget.dispatcher.minAvailable }}
-  minAvailable: {{ .Values.podDisruptionBudget.dispatcher.minAvailable }}
+  # Ensure at least one gateway pod is always available
+  {{- if .Values.podDisruptionBudget.gateway.minAvailable }}
+  minAvailable: {{ .Values.podDisruptionBudget.gateway.minAvailable }}
   {{- else }}
-  maxUnavailable: {{ .Values.podDisruptionBudget.dispatcher.maxUnavailable | default 1 }}
+  maxUnavailable: {{ .Values.podDisruptionBudget.gateway.maxUnavailable | default 1 }}
   {{- end }}
   selector:
     matchLabels:
       app: {{ include "peerbot.name" . }}
-      component: dispatcher
+      component: gateway
 
 ---
 # PDB for worker jobs - allow more disruption since they are transient

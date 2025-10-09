@@ -13,7 +13,6 @@ secrets:
   githubClientSecret: "" # Optional: GitHub OAuth Client Secret
   encryptionKey: "" # Optional: 32-char key for AES-GCM at-rest encryption
   claudeCodeOAuthToken: "placeholder"
-  postgresqlPassword: "placeholder"
 
 config:
   githubOrganization: "peerbot-community"
@@ -68,23 +67,6 @@ ingress:
 limitRange:
   enabled: false
 
-# PostgreSQL configuration
-postgresql:
-  enabled: true
-  database: peerbot
-  username: postgres
-  sslMode: "disable" # Options: disable, require, verify-ca, verify-full
-  resources:
-    requests:
-      memory: "256Mi"
-      cpu: "100m"
-    limits:
-      memory: "512Mi"
-      cpu: "500m"
-  storage:
-    size: "1Gi"
-    storageClass: ""
-
 slack:
   socketMode: true
   allowDirectMessages: true
@@ -94,7 +76,7 @@ claude:
   model: "claude-sonnet-4-20250514"
   timeoutMinutes: "5" # Default timeout
 
-# Disable static worker deployment - workers are created dynamically by orchestrator
+# Disable static worker deployment - workers are created dynamically by dispatcher
 worker:
   enabled: false
   runtimeClassName: "kata"
@@ -128,10 +110,10 @@ worker:
     K8S_SKIP_TLS_VERIFY: "true"
 
 # Development settings
-dispatcher:
+gateway:
   enabled: true
   image:
-    repository: buremba/peerbot-dispatcher
+    repository: buremba/peerbot-gateway
     pullPolicy: Always
     tag: latest
   resources:
@@ -192,26 +174,6 @@ workerQuota:
   counts:
     pods: "15" # Max 15 concurrent worker pods
     jobs: "10" # Legacy job limit
-
-# Re-enable orchestrator - needed for dynamic worker creation
-orchestrator:
-  enabled: true
-  image:
-    repository: buremba/peerbot-orchestrator
-    tag: latest
-    pullPolicy: Always
-  resources:
-    requests:
-      memory: "256Mi"
-      cpu: "100m"
-    limits:
-      memory: "512Mi"
-      cpu: "500m"
-  maxWorkerDeployments: 5
-
-# pgboss configuration override
-pgboss:
-  expireInHours: 1 # 1 hour minimum required by pgboss
 
 # Spegel P2P image distribution
 spegel:

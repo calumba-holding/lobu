@@ -5,7 +5,6 @@ export interface WorkerConfig {
   userId: string;
   channelId: string;
   threadTs?: string;
-  repositoryUrl: string | null;
   userPrompt: string; // Base64 encoded
   slackResponseChannel: string;
   slackResponseTs: string;
@@ -22,19 +21,11 @@ export interface WorkspaceSetupConfig {
   baseDirectory: string;
 }
 
-export interface GitRepository {
-  url: string;
-  branch: string;
-  directory: string;
-  lastCommit?: string;
-}
-
 export interface WorkspaceInfo {
   baseDirectory: string;
   userDirectory: string;
-  repository?: GitRepository;
   setupComplete: boolean;
 }
 
 // Re-export from shared package
-export { WorkerError, WorkspaceError, SlackError } from "@peerbot/shared";
+export { SlackError, WorkerError, WorkspaceError } from "@peerbot/core";

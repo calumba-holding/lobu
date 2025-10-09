@@ -39,7 +39,7 @@ rules:
     resources: ["events"]
     verbs: ["get", "list", "watch"]
   
-  # ConfigMaps and Secrets access for dispatcher
+  # ConfigMaps and Secrets access for gateway
   - apiGroups: [""]
     resources: ["configmaps", "secrets"]
     verbs: ["get", "list"]

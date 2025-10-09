@@ -1,10 +1,10 @@
 import {
-  describe,
-  it,
-  expect,
-  beforeAll,
   afterAll,
+  beforeAll,
   beforeEach,
+  describe,
+  expect,
+  it,
 } from "bun:test";
 import { TestContext } from "../fixtures/test-context";
 

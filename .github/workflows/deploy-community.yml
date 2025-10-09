@@ -133,7 +133,6 @@ jobs:
           SLACK_APP_TOKEN: ${{ secrets.SLACK_APP_TOKEN }}
           SLACK_SIGNING_SECRET: ${{ secrets.SLACK_SIGNING_SECRET }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          POSTGRESQL_PASSWORD: ${{ secrets.POSTGRESQL_PASSWORD }}
           ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
         run: |
           echo "🚀 Deploying with make deploy..."
@@ -167,8 +166,8 @@ jobs:
           kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=peerbot -n $NAMESPACE --timeout=300s || true
           
           echo ""
-          echo "📝 Recent Logs from Dispatcher:"
-          kubectl logs -n $NAMESPACE deployment/$DEPLOYMENT_NAME-dispatcher --tail=20 || true
+          echo "📝 Recent Logs from Gateway:"
+          kubectl logs -n $NAMESPACE deployment/$DEPLOYMENT_NAME-gateway --tail=20 || true
           echo ""
           echo "📝 Recent Logs from Orchestrator:"
           kubectl logs -n $NAMESPACE deployment/$DEPLOYMENT_NAME-orchestrator --tail=20 || true

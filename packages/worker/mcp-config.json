@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "process-manager": {
-      "type": "sse",
-      "url": "http://localhost:3001/sse",
-      "description": "Process management MCP server for background tasks with cloudflared tunnel support (HTTP streaming)"
-    }
-  }
-}

@@ -25,7 +25,7 @@ config:
   githubOrganization: "peerbot-community"
   githubClientId: ""  # Add your GitHub OAuth App Client ID
   demoRepository: "https://github.com/buremba/peerbot.ai"  # Enable demo feature
-  ingressUrl: "https://dispatcher.peerbot.ai"  # Critical for OAuth redirects
+  ingressUrl: "https://gateway.peerbot.ai"  # Critical for OAuth redirects
   sessionTimeoutMinutes: "5"
 
 # RBAC configuration
@@ -65,31 +65,14 @@ ingress:
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
   hosts:
-    - host: dispatcher.peerbot.ai
+    - host: gateway.peerbot.ai
       paths:
         - path: /
           pathType: Prefix
   tls:
     - secretName: peerbot-tls
       hosts:
-        - dispatcher.peerbot.ai
-
-# PostgreSQL configuration
-postgresql:
-  enabled: true
-  database: peerbot
-  username: postgres
-  sslMode: "disable"
-  resources:
-    requests:
-      memory: "512Mi"
-      cpu: "250m"
-    limits:
-      memory: "1Gi"
-      cpu: "1000m"
-  storage:
-    size: "10Gi"
-    storageClass: ""  # Use default
+        - gateway.peerbot.ai
 
 # Slack configuration
 slack:
@@ -135,11 +118,11 @@ worker:
     DISABLE_AUTOUPDATER: "1"
     K8S_SKIP_TLS_VERIFY: "true"
 
-# Dispatcher configuration
-dispatcher:
+# Gateway configuration
+gateway:
   enabled: true
   image:
-    repository: buremba/peerbot-dispatcher
+    repository: buremba/peerbot-gateway
     pullPolicy: Always
     tag: latest
   resources:
@@ -159,29 +142,6 @@ dispatcher:
   anthropicProxy:
     enabled: true
     baseUrl: ""
-
-# Orchestrator configuration
-orchestrator:
-  enabled: true
-  image:
-    repository: buremba/peerbot-orchestrator
-    tag: latest
-    pullPolicy: Always
-  resources:
-    requests:
-      memory: "512Mi"
-      cpu: "250m"
-    limits:
-      memory: "1Gi"
-      cpu: "500m"
-  maxWorkerDeployments: 100
-  idleCleanupMinutes: 60
-
-# pgboss configuration
-pgboss:
-  retryLimit: 3
-  retryDelay: 60
-  expireInHours: 1
 
 # Resource quota - Production limits
 resourceQuota:

@@ -10,13 +10,12 @@
     "esModuleInterop": true,
     "verbatimModuleSyntax": false,
     "noEmit": false,
-    "allowImportingTsExtensions": false
+    "allowImportingTsExtensions": false,
+    "baseUrl": ".",
+    "paths": {
+      "@worker/*": ["src/*"]
+    }
   },
-  "include": [
-    "src/**/*",
-    "mcp/**/*",
-    "../../modules/**/*",
-    "../shared/src/**/*"
-  ],
+  "include": ["src/**/*", "../../modules/**/*", "../shared/src/**/*"],
   "exclude": ["dist", "node_modules", "**/*.test.ts", "**/__tests__/**"]
 }

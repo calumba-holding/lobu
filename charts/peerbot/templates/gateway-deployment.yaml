@@ -1,0 +1,170 @@
+{{- if .Values.gateway.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "peerbot.fullname" . }}-gateway
+  labels:
+    {{- include "peerbot.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.gateway.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "peerbot.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: gateway
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "peerbot.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: gateway
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "peerbot.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: gateway
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.global.imageRegistry }}{{ .Values.gateway.image.repository }}:{{ .Values.gateway.image.tag }}"
+          imagePullPolicy: {{ .Values.gateway.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.gateway.service.targetPort }}
+              protocol: TCP
+            - name: health
+              containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.gateway.resources | nindent 12 }}
+          env:
+            # Slack configuration
+            - name: SLACK_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "peerbot.fullname" . }}-secrets
+                  key: slack-bot-token
+            - name: SLACK_SIGNING_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "peerbot.fullname" . }}-secrets
+                  key: slack-signing-secret
+                  optional: true
+            - name: SLACK_APP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "peerbot.fullname" . }}-secrets
+                  key: slack-app-token
+                  optional: true
+            - name: SLACK_HTTP_MODE
+              value: {{ if .Values.slack.socketMode }}"false"{{ else }}"true"{{ end }}
+            - name: PORT
+              value: "{{ .Values.gateway.service.targetPort }}"
+            - name: SLACK_ALLOW_DIRECT_MESSAGES
+              value: "{{ .Values.slack.allowDirectMessages }}"
+            - name: SLACK_ALLOW_PRIVATE_CHANNELS
+              value: "{{ .Values.slack.allowPrivateChannels }}"
+            
+            # Kubernetes configuration
+            - name: KUBERNETES_NAMESPACE
+              value: "{{ .Values.kubernetes.namespace }}"
+            - name: WORKER_IMAGE
+              value: "{{ .Values.global.imageRegistry }}{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
+            - name: WORKER_CPU
+              value: "{{ .Values.worker.resources.requests.cpu }}"
+            - name: WORKER_MEMORY
+              value: "{{ .Values.worker.resources.requests.memory }}"
+            - name: WORKER_TIMEOUT_SECONDS
+              value: "{{ .Values.worker.job.timeoutSeconds }}"
+
+            # Sentry configuration
+            - name: SENTRY_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "peerbot.fullname" . }}-secrets
+                  key: sentry-dsn
+                  optional: true
+
+            # GitHub authentication handled via MCP
+
+            # OAuth callback ingress URL
+            - name: INGRESS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "peerbot.fullname" . }}-config
+                  key: ingress-url
+                  optional: true
+          
+            # Claude configuration
+            - name: MODEL
+              value: "{{ .Values.claude.model }}"
+            - name: TIMEOUT_MINUTES
+              value: "{{ .Values.claude.timeoutMinutes }}"
+            - name: ALLOWED_TOOLS
+              value: "{{ .Values.claude.allowedTools }}"
+            
+            # Session configuration
+            - name: SESSION_TIMEOUT_MINUTES
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "peerbot.fullname" . }}-config
+                  key: session-timeout-minutes
+            
+            # Application configuration
+            - name: NODE_ENV
+              value: "{{ .Values.gateway.config.nodeEnv }}"
+            - name: LOG_LEVEL
+              value: "{{ .Values.gateway.config.logLevel }}"
+
+            # Encryption key for token at-rest encryption
+            - name: ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "peerbot.fullname" . }}-secrets
+                  key: encryption-key
+                  optional: true
+            
+            # Anthropic proxy configuration (always enabled)
+            - name: CLAUDE_CODE_OAUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "peerbot.fullname" . }}-secrets
+                  key: claude-code-oauth-token
+            {{- if .Values.gateway.anthropicProxy.baseUrl }}
+            - name: ANTHROPIC_BASE_URL
+              value: "{{ .Values.gateway.anthropicProxy.baseUrl }}"
+            {{- end }}
+      
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}{{- end }}

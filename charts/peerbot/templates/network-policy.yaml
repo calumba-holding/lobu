@@ -14,7 +14,7 @@ spec:
   - Ingress
   - Egress
   
-  # Ingress rules - only allow traffic from within namespace and to dispatcher
+  # Ingress rules - only allow traffic from within namespace and to gateway
   ingress:
   - from:
     - namespaceSelector:

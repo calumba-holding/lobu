@@ -1,0 +1,106 @@
+import {
+  type ActionButton,
+  type ModuleSessionContext,
+  moduleRegistry,
+  type SessionContext,
+} from "@peerbot/core";
+import { createLogger } from "@peerbot/core";
+
+const logger = createLogger("worker");
+
+export async function onSessionStart(
+  context: SessionContext
+): Promise<SessionContext> {
+  // Convert to module session context
+  const moduleContext: ModuleSessionContext = {
+    userId: context.userId,
+    threadId: context.threadTs || "",
+    systemPrompt: "", // Will be set by modules
+    workspace: undefined,
+  };
+
+  let updatedContext = moduleContext;
+
+  const workerModules = moduleRegistry.getWorkerModules();
+  for (const module of workerModules) {
+    try {
+      updatedContext = await module.onSessionStart(updatedContext);
+    } catch (error) {
+      logger.error(
+        `Failed to execute onSessionStart for module ${module.name}:`,
+        error
+      );
+    }
+  }
+
+  // Merge back into original context
+  return {
+    ...context,
+    ...updatedContext,
+  };
+}
+
+export async function onSessionEnd(
+  context: SessionContext
+): Promise<ActionButton[]> {
+  const allButtons: ActionButton[] = [];
+
+  // Convert to module session context
+  const moduleContext: ModuleSessionContext = {
+    userId: context.userId,
+    threadId: context.threadTs || "",
+    systemPrompt: "",
+    workspace: undefined,
+  };
+
+  const workerModules = moduleRegistry.getWorkerModules();
+  for (const module of workerModules) {
+    try {
+      const buttons = await module.onSessionEnd(moduleContext);
+      allButtons.push(...buttons);
+    } catch (error) {
+      logger.error(
+        `Failed to execute onSessionEnd for module ${module.name}:`,
+        error
+      );
+    }
+  }
+
+  return allButtons;
+}
+
+export async function initModuleWorkspace(config: any): Promise<void> {
+  const workerModules = moduleRegistry.getWorkerModules();
+  for (const module of workerModules) {
+    try {
+      await module.initWorkspace(config);
+    } catch (error) {
+      logger.error(
+        `Failed to initialize workspace for module ${module.name}:`,
+        error
+      );
+    }
+  }
+}
+
+export async function collectModuleData(context: {
+  workspaceDir: string;
+  userId: string;
+  threadId: string;
+}): Promise<Record<string, unknown>> {
+  const moduleData: Record<string, unknown> = {};
+  const workerModules = moduleRegistry.getWorkerModules();
+
+  for (const module of workerModules) {
+    try {
+      const data = await module.onBeforeResponse(context);
+      if (data !== null) {
+        moduleData[module.name] = data;
+      }
+    } catch (error) {
+      logger.error(`Failed to collect data from module ${module.name}:`, error);
+    }
+  }
+
+  return moduleData;
+}

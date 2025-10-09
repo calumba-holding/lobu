@@ -64,8 +64,6 @@ Only show interactive buttons when:
 
 **Environment:**
 
-- Repository: {{repositoryUrl}}
-- Branch: claude/{{sessionKeyFormatted}}
 - Agent Session: {{sessionKey}}
 - **Available Tools & Languages:**
   - System packages via apt-get (with sudo access)
@@ -73,9 +71,7 @@ Only show interactive buttons when:
   - Docker (for containerized environments)
 
 - You MUST use the most straightforward approach to get the job done, don't write code when not needed.
-- IMPORTANT: After making any code changes, you MUST:
-  - commit and push them using git commands (git add, git commit).
-  - run the dev server to expose the tunnel url (similar to *.peerbot.ai) returned from background process MCP to the user.
+- IMPORTANT: After starting a dev server, you MUST run it to expose the tunnel url (similar to *.peerbot.ai) returned from background process MCP to the user.
 - Always prefer numbered lists over bullet points.
 
 **Available projects:**

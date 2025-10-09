@@ -71,9 +71,8 @@ RUN echo 'export PATH="/home/bun/.bun/bin:$PATH"' >> /home/claude/.bashrc && \
 COPY package.json ./
 COPY tsconfig.json ./
 COPY packages/worker/package.json ./packages/worker/
-COPY packages/shared/package.json ./packages/shared/
-COPY packages/dispatcher/package.json ./packages/dispatcher/
-COPY packages/orchestrator/package.json ./packages/orchestrator/
+COPY packages/core/package.json ./packages/core/
+COPY packages/gateway/package.json ./packages/gateway/
 
 # Install all dependencies including devDependencies for building
 RUN --mount=type=cache,target=/root/.bun/install/cache bun install
@@ -81,13 +80,12 @@ RUN --mount=type=cache,target=/root/.bun/install/cache bun install
 # Copy source code (needed for both dev and prod)
 COPY packages/ ./packages/
 COPY scripts/ ./scripts/
-COPY modules/ ./modules/
 
 # For production mode, build during image creation
 # For dev mode, we'll build at startup to allow for live code changes
 RUN if [ "$NODE_ENV" != "development" ]; then \
         echo "Building for production..."; \
-        cd /app/packages/shared && bun run build; \
+        cd /app/packages/core && bun run build; \
         cd /app/packages/worker && bun run build; \
         ls -la /app/packages/worker/dist/ || echo "No dist directory found"; \
     else \
@@ -101,10 +99,10 @@ RUN mkdir -p /workspace && \
     chown claude:claude /workspace && \
     chmod 755 /workspace && \
     # Create dist directories for TypeScript compilation
-    mkdir -p /app/packages/shared/dist && \
+    mkdir -p /app/packages/core/dist && \
     mkdir -p /app/packages/worker/dist && \
     # Only chown specific directories that claude needs write access to
-    chown -R claude:claude /app/packages/shared/dist && \
+    chown -R claude:claude /app/packages/core/dist && \
     chown -R claude:claude /app/packages/worker/dist && \
     chown -R claude:claude /app/packages/worker/scripts 2>/dev/null || true && \
     chown -R claude:claude /app
@@ -120,14 +118,10 @@ RUN mkdir -p /home/claude/.claude/projects && \
     chmod -R 755 /home/claude/.claude && \
     echo 'export PATH="/home/claude/bin:$PATH"' >> /home/claude/.bashrc
 
-# Copy Claude settings
-COPY packages/worker/claude-settings.json /app/packages/worker/claude-settings.json
-
 # Copy the entrypoint script and make it executable
 COPY packages/worker/scripts/worker-entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh && \
-    chown claude:claude /app/entrypoint.sh && \
-    chown claude:claude /app/packages/worker/claude-settings.json
+    chown claude:claude /app/entrypoint.sh
 
 # Switch to non-root user
 USER claude

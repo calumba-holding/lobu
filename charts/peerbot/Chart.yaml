@@ -26,8 +26,6 @@ annotations:
   artifacthub.io/images: |
     - name: peerbot-dispatcher
       image: buremba/peerbot-dispatcher:latest
-    - name: peerbot-orchestrator  
-      image: buremba/peerbot-orchestrator:latest
     - name: peerbot-worker
       image: buremba/peerbot-worker:latest
   artifacthub.io/links: |

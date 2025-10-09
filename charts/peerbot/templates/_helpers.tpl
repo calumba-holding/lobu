@@ -70,11 +70,6 @@ Common environment variables for workers
     secretKeyRef:
       name: {{ include "peerbot.fullname" . }}-secrets
       key: slack-bot-token
-- name: GITHUB_TOKEN
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "peerbot.fullname" . }}-secrets
-      key: github-token
 {{- end }}
 
 {{/*

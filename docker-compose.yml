@@ -14,69 +14,27 @@ services:
     profiles:
       - build-only
 
-  dispatcher:
+  gateway:
     build:
       context: .
-      dockerfile: Dockerfile.dispatcher
-    image: peerbot-dispatcher:latest
+      dockerfile: Dockerfile.gateway
+    image: peerbot-gateway:latest
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://postgres:${POSTGRESQL_PASSWORD:-password}@postgres:5432/peerbot?sslmode=disable
       SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN}
       SLACK_APP_TOKEN: ${SLACK_APP_TOKEN}
       SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET}
-      GITHUB_TOKEN: ${GITHUB_TOKEN}
-      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
-      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
       INGRESS_URL: ${INGRESS_URL}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN}
       AGENT_DEFAULT_MODEL: ${AGENT_DEFAULT_MODEL}
       DEPLOYMENT_MODE: ${DEPLOYMENT_MODE:-docker}
-    ports:
-      - "3000:3000"
-      - "8080:8080"
-    networks:
-      - peerbot-network
-    depends_on:
-      - postgres
-    restart: unless-stopped
-
-  orchestrator:
-    build:
-      context: .
-      dockerfile: Dockerfile.orchestrator
-    image: peerbot-orchestrator:latest
-    environment:
-      NODE_ENV: production
-      DATABASE_URL: postgresql://postgres:${POSTGRESQL_PASSWORD:-password}@postgres:5432/peerbot?sslmode=disable
-      GITHUB_TOKEN: ${GITHUB_TOKEN}
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
-      DEPLOYMENT_MODE: ${DEPLOYMENT_MODE:-docker}
-      DOCKER_HOST: unix:///var/run/docker.sock
-      CLAUDE_ALLOWED_TOOLS: ${CLAUDE_ALLOWED_TOOLS}
-      AGENT_DEFAULT_MODEL: ${AGENT_DEFAULT_MODEL}
     volumes:
       # Mount Docker socket
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
-      - "3001:3001"
-    networks:
-      - peerbot-network
-    depends_on:
-      - postgres
-    restart: unless-stopped
-
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRESQL_PASSWORD:-password}
-      POSTGRES_DB: peerbot
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+      - "3000:3000"
+      - "8080:8080"
     networks:
       - peerbot-network
     restart: unless-stopped
@@ -84,6 +42,3 @@ services:
 networks:
   peerbot-network:
     driver: bridge
-
-volumes:
-  postgres_data:

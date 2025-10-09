@@ -1,0 +1,48 @@
+FROM node:20-alpine
+
+# Install bun for build step
+RUN apk add --no-cache curl bash && \
+    curl -fsSL https://bun.sh/install | bash
+ENV PATH="/root/.bun/bin:${PATH}"
+
+WORKDIR /app
+
+# Only set up a minimal workspace for gateway + core + github to avoid cache busts
+COPY tsconfig.json ./
+RUN echo '{ "name": "@peerbot/gateway-build", "private": true, "workspaces": [ "packages/core", "packages/github", "packages/gateway" ] }' > package.json
+COPY packages/core/package.json ./packages/core/
+COPY packages/github/package.json ./packages/github/
+COPY packages/gateway/package.json ./packages/gateway/
+
+# Install dependencies for gateway + core + github only
+RUN --mount=type=cache,target=/root/.bun/install/cache bun install && \
+    bun add dotenv
+
+# Copy source code
+COPY packages/core/ ./packages/core/
+COPY packages/github/ ./packages/github/
+COPY packages/gateway/ ./packages/gateway/
+
+# Build core first
+WORKDIR /app/packages/core
+RUN bun run build
+
+# Build github module
+WORKDIR /app/packages/github
+RUN bun run build
+
+# Build gateway
+WORKDIR /app/packages/gateway
+RUN bun run build
+
+# Runtime
+ENV NODE_ENV=production
+EXPOSE 3000
+
+# Runtime user setup is handled by node:20-alpine
+
+# Set working directory back to /app for runtime to resolve modules correctly
+WORKDIR /app
+
+# Use Node.js for runtime (better WebSocket compatibility)
+CMD ["node", "packages/gateway/dist/packages/gateway/src/index.js"]

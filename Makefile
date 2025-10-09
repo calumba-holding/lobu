@@ -16,11 +16,6 @@ help:
 	@echo "  peerbot test                               - Run test bot"
 	@echo "  peerbot clean                              - Stop all services and clean up all resources"
 
-# Interactive setup for development
-setup:
-	@echo "🚀 Starting PeerBot development setup..."
-	@./scripts/setup-local-dev.sh
-
 # Start local development with Docker Compose in foreground
 dev:
 	@if [ ! -f .env ]; then \
@@ -35,13 +30,12 @@ dev:
 	@echo "   This will:"
 	@echo "   - Build all services including worker image"
 	@echo "   - Start services with hot reload"
-	@echo "   - Start PostgreSQL database"
 	@echo "   - Mount source code for live changes"
 	@echo ""
 	@echo "🔨 Building all services..."
 	@DETACH_FLAG=""; [ "$(DETACH)" = "1" ] && DETACH_FLAG="-d"; \
 	if [ -n "$$DETACH_FLAG" ]; then echo "🧩 Running in detached mode"; fi; \
-	COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1 docker compose -f docker-compose.dev.yml up $$DETACH_FLAG --build dispatcher orchestrator postgres
+	COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1 docker compose -f docker-compose.dev.yml up $$DETACH_FLAG --build gateway redis
 
 # Build the worker image on demand
 build-worker:
@@ -100,16 +94,14 @@ deploy:
 	echo "🚀 Building and deploying to K8s..."; \
 	if [ -z "$$GITHUB_ACTIONS" ]; then \
 		echo "📦 Building Docker images..."; \
-		docker build -f Dockerfile.dispatcher -t peerbot-dispatcher:latest .; \
-		docker build -f Dockerfile.orchestrator -t peerbot-orchestrator:latest .; \
+		docker build -f Dockerfile.gateway -t peerbot-gateway:latest .; \
 		docker build -f Dockerfile.worker -t peerbot-worker:latest .; \
 	else \
 		echo "📦 Using pre-built Docker images from registry..."; \
 	fi; \
 	if command -v kind >/dev/null 2>&1 && kind get clusters 2>/dev/null | grep -q kind; then \
 		echo "📦 Loading images into kind..."; \
-		kind load docker-image peerbot-dispatcher:latest; \
-		kind load docker-image peerbot-orchestrator:latest; \
+		kind load docker-image peerbot-gateway:latest; \
 		kind load docker-image peerbot-worker:latest; \
 	fi; \
 	echo "🔧 Deploying with Helm..."; \
@@ -120,10 +112,8 @@ deploy:
 	if [ -n "$$GITHUB_ACTIONS" ]; then \
 		IMAGE_REPO="$${DOCKER_NAMESPACE:-peerbot}"; \
 		IMAGE_TAG="$${IMAGE_TAG:-latest}"; \
-		IMAGE_OVERRIDES="--set dispatcher.image.repository=$$IMAGE_REPO/peerbot-dispatcher \
-			--set dispatcher.image.tag=$$IMAGE_TAG \
-			--set orchestrator.image.repository=$$IMAGE_REPO/peerbot-orchestrator \
-			--set orchestrator.image.tag=$$IMAGE_TAG \
+		IMAGE_OVERRIDES="--set gateway.image.repository=$$IMAGE_REPO/peerbot-gateway \
+			--set gateway.image.tag=$$IMAGE_TAG \
 			--set worker.image.repository=$$IMAGE_REPO/peerbot-worker \
 			--set worker.image.tag=$$IMAGE_TAG"; \
 	else \
@@ -135,23 +125,16 @@ deploy:
 		--namespace "$${NAMESPACE:-peerbot}" \
 		-f "$$VALUES_FILE" \
 		$$IMAGE_OVERRIDES \
-		--set config.githubClientId="$$GITHUB_CLIENT_ID" \
-		--set secrets.githubClientSecret="$$GITHUB_CLIENT_SECRET" \
 		--set secrets.encryptionKey="$$ENCRYPTION_KEY" \
 		--set secrets.slackBotToken="$$SLACK_BOT_TOKEN" \
 		--set secrets.slackSigningSecret="$$SLACK_SIGNING_SECRET" \
 		--set secrets.slackAppToken="$$SLACK_APP_TOKEN" \
-		--set secrets.githubToken="$$GITHUB_TOKEN" \
 		--set secrets.claudeCodeOAuthToken="$$CLAUDE_CODE_OAUTH_TOKEN" \
-		--set secrets.postgresqlPassword="$$POSTGRESQL_PASSWORD" \
 		--wait \
 		--timeout "$${HELM_TIMEOUT:-10m}"
-	@# Migrations are handled by orchestrator on startup, so just verify it's running
-	@echo "🗄️ Verifying orchestrator is running (migrations run automatically)..."
-	@kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=peerbot,app.kubernetes.io/component=orchestrator -n "$${NAMESPACE:-peerbot}" --timeout=300s || echo "Orchestrator may still be starting..."
 	@echo "✅ Deployed to K8s. Check status with:"
 	@echo "  kubectl get pods -n $${NAMESPACE:-peerbot}"
-	@echo "  kubectl logs -f deployment/$${DEPLOYMENT_NAME:-peerbot}-dispatcher -n $${NAMESPACE:-peerbot}"
+	@echo "  kubectl logs -f deployment/$${DEPLOYMENT_NAME:-peerbot}-gateway -n $${NAMESPACE:-peerbot}"
 
 # View logs based on deployment mode
 logs:

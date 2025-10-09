@@ -6,7 +6,7 @@ metadata:
   namespace: {{ .Values.kubernetes.namespace }}
   labels:
     {{- include "peerbot.labels" . | nindent 4 }}
-    component: dispatcher
+    component: gateway
 spec:
   type: LoadBalancer
   ports:

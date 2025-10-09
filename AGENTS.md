@@ -1,5 +1,5 @@
 ## Project Structure & Module Organization
-- Monorepo managed by Bun workspaces: `packages/dispatcher`, `packages/orchestrator`, `packages/worker`, `packages/shared`.
+- Monorepo managed by Bun workspaces: `packages/gateway`, `packages/orchestrator`, `packages/worker`, `packages/shared`.
 - Top-level tooling and ops: `Makefile`, `bin/` (CLI and setup scripts), `docker-compose*.yml`, `charts/peerbot` (Helm), `workspaces/` (local volumes), `.env*`.
 - TypeScript sources under `packages/*/src`. Tests live in `packages/*/src/__tests__` and `packages/shared/tests`.
 - **ALWAYS prefer `bun` commands over `npm`**
@@ -7,6 +7,7 @@
 
 ## Instructions
 - You MUST only do what has been asked; nothing more, nothing less.
+- When you are in planning mode and you're not fully sure, you need to ask 'codex exec "YOUR_QUESTION" --config model_reasoning_effort="high"'
 - For comprehensive QA and E2E testing, see `.claude/commands/qa.md` for detailed testing procedures and examples.
 - When you make changes to worker code (`packages/worker/*`), run `make clean-workers` to ensure new workers use the updated code.
 - Anytime you make changes in the code, you MUST:
@@ -27,7 +28,6 @@
 - **Docker Compose**: Run `make dev` to start all services with hot reload enabled
 - **Logs**: View logs with `make logs` or `docker compose logs -f [service]`
 - **Hot Reload**: Source code changes are automatically detected when NODE_ENV=development
-- **Database**: PostgreSQL runs in Docker Compose, accessible on port 5432
 
 ## Deployment Instructions
 
