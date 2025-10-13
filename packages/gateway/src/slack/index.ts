@@ -8,6 +8,9 @@ import { QueueProducer } from "../session/queue-producer";
 import { ThreadResponseConsumer } from "../session/thread-processor";
 import type { DispatcherConfig } from "../types";
 import { SlackEventHandlers } from "./event-router";
+import { McpConfigService } from "../mcp/config-service";
+import { McpCredentialStore } from "../mcp/credential-store";
+import { McpProxy } from "../mcp/proxy";
 
 export class SlackDispatcher {
   private app: App;
@@ -15,6 +18,7 @@ export class SlackDispatcher {
   private threadResponseConsumer?: ThreadResponseConsumer;
   private anthropicProxy?: AnthropicProxy;
   private workerGateway?: WorkerGateway;
+  private mcpProxy?: McpProxy;
   private config: DispatcherConfig;
 
   constructor(config: DispatcherConfig) {
@@ -113,8 +117,16 @@ export class SlackDispatcher {
       // Initialize Worker Gateway for SSE/HTTP worker communication
       const queue = createMessageQueue(this.config.queues.connectionString);
       await queue.start();
-      this.workerGateway = new WorkerGateway(queue);
+      const mcpConfigService = new McpConfigService({
+        configUrl:
+          process.env.PEERBOT_MCP_SERVERS_URL ||
+          process.env.PEERBOT_MCP_SERVERS_FILE,
+      });
+      const mcpCredentialStore = new McpCredentialStore(queue);
+      this.workerGateway = new WorkerGateway(queue, mcpConfigService);
+      this.mcpProxy = new McpProxy(mcpConfigService, mcpCredentialStore);
       logger.info("✅ Worker gateway initialized");
+      logger.info("✅ MCP proxy initialized");
 
       // Discover and register available modules
       await moduleRegistry.registerAvailableModules();
@@ -339,6 +351,10 @@ export class SlackDispatcher {
    */
   getWorkerGateway() {
     return this.workerGateway;
+  }
+
+  getMcpProxy() {
+    return this.mcpProxy;
   }
 
   /**
