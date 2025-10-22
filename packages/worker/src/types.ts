@@ -12,6 +12,7 @@ export interface WorkerConfig {
   claudeOptions: string; // JSON string
   sessionId?: string; // Claude session ID for new sessions
   resumeSessionId?: string; // Claude session ID to resume from
+  teamId?: string; // Slack team/workspace ID for streaming API
   workspace: {
     baseDirectory: string;
   };

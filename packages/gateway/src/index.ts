@@ -174,9 +174,9 @@ async function startGateway({ env }: StartOptions = {}) {
         connectionString,
         directMessage: process.env.QUEUE_DIRECT_MESSAGE || "direct_message",
         messageQueue: process.env.QUEUE_MESSAGE_QUEUE || "message_queue",
-        retryLimit: parseInt(process.env.PGBOSS_RETRY_LIMIT || "3", 10),
-        retryDelay: parseInt(process.env.PGBOSS_RETRY_DELAY || "30", 10),
-        expireInHours: parseInt(process.env.PGBOSS_EXPIRE_HOURS || "24", 10),
+        retryLimit: parseInt(process.env.QUEUE_RETRY_LIMIT || "3", 10),
+        retryDelay: parseInt(process.env.QUEUE_RETRY_DELAY || "30", 10),
+        expireInHours: parseInt(process.env.QUEUE_EXPIRE_HOURS || "24", 10),
       },
       // Anthropic proxy configuration (always enabled)
       anthropicProxy: {

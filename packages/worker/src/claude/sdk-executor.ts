@@ -10,6 +10,28 @@ import type {
 
 const logger = createLogger("worker-sdk");
 
+/**
+ * Map tool names to friendly status messages
+ */
+function getToolStatus(toolName: string): string {
+  const toolStatusMap: Record<string, string> = {
+    Bash: "Running command",
+    Read: "Reading file",
+    Write: "Writing file",
+    Edit: "Editing file",
+    Grep: "Searching",
+    Glob: "Finding files",
+    Task: "Launching agent",
+    WebFetch: "Fetching web page",
+    WebSearch: "Searching web",
+    SlashCommand: "Running command",
+    AskUserQuestion: "Asking question",
+    TodoWrite: "Updating tasks",
+  };
+
+  return toolStatusMap[toolName] || `Using ${toolName}`;
+}
+
 interface MCPServerConfig {
   type?: "sse" | "stdio";
   url?: string;
@@ -223,7 +245,19 @@ export async function runClaudeWithSDK(
                 logger.info(`  Text block: ${block.text.substring(0, 100)}`);
                 output += `${block.text}\n`;
               } else if (block.type === "tool_use") {
-                logger.info(`  Tool use: ${block.name}`);
+                logger.info(
+                  `🔧 Tool use: ${block.name} with params: ${JSON.stringify(block.input)}`
+                );
+
+                // Send status update for tool usage
+                if (onProgress) {
+                  const toolStatus = getToolStatus(block.name);
+                  await onProgress({
+                    type: "status",
+                    data: { status: toolStatus },
+                    timestamp: Date.now(),
+                  });
+                }
               }
             }
           } else {
@@ -262,8 +296,18 @@ export async function runClaudeWithSDK(
           logger.debug(`Stream event received`);
           break;
 
+        case "user": {
+          // User messages contain tool results being sent back to Claude
+          // These are handled internally by the SDK, we just log them at debug level
+          const userMsg = (message as any).message;
+          if (userMsg?.content?.[0]?.type === "tool_result") {
+            logger.debug(`Tool result returned to Claude`);
+          }
+          break;
+        }
+
         default:
-          logger.info(`Unhandled SDK message type: ${message.type}`, {
+          logger.info(`Unhandled SDK message type: ${(message as any).type}`, {
             fullMessage: JSON.stringify(message, null, 2),
           });
       }

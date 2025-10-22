@@ -18,7 +18,7 @@
     "@peerbot/core": "workspace:*",
     "@sentry/node": "^10.19.0",
     "@slack/bolt": "^3.19.0",
-    "@slack/web-api": "^7.6.0",
+    "@slack/web-api": "^7.11.0",
     "@types/node-fetch": "^2.6.13",
     "commander": "^14.0.1",
     "dockerode": "^4.0.7",

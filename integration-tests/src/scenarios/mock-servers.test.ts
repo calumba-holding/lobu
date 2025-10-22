@@ -76,27 +76,27 @@ describe("Mock Servers Test", () => {
       expect(messages[0].user).toBe("U123456");
     });
 
-    it("should handle reactions", async () => {
-      const response = await fetch("http://localhost:4001/api/reactions.add", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          channel: "C123456",
-          timestamp: "1234567890.123456",
-          name: "thumbsup",
-        }),
-      });
+    it("should record status updates", async () => {
+      const response = await fetch(
+        "http://localhost:4001/api/assistant.threads.setStatus",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            channel_id: "C123456",
+            thread_ts: "1234567890.123456",
+            status: "is thinking...",
+          }),
+        }
+      );
 
       const data = await response.json();
       expect(data.ok).toBe(true);
 
-      const reactions = slackServer.getReactions(
-        "C123456",
-        "1234567890.123456"
-      );
-      expect(reactions).toContain("thumbsup");
+      const status = slackServer.getStatus("C123456", "1234567890.123456");
+      expect(status?.status).toBe("is thinking...");
     });
   });
 

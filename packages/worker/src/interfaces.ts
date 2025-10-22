@@ -32,8 +32,13 @@ export interface GatewayIntegrationInterface {
   setProcessedMessages(messageIds: string[]): void;
   setBotResponseTs(botResponseTs: string): void;
   setModuleData(moduleData: Record<string, unknown>): void;
+  updateStatus(status: string, loadingMessages?: string[]): Promise<void>;
   sendContent(content: string): Promise<void>;
-  signalDone(content: string): Promise<void>;
+  signalDone(
+    finalDelta?: string,
+    seq?: number,
+    fullContent?: string
+  ): Promise<void>;
   signalCompletion(): Promise<void>;
   signalError(error: Error): Promise<void>;
 }

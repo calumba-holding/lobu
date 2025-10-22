@@ -22,7 +22,7 @@ export async function initSentry() {
       tracesSampleRate: 1.0, // Capture 100% of traces for better visibility
       integrations: [
         Sentry.consoleLoggingIntegration({ levels: ["log", "warn", "error"] }),
-        Sentry.postgresIntegration(),
+        Sentry.redisIntegration(),
       ],
     });
 

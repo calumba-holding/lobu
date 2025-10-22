@@ -14,6 +14,7 @@ import { McpProxy } from "../mcp/proxy";
 import { McpOAuthModule } from "../mcp/oauth-module";
 import { OAuthStateStore } from "../mcp/oauth-state-store";
 import { McpInputStore } from "../mcp/input-store";
+import { SocketHealthMonitor } from "../health/socket-health-monitor";
 
 export class SlackDispatcher {
   private app: App;
@@ -24,6 +25,7 @@ export class SlackDispatcher {
   private mcpProxy?: McpProxy;
   private config: DispatcherConfig;
   private queue?: ReturnType<typeof createMessageQueue>;
+  private socketHealthMonitor?: SocketHealthMonitor;
 
   constructor(config: DispatcherConfig) {
     this.config = config;
@@ -261,8 +263,25 @@ export class SlackDispatcher {
             }
           };
 
+          // Initialize health monitor for zombie connection detection
+          const healthConfig = {
+            checkIntervalMs: parseInt(
+              process.env.SOCKET_HEALTH_CHECK_INTERVAL_MS || "300000", // 5 min
+              10
+            ),
+            staleThresholdMs: parseInt(
+              process.env.SOCKET_STALE_THRESHOLD_MS || "900000", // 15 min
+              10
+            ),
+            protectActiveWorkers:
+              process.env.SOCKET_PROTECT_ACTIVE_WORKERS !== "false",
+          };
+          this.socketHealthMonitor = new SocketHealthMonitor(healthConfig);
+
           socketModeClient.on("slack_event", (event: any, _body: any) => {
             logger.info("Socket Mode event received:", event.type);
+            // Record activity for health monitoring
+            this.socketHealthMonitor?.recordSocketEvent();
           });
 
           socketModeClient.on("disconnect", () => {
@@ -275,6 +294,8 @@ export class SlackDispatcher {
 
           socketModeClient.on("ready", () => {
             logger.info("Socket Mode client ready");
+            // Record activity
+            this.socketHealthMonitor?.recordSocketEvent();
           });
 
           socketModeClient.on("connecting", () => {
@@ -284,11 +305,22 @@ export class SlackDispatcher {
 
           socketModeClient.on("connected", () => {
             logger.info("Socket Mode connected successfully!");
+            // Record activity
+            this.socketHealthMonitor?.recordSocketEvent();
+
             // Reset counter on successful stable connection
             setTimeout(() => {
               connectionCount = 0;
               logger.debug("Connection stable - reset reconnection counter");
             }, 5000);
+
+            // Start health monitoring after successful connection
+            if (this.socketHealthMonitor && this.workerGateway) {
+              this.socketHealthMonitor.start(
+                () => this.workerGateway?.getActiveConnections().length || 0
+              );
+              logger.info("✅ Socket health monitoring enabled");
+            }
           });
         } else {
           logger.warn("No Socket Mode client found in receiver");
@@ -383,6 +415,12 @@ export class SlackDispatcher {
    */
   async stop(): Promise<void> {
     try {
+      // Stop health monitor first
+      if (this.socketHealthMonitor) {
+        this.socketHealthMonitor.stop();
+        logger.info("Socket health monitor stopped");
+      }
+
       await this.app.stop();
 
       await this.queueProducer.stop();

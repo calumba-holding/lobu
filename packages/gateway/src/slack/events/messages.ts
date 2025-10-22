@@ -119,24 +119,13 @@ export class MessageHandler {
 
       await this.sessionManager.setSession(threadSession);
 
-      // Add immediate acknowledgment reaction
-      const isDM = context.channelId?.startsWith("D");
-      const isRootMessage = !context.threadTs;
-      if (isDM || isRootMessage) {
-        try {
-          logger.info(
-            `👀 REACTION CHANGE: Adding acknowledgment reaction 'eyes' to message ${context.messageTs} in channel ${context.channelId}`
-          );
-          await client.reactions.add({
-            channel: context.channelId,
-            timestamp: context.messageTs,
-            name: "eyes",
-          });
-          logger.info(`Added eyes reaction to message ${context.messageTs}`);
-        } catch (reactionError) {
-          logger.warn("Failed to add eyes reaction:", reactionError);
-        }
-      }
+      // Show immediate typing indicator
+      await this.setThreadStatus(
+        client,
+        context.channelId,
+        normalizedThreadTs,
+        "is thinking..."
+      );
 
       // Determine if this is a new conversation
       const isNewConversation = !context.threadTs || !existingSession;
@@ -220,19 +209,14 @@ export class MessageHandler {
 
       // Handle all errors the same way - let the worker decide what to show
       try {
-        await client.reactions.remove({
-          channel: context.channelId,
-          timestamp: context.messageTs,
-          name: "eyes",
-        });
-
-        await client.reactions.add({
-          channel: context.channelId,
-          timestamp: context.messageTs,
-          name: "x",
-        });
-      } catch (reactionError) {
-        logger.error("Failed to update error reaction:", reactionError);
+        await this.setThreadStatus(
+          client,
+          context.channelId,
+          normalizedThreadTs,
+          "encountered an error"
+        );
+      } catch (statusError) {
+        logger.error("Failed to update error status:", statusError);
       }
 
       const errorMessage =
@@ -303,6 +287,40 @@ export class MessageHandler {
     );
     if (deletedCount > 0) {
       logger.info(`Cleanup completed - Deleted ${deletedCount} sessions`);
+    }
+  }
+
+  /**
+   * Update Slack assistant thread status indicator
+   */
+  private async setThreadStatus(
+    client: any,
+    channelId: string,
+    threadTs: string,
+    status?: string,
+    loadingMessages?: string[]
+  ): Promise<void> {
+    if (!threadTs) {
+      return;
+    }
+
+    try {
+      const payload: Record<string, any> = {
+        channel_id: channelId,
+        thread_ts: threadTs,
+        status: status ?? "",
+      };
+
+      if (loadingMessages && loadingMessages.length > 0) {
+        payload.loading_messages = loadingMessages;
+      }
+
+      await client.apiCall("assistant.threads.setStatus", payload);
+    } catch (error) {
+      logger.warn(
+        `Failed to set status '${status || "<clear>"}' for thread ${threadTs}:`,
+        error
+      );
     }
   }
 }

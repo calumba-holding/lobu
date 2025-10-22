@@ -82,7 +82,7 @@ rules:
     verbs: ["get"]
     resourceNames: ["peerbot-secrets"]
   
-  # ConfigMap permissions removed - now using PostgreSQL queues only
+  # ConfigMap permissions removed - now using Redis queues only
   
   # Self-monitoring for graceful shutdown - read-only access to own job
   - apiGroups: ["batch"]

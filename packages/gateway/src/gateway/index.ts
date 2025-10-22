@@ -106,6 +106,16 @@ export class WorkerGateway {
         this.jobRouter.acknowledgeJob(jobId);
       }
 
+      // Log for debugging
+      logger.info(
+        `[WORKER-GATEWAY] Received response with fields: ${Object.keys(responseData).join(", ")}`
+      );
+      if (responseData.isStreamDelta) {
+        logger.info(
+          `[WORKER-GATEWAY] Stream delta: seq=${responseData.seq}, deltaLength=${responseData.delta?.length}`
+        );
+      }
+
       // Send response to thread_response queue
       await this.queue.send("thread_response", responseData);
 

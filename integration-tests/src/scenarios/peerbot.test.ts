@@ -50,9 +50,19 @@ describe("Peerbot Integration Tests", () => {
       expect(botMessage?.text).toBe("4");
       expect(botMessage?.blocks).toBeUndefined(); // No blocks/buttons for simple answer
 
-      // Check reactions
-      const reactions = ctx.slackServer.getReactions("C123456", ts);
-      expect(reactions).toContain("eyes");
+      // Status transitions
+      await ctx.waitFor(async () => {
+        const status = ctx.slackServer.getStatus("C123456", ts);
+        return status?.status === "is thinking...";
+      });
+      await ctx.waitFor(async () => {
+        const status = ctx.slackServer.getStatus("C123456", ts);
+        return status?.status === "is thinking...";
+      });
+      await ctx.waitFor(async () => {
+        const status = ctx.slackServer.getStatus("C123456", ts);
+        return status?.status === "";
+      });
     });
 
     it("should show file creation button when creating a file", async () => {
@@ -189,8 +199,8 @@ describe("Peerbot Integration Tests", () => {
       );
 
       await ctx.waitFor(async () => {
-        const reactions = ctx.slackServer.getReactions("C123456", ts);
-        return reactions.includes("x");
+        const status = ctx.slackServer.getStatus("C123456", ts);
+        return status?.status === "encountered an error";
       });
 
       const messages = ctx.slackServer.getThreadMessages(ts);
@@ -199,10 +209,8 @@ describe("Peerbot Integration Tests", () => {
       );
       expect(errorMessage).toBeDefined();
 
-      // Should have x reaction instead of eyes
-      const reactions = ctx.slackServer.getReactions("C123456", ts);
-      expect(reactions).toContain("x");
-      expect(reactions).not.toContain("eyes");
+      const status = ctx.slackServer.getStatus("C123456", ts);
+      expect(status?.status).toBe("encountered an error");
     });
 
     it("should work when user has valid repository access", async () => {
@@ -235,14 +243,13 @@ describe("Peerbot Integration Tests", () => {
       const botMessage = messages.find((m) => m.user === "UBOT123");
       expect(botMessage?.text).toContain("valid-repo");
 
-      // Should have successful reaction
-      const reactions = ctx.slackServer.getReactions("C123456", ts);
-      expect(reactions).toContain("eyes");
+      const status = ctx.slackServer.getStatus("C123456", ts);
+      expect(status?.status).toBe("");
     });
   });
 
   describe("Queue and Worker Management", () => {
-    it("should create pgboss job for each message", async () => {
+    it("should create queue job for each message", async () => {
       ctx.claudeServer
         .onMessage(/.*/)
         .reply([{ type: "text", content: "Processing your request" }]);

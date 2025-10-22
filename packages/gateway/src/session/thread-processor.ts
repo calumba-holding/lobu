@@ -18,12 +18,130 @@ import { convertMarkdownToSlack } from "../slack/converters/markdown";
 
 const logger = createLogger("dispatcher");
 
+/**
+ * Represents a single Slack chatStream session
+ */
+class StreamSession {
+  private stream: any;
+  private started: boolean = false;
+  private slackClient: WebClient;
+  private channelId: string;
+  private threadTs: string;
+  private userId: string;
+  private teamId?: string;
+
+  constructor(
+    slackClient: WebClient,
+    channelId: string,
+    threadTs: string,
+    userId: string,
+    teamId?: string
+  ) {
+    this.slackClient = slackClient;
+    this.channelId = channelId;
+    this.threadTs = threadTs;
+    this.userId = userId;
+    this.teamId = teamId;
+  }
+
+  async appendDelta(delta: string): Promise<void> {
+    if (!this.started) {
+      // Start new stream
+      logger.info(
+        `Starting Slack stream for channel ${this.channelId}, thread ${this.threadTs} with ${delta.length} chars`
+      );
+      this.stream = (this.slackClient as any).chatStream({
+        channel: this.channelId,
+        thread_ts: this.threadTs,
+        recipient_user_id: this.userId,
+        markdown_text: delta,
+        ...(this.teamId ? { recipient_team_id: this.teamId } : {}),
+      });
+      this.started = true;
+      logger.info(
+        `Stream started with initial content (${delta.length} chars)`
+      );
+    } else {
+      // Append to existing stream
+      await this.stream.append({ markdown_text: delta });
+    }
+  }
+
+  async stop(): Promise<void> {
+    if (this.started && this.stream) {
+      await this.stream.stop();
+      logger.info(
+        `Stopped Slack stream for channel ${this.channelId}, thread ${this.threadTs}`
+      );
+    }
+  }
+
+  isStarted(): boolean {
+    return this.started;
+  }
+}
+
+/**
+ * Manages all active stream sessions
+ */
+class StreamSessionManager {
+  private sessions = new Map<string, StreamSession>();
+  private slackClient: WebClient;
+
+  constructor(slackClient: WebClient) {
+    this.slackClient = slackClient;
+  }
+
+  async handleDelta(
+    sessionId: string,
+    channelId: string,
+    threadTs: string,
+    userId: string,
+    delta: string,
+    teamId?: string
+  ): Promise<void> {
+    let session = this.sessions.get(sessionId);
+
+    if (!session) {
+      // Create new session
+      session = new StreamSession(
+        this.slackClient,
+        channelId,
+        threadTs,
+        userId,
+        teamId
+      );
+      this.sessions.set(sessionId, session);
+    }
+
+    await session.appendDelta(delta);
+  }
+
+  async completeSession(sessionId: string): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      await session.stop();
+      this.sessions.delete(sessionId);
+    }
+  }
+
+  hasSession(sessionId: string): boolean {
+    return this.sessions.has(sessionId);
+  }
+}
+
 interface ThreadResponsePayload {
   messageId: string;
   channelId: string;
   threadTs: string;
   userId: string;
+  teamId?: string; // Slack team/workspace ID for streaming API
   content?: string;
+  delta?: string; // Stream delta content
+  seq?: number; // Stream sequence number
+  isStreamDelta?: boolean; // Whether this is a stream delta
+  finalContent?: string; // Final content when streaming completes
+  usedStreaming?: boolean; // Whether streaming was used
   processedMessageIds?: string[];
   reaction?: string;
   error?: string;
@@ -32,6 +150,10 @@ interface ThreadResponsePayload {
   moduleData?: Record<string, unknown>; // Generic module data from all modules
   botResponseTs?: string; // Bot's response message timestamp for updates
   claudeSessionId?: string; // Claude session ID for tracking bot messages per session
+  statusUpdate?: {
+    status: string;
+    loadingMessages?: string[];
+  };
 }
 
 /**
@@ -46,6 +168,7 @@ export class ThreadResponseConsumer {
   private blockBuilder: SlackBlockBuilder;
   private readonly BOT_MESSAGES_PREFIX = "bot_messages:";
   private moduleRegistry: IModuleRegistry;
+  private streamSessionManager: StreamSessionManager;
 
   constructor(
     queue: ReturnType<typeof createMessageQueue>,
@@ -56,6 +179,7 @@ export class ThreadResponseConsumer {
     this.slackClient = new WebClient(slackToken);
     this.blockBuilder = new SlackBlockBuilder();
     this.moduleRegistry = moduleRegistry;
+    this.streamSessionManager = new StreamSessionManager(this.slackClient);
     // Get Redis client from queue connection pool (queue must be started)
     this.redis = new RedisClient(this.queue.getRedisClient());
   }
@@ -77,6 +201,39 @@ export class ThreadResponseConsumer {
   ): Promise<void> {
     const key = `${this.BOT_MESSAGES_PREFIX}${sessionKey}`;
     await this.redis.set(key, botMessageTs, 24 * 60 * 60); // 24 hours
+  }
+
+  /**
+   * Set thread status using assistant.threads.setStatus API
+   */
+  private async setThreadStatus(
+    channelId: string,
+    threadTs: string,
+    status?: string,
+    loadingMessages?: string[]
+  ): Promise<void> {
+    if (!threadTs) {
+      return;
+    }
+
+    try {
+      const payload: Record<string, any> = {
+        channel_id: channelId,
+        thread_ts: threadTs,
+        status: status ?? "",
+      };
+
+      if (loadingMessages && loadingMessages.length > 0) {
+        payload.loading_messages = loadingMessages;
+      }
+
+      await this.slackClient.apiCall("assistant.threads.setStatus", payload);
+    } catch (error) {
+      logger.warn(
+        `Failed to set status '${status || "<clear>"}' for thread ${threadTs}:`,
+        error
+      );
+    }
   }
 
   /**
@@ -124,13 +281,13 @@ export class ThreadResponseConsumer {
     let data;
 
     try {
-      // Handle PgBoss serialized format (similar to worker queue consumer)
+      // Handle serialized format from queue (similar to worker queue consumer)
       if (typeof job === "object" && job !== null) {
         const keys = Object.keys(job);
         const numericKeys = keys.filter((key) => !Number.isNaN(Number(key)));
 
         if (numericKeys.length > 0) {
-          // PgBoss passes jobs as an array, get the first element
+          // Queue passes jobs as an array, get the first element
           const firstKey = numericKeys[0];
           const firstJob = firstKey ? job[firstKey] : null;
 
@@ -139,7 +296,7 @@ export class ThreadResponseConsumer {
             firstJob !== null &&
             firstJob.data
           ) {
-            // This is the actual job object from PgBoss
+            // This is the actual job object from the queue
             data = firstJob.data;
             logger.info(
               `📤 AGENT RESPONSE: Processing agent response for user ${data.userId}, thread ${data.threadId || "unknown"}, jobId: ${firstJob.id}`
@@ -176,53 +333,57 @@ export class ThreadResponseConsumer {
 
       logger.info(`Using session key: ${sessionKey}`);
 
+      // Log data fields for debugging
+      logger.info(
+        `Thread response data fields: ${Object.keys(data).join(", ")}`
+      );
+      if (data.isStreamDelta) {
+        logger.info(
+          `Stream delta detected: seq=${data.seq}, deltaLength=${data.delta?.length || 0}`
+        );
+      }
+
       // Check if we have a bot message for this Claude session
       // First check if the worker provided a bot message timestamp, then check Redis
       const redisBotMessageTs = await this.getBotMessageTs(sessionKey);
       const existingBotMessageTs = data.botResponseTs || redisBotMessageTs;
       const isFirstResponse = !existingBotMessageTs;
-      // Use originalMessageTs for reactions (the actual user message timestamp)
-      const reactionTimestamp = data.originalMessageTs || data.messageId;
 
-      // Handle reaction transitions without gear. Completion is signaled by processedMessageIds presence.
-      const isDM = data.channelId?.startsWith("D");
-      if (data.error && reactionTimestamp) {
-        // Error: change eyes to x on the relevant message
-        await this.updateReaction(
-          data.channelId,
-          reactionTimestamp,
-          "eyes",
-          "x"
+      // Handle streaming delta FIRST before status updates
+      // This is critical because setThreadStatus interferes with chatStream
+      if (data.isStreamDelta && data.delta) {
+        logger.info(
+          `Processing stream delta seq=${data.seq}, length=${data.delta.length} for session ${sessionKey}`
         );
+
+        // Clear any existing status on first stream delta to show the stream content
+        if (data.seq === 0) {
+          await this.setThreadStatus(data.channelId, data.threadTs, "");
+        }
+
+        await this.streamSessionManager.handleDelta(
+          sessionKey,
+          data.channelId,
+          data.threadTs,
+          data.userId,
+          data.delta,
+          data.teamId
+        );
+        // Don't set status when streaming - it interferes with chatStream
+        return;
       }
 
-      // On completion, processedMessageIds will be provided
-      if (
-        Array.isArray(data.processedMessageIds) &&
-        data.processedMessageIds.length > 0
-      ) {
-        if (isDM) {
-          // Remove eyes from each processed user message (no checkmarks in DMs)
-          for (const ts of data.processedMessageIds) {
-            try {
-              await this.slackClient.reactions.remove({
-                channel: data.channelId,
-                timestamp: ts,
-                name: "eyes",
-              });
-            } catch (_e) {
-              // ignore if reaction not present
-            }
-          }
-        } else {
-          // Channel: only the root thread message should get the checkmark
-          await this.updateReaction(
-            data.channelId,
-            data.threadTs,
-            "eyes",
-            "white_check_mark"
-          );
-        }
+      // Apply status update if provided (only when NOT streaming)
+      if (data.statusUpdate) {
+        logger.info(
+          `Setting thread status to: "${data.statusUpdate.status}" for thread ${data.threadTs}`
+        );
+        await this.setThreadStatus(
+          data.channelId,
+          data.threadTs,
+          data.statusUpdate.status,
+          data.statusUpdate.loadingMessages
+        );
       }
 
       // Handle message content
@@ -274,6 +435,32 @@ export class ThreadResponseConsumer {
         logger.info(
           `Thread processing completed for message ${data.messageId}`
         );
+
+        // Complete active streaming session if one exists
+        const hasActiveStream =
+          this.streamSessionManager.hasSession(sessionKey);
+        if (hasActiveStream) {
+          logger.info(`Completing active stream for session ${sessionKey}`);
+          await this.streamSessionManager.completeSession(sessionKey);
+          // Don't set status - streaming completion handles it
+        } else {
+          // Clear status for non-streaming completion
+          await this.setThreadStatus(data.channelId, data.threadTs, "");
+
+          if (data.finalContent) {
+            // No streaming or stream wasn't active - post content directly
+            logger.info(
+              `Posting final content directly (${data.finalContent.length} chars) - usedStreaming: ${data.usedStreaming}, hasActiveStream: ${hasActiveStream}`
+            );
+            const botMessageTs = existingBotMessageTs || data.botResponseTs;
+            await this.handleMessageUpdate(
+              { ...data, content: data.finalContent },
+              isFirstResponse,
+              botMessageTs
+            );
+          }
+        }
+
         // Don't clear the session here - it will be cleared when a new user message arrives
         // This prevents duplicate bot messages if the worker sends more messages after completion
       }
@@ -311,70 +498,7 @@ export class ThreadResponseConsumer {
       }
 
       logger.error(`Failed to process thread response job ${job.id}:`, error);
-      throw error; // Let pgboss handle retry logic for other errors
-    }
-  }
-
-  /**
-   * Update reactions atomically (remove old, add new)
-   */
-  private async updateReaction(
-    channel: string,
-    timestamp: string,
-    oldReaction: string,
-    newReaction: string
-  ): Promise<void> {
-    logger.info(
-      `🔄 REACTION UPDATE: Changing ${oldReaction} → ${newReaction} on message ${timestamp} in channel ${channel}`
-    );
-
-    try {
-      // Remove old reaction
-      logger.info(
-        `🗑️  REACTION CHANGE: Removing '${oldReaction}' from message ${timestamp}`
-      );
-      await this.slackClient.reactions.remove({
-        channel,
-        timestamp,
-        name: oldReaction,
-      });
-      logger.info(
-        `✅ REACTION REMOVED: '${oldReaction}' successfully removed from message ${timestamp}`
-      );
-    } catch (error) {
-      // Ignore - reaction might not exist
-      logger.warn(
-        `⚠️  REACTION REMOVE: '${oldReaction}' reaction might not exist on message ${timestamp}:`,
-        error
-      );
-      logger.debug(
-        `Failed to remove ${oldReaction} reaction (might not exist):`,
-        error
-      );
-    }
-
-    try {
-      // Add new reaction
-      logger.info(
-        `➕ REACTION CHANGE: Adding '${newReaction}' to message ${timestamp}`
-      );
-      await this.slackClient.reactions.add({
-        channel,
-        timestamp,
-        name: newReaction,
-      });
-      logger.info(
-        `✅ REACTION ADDED: '${newReaction}' successfully added to message ${timestamp}`
-      );
-      logger.info(
-        `Updated reaction: ${oldReaction} → ${newReaction} on message ${timestamp}`
-      );
-    } catch (error) {
-      // Ignore - reaction might already exist
-      logger.debug(
-        `Failed to add ${newReaction} reaction (might already exist):`,
-        error
-      );
+      throw error; // Let the queue handle retry logic for other errors
     }
   }
 

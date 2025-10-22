@@ -41,6 +41,16 @@ When making changes to the Slack bot:
 - Rate limiting is disabled in local development
 - Worker image is built automatically when running `make dev`
 
+## Socket Mode Health Monitoring
+
+Gateway automatically detects zombie Socket Mode connections and triggers restart:
+- Monitors Socket Mode WebSocket event activity (not message activity)
+- Default: triggers restart if no events for 15 minutes (Socket Mode normally sends heartbeats every 30-60s)
+- Protects active workers by default - waits for them to finish before restarting
+- Gateway exits with code 0 → Docker/K8s automatically restarts the container
+- Workers automatically reconnect when gateway comes back online
+- Configure via env vars: `SOCKET_HEALTH_CHECK_INTERVAL_MS`, `SOCKET_STALE_THRESHOLD_MS`, `SOCKET_PROTECT_ACTIVE_WORKERS`
+
 ## Persistent Storage
 
 Worker pods now use persistent volumes for data storage:

@@ -142,7 +142,10 @@ interface TodoItem {
  */
 class ProgressProcessor {
   private currentTodos: TodoItem[] = [];
+  private currentThinking: string = "";
   private chronologicalOutput: string = "";
+  private sentLength: number = 0;
+  private sequenceNum: number = 0;
 
   /**
    * Process streaming update and return formatted content for Slack
@@ -225,9 +228,17 @@ class ProgressProcessor {
     else if (Array.isArray(content)) {
       for (const block of content) {
         if (block.type === "text" && block.text?.trim()) {
+          // Clear thinking when text appears (thinking -> text transition)
+          this.currentThinking = "";
           this.chronologicalOutput += `${block.text}\n`;
           hasUpdate = true;
+        } else if (block.type === "thinking" && block.thinking?.trim()) {
+          // Store thinking content for status updates
+          this.currentThinking = block.thinking.trim();
+          hasUpdate = true;
         } else if (block.type === "tool_use") {
+          // Clear thinking when tool use appears (thinking -> tool transition)
+          this.currentThinking = "";
           // Check for TodoWrite updates
           if (block.name === "TodoWrite" && block.input?.todos) {
             this.currentTodos = block.input.todos;
@@ -235,7 +246,6 @@ class ProgressProcessor {
           }
           // Format and append tool execution
           const toolExecution = this.formatToolExecution(block);
-          logger.info(`🔧 Tool use: ${toolExecution}`);
           this.chronologicalOutput += `${toolExecution}\n`;
           hasUpdate = true;
         }
@@ -423,6 +433,48 @@ class ProgressProcessor {
     // Join all sections
     return sections.filter((s) => s).join("\n");
   }
+
+  /**
+   * Get delta since last sent content
+   * Returns null if no new content
+   */
+  getDelta(): { delta: string; seq: number } | null {
+    const fullContent = this.formatFullUpdate();
+
+    if (!fullContent || fullContent.length <= this.sentLength) {
+      return null;
+    }
+
+    const delta = fullContent.slice(this.sentLength);
+    const seq = this.sequenceNum++;
+    this.sentLength = fullContent.length;
+
+    return { delta, seq };
+  }
+
+  /**
+   * Get current thinking content and clear it
+   * Returns null if no thinking content
+   */
+  getCurrentThinking(): string | null {
+    if (!this.currentThinking) {
+      return null;
+    }
+    const thinking = this.currentThinking;
+    this.currentThinking = ""; // Clear after reading
+    return thinking;
+  }
+
+  /**
+   * Reset state for new message
+   */
+  reset(): void {
+    this.sentLength = 0;
+    this.sequenceNum = 0;
+    this.chronologicalOutput = "";
+    this.currentTodos = [];
+    this.currentThinking = "";
+  }
 }
 
 // ============================================================================
@@ -469,7 +521,8 @@ export class ClaudeWorker implements WorkerExecutor {
       config.threadTs || "",
       config.slackResponseTs,
       sessionId,
-      config.botResponseTs
+      config.botResponseTs,
+      config.teamId
     );
   }
 
@@ -537,6 +590,9 @@ export class ClaudeWorker implements WorkerExecutor {
     const executeStartTime = Date.now();
 
     try {
+      // Reset progress processor for new message
+      this.progressProcessor.reset();
+
       logger.info(
         `🚀 Starting Claude worker for session: ${this.config.sessionKey}`
       );
@@ -662,6 +718,15 @@ export class ClaudeWorker implements WorkerExecutor {
                 );
                 firstOutputLogged = true;
               }
+
+              // Handle status updates for tool usage
+              if (update.type === "status" && update.data?.status) {
+                await this.gatewayIntegration.updateStatus(
+                  update.data.status as string
+                );
+                return;
+              }
+
               if (update.type === "output" && update.data) {
                 // Skip system messages - they should not be sent to Slack
                 if (
@@ -675,13 +740,28 @@ export class ClaudeWorker implements WorkerExecutor {
                 }
 
                 // Process the update to extract user-friendly content
-                const formattedContent = this.progressProcessor.processUpdate(
-                  update.data
-                );
+                this.progressProcessor.processUpdate(update.data);
 
-                // Only send if we have formatted content (skip internal events)
-                if (formattedContent) {
-                  await this.gatewayIntegration.sendContent(formattedContent);
+                // Check for thinking content and send as status update
+                const thinkingContent =
+                  this.progressProcessor.getCurrentThinking();
+                if (thinkingContent) {
+                  // Truncate thinking content if too long for status display
+                  const maxLength = 100;
+                  const displayThinking =
+                    thinkingContent.length > maxLength
+                      ? thinkingContent.substring(0, maxLength) + "..."
+                      : thinkingContent;
+                  await this.gatewayIntegration.updateStatus(displayThinking);
+                }
+
+                // Get delta and send if there's new content
+                const deltaInfo = this.progressProcessor.getDelta();
+                if (deltaInfo) {
+                  await this.gatewayIntegration.sendStreamDelta(
+                    deltaInfo.delta,
+                    deltaInfo.seq
+                  );
                 }
               }
             },
@@ -721,7 +801,7 @@ export class ClaudeWorker implements WorkerExecutor {
             `Session timed out (exit code 124) - will be retried automatically, not showing error to user`
           );
           // Don't send error content or signal error for timeouts (no ❌ emoji)
-          // But still throw an error so pg-boss retries the job
+          // But still throw an error so the queue retries the job
           throw new Error("SESSION_TIMEOUT");
         } else {
           // For non-timeout errors, show the error to the user

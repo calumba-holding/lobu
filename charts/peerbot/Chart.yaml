@@ -33,13 +33,9 @@ annotations:
       url: https://github.com/buremba/peerbot
     - name: Documentation
       url: https://github.com/buremba/peerbot#readme
-  artifacthub.io/recommendations: |
-    - url: https://artifacthub.io/packages/helm/bitnami/postgresql
   artifacthub.io/changes: |
     - kind: added
       description: Initial Helm chart for Peerbot deployment
-    - kind: added  
-      description: Support for PostgreSQL dependency
     - kind: added
       description: Kubernetes deployment with persistent volumes
 dependencies:

@@ -15,6 +15,10 @@ export class MockSlackServer extends EventEmitter {
   private server: any;
   private messages: Map<string, SlackMessage[]> = new Map();
   private reactions: Map<string, Set<string>> = new Map();
+  private statuses: Map<
+    string,
+    { status: string; loadingMessages?: string[] }
+  > = new Map();
   public dispatcherUrl: string = "http://localhost:3000";
 
   constructor(private port: number = 4001) {
@@ -72,6 +76,28 @@ export class MockSlackServer extends EventEmitter {
       this.reactions.set(key, reactions);
 
       this.emit("reaction:removed", { channel, timestamp, name });
+      res.json({ ok: true });
+    });
+
+    // Mock assistant.threads.setStatus
+    this.app.post("/api/assistant.threads.setStatus", (req, res) => {
+      const { channel_id, thread_ts, status, loading_messages } = req.body;
+      const key = `${channel_id}:${thread_ts}`;
+
+      const payload: { status: string; loadingMessages?: string[] } = {
+        status: status || "",
+      };
+
+      if (Array.isArray(loading_messages) && loading_messages.length > 0) {
+        payload.loadingMessages = loading_messages;
+      }
+
+      this.statuses.set(key, payload);
+      this.emit("status:update", {
+        channel: channel_id,
+        threadTs: thread_ts,
+        ...payload,
+      });
       res.json({ ok: true });
     });
 
@@ -217,9 +243,17 @@ export class MockSlackServer extends EventEmitter {
     return Array.from(this.reactions.get(`${channel}:${timestamp}`) || []);
   }
 
+  getStatus(
+    channel: string,
+    threadTs: string
+  ): { status: string; loadingMessages?: string[] } | undefined {
+    return this.statuses.get(`${channel}:${threadTs}`);
+  }
+
   clearMessages() {
     this.messages.clear();
     this.reactions.clear();
+    this.statuses.clear();
   }
 
   waitForMessage(

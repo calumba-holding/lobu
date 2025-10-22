@@ -261,6 +261,10 @@ export class GatewayIntegration implements GatewayIntegrationInterface {
   private processedMessageIds: string[] = [];
   private jobId?: string;
   private moduleData?: Record<string, unknown>;
+  private teamId?: string;
+  private usedStreaming: boolean = false;
+  private finalContent?: string;
+  private lastStatus?: string;
 
   constructor(
     dispatcherUrl: string,
@@ -270,7 +274,8 @@ export class GatewayIntegration implements GatewayIntegrationInterface {
     threadId: string,
     originalMessageTs: string,
     claudeSessionId: string | undefined = undefined,
-    botResponseTs: string | undefined = undefined
+    botResponseTs: string | undefined = undefined,
+    teamId: string | undefined = undefined
   ) {
     this.dispatcherUrl = dispatcherUrl;
     this.workerToken = workerToken;
@@ -280,6 +285,7 @@ export class GatewayIntegration implements GatewayIntegrationInterface {
     this.originalMessageTs = originalMessageTs;
     this.claudeSessionId = claudeSessionId;
     this.botResponseTs = botResponseTs;
+    this.teamId = teamId;
   }
 
   setJobId(jobId: string): void {
@@ -298,8 +304,49 @@ export class GatewayIntegration implements GatewayIntegrationInterface {
     this.moduleData = moduleData;
   }
 
-  async signalDone(content: string): Promise<void> {
-    await this.sendContent(content);
+  async updateStatus(
+    status: string,
+    loadingMessages?: string[]
+  ): Promise<void> {
+    // Skip duplicate status updates
+    if (status === this.lastStatus && status !== "") {
+      return;
+    }
+
+    this.lastStatus = status || undefined;
+
+    const statusPayload: Record<string, unknown> = { status };
+    if (loadingMessages && loadingMessages.length > 0) {
+      statusPayload.loadingMessages = loadingMessages;
+    }
+
+    await this.sendResponse({
+      messageId: this.originalMessageTs,
+      channelId: this.channelId,
+      threadTs: this.threadId,
+      userId: this.userId,
+      timestamp: Date.now(),
+      originalMessageTs: this.originalMessageTs,
+      claudeSessionId: this.claudeSessionId,
+      botResponseTs: this.botResponseTs,
+      statusUpdate: statusPayload,
+    });
+  }
+
+  async signalDone(
+    finalDelta?: string,
+    seq?: number,
+    fullContent?: string
+  ): Promise<void> {
+    // Store full content for completion signal
+    if (fullContent) {
+      this.finalContent = fullContent;
+    }
+
+    // Send final delta if there is one
+    if (finalDelta && seq !== undefined) {
+      await this.sendStreamDelta(finalDelta, seq);
+    }
     await this.signalCompletion();
   }
 
@@ -318,18 +365,42 @@ export class GatewayIntegration implements GatewayIntegrationInterface {
     });
   }
 
+  async sendStreamDelta(delta: string, seq: number): Promise<void> {
+    // Mark that streaming was used
+    this.usedStreaming = true;
+
+    await this.sendResponse({
+      messageId: this.originalMessageTs,
+      channelId: this.channelId,
+      threadTs: this.threadId,
+      userId: this.userId,
+      teamId: this.teamId,
+      delta,
+      seq,
+      timestamp: Date.now(),
+      originalMessageTs: this.originalMessageTs,
+      claudeSessionId: this.claudeSessionId,
+      botResponseTs: this.botResponseTs,
+      moduleData: this.moduleData,
+      isStreamDelta: true, // Mark as streaming delta
+    });
+  }
+
   async signalCompletion(): Promise<void> {
     await this.sendResponse({
       messageId: this.originalMessageTs,
       channelId: this.channelId,
       threadTs: this.threadId,
       userId: this.userId,
+      teamId: this.teamId,
       timestamp: Date.now(),
       originalMessageTs: this.originalMessageTs,
       processedMessageIds: this.processedMessageIds,
       claudeSessionId: this.claudeSessionId,
       botResponseTs: this.botResponseTs,
       moduleData: this.moduleData,
+      finalContent: this.finalContent, // Include final content
+      usedStreaming: this.usedStreaming, // Include streaming flag
     });
   }
 
@@ -355,6 +426,16 @@ export class GatewayIntegration implements GatewayIntegrationInterface {
       try {
         const responseUrl = `${this.dispatcherUrl}/worker/response`;
         const payload = this.jobId ? { jobId: this.jobId, ...data } : data;
+
+        // Log the payload for debugging
+        logger.info(
+          `[WORKER-HTTP] Sending to ${responseUrl}: ${JSON.stringify(payload).substring(0, 500)}`
+        );
+        if (payload.isStreamDelta) {
+          logger.info(
+            `[WORKER-HTTP] Stream delta payload: isStreamDelta=${payload.isStreamDelta}, seq=${payload.seq}, deltaLength=${payload.delta?.length}`
+          );
+        }
 
         const response = await fetch(responseUrl, {
           method: "POST",
@@ -767,6 +848,7 @@ export class GatewayClient {
         platformMetadata.slackResponseChannel || payload.channelId,
       slackResponseTs: platformMetadata.slackResponseTs || payload.messageId,
       botResponseTs: platformMetadata.botResponseTs,
+      teamId: platformMetadata.teamId,
       claudeOptions: JSON.stringify(claudeOptions),
       workspace: {
         baseDirectory: "/workspace",

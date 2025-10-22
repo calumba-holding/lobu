@@ -18,7 +18,6 @@ RUN curl -L "https://github.com/docker/compose/releases/latest/download/docker-c
 
 # Install additional tools
 RUN apt-get update && apt-get install -y \
-    postgresql-client \
     redis-tools \
     jq \
     vim \

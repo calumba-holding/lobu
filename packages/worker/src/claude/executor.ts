@@ -32,7 +32,7 @@ export interface ClaudeExecutionResult {
 }
 
 export interface ProgressUpdate {
-  type: "output" | "completion" | "error";
+  type: "output" | "completion" | "error" | "status";
   data: any;
   timestamp: number;
 }

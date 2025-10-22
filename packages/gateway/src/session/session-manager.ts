@@ -49,20 +49,8 @@ export class RedisSessionStore implements SessionStore {
         return null;
       }
 
-      // Parse JSON and deserialize Map fields
-      const parsed = JSON.parse(data);
-      const session = parsed as ThreadSession;
-
-      if (
-        session.messageReactions &&
-        typeof session.messageReactions === "object"
-      ) {
-        session.messageReactions = new Map(
-          Object.entries(session.messageReactions)
-        );
-      }
-
-      return session;
+      // Parse JSON
+      return JSON.parse(data) as ThreadSession;
     } catch (error) {
       logger.error(`Failed to get session ${sessionKey}:`, error);
       return null;
@@ -74,17 +62,10 @@ export class RedisSessionStore implements SessionStore {
       const key = this.getSessionKey(sessionKey);
 
       // Serialize Map fields to plain objects
-      const serializedSession = {
-        ...session,
-        messageReactions: session.messageReactions
-          ? Object.fromEntries(session.messageReactions)
-          : undefined,
-      };
-
       // Store session with TTL in Redis
       await this.redis.set(
         key,
-        JSON.stringify(serializedSession),
+        JSON.stringify(session),
         this.DEFAULT_TTL_SECONDS
       );
 

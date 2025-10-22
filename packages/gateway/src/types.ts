@@ -60,7 +60,6 @@ export interface ThreadSession {
     | "timeout";
   createdAt: number;
   botResponseTs?: string; // Bot's response message timestamp for updates
-  messageReactions?: Map<string, string>; // Track reactions per message (messageTs -> reaction)
 }
 
 // Slack Event Types - properly typed to replace 'any'

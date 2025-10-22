@@ -29,11 +29,13 @@ services:
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN}
       AGENT_DEFAULT_MODEL: ${AGENT_DEFAULT_MODEL}
       DEPLOYMENT_MODE: ${DEPLOYMENT_MODE:-docker}
+      QUEUE_URL: redis://redis:6379
     volumes:
       # Mount Docker socket
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
-      - "3000:3000"
+      # Port 3000 only needed when SLACK_HTTP_MODE=true (Socket Mode is default)
+      # Add "3000:3000" here if using HTTP mode
       - "8080:8080"
     networks:
       - peerbot-network

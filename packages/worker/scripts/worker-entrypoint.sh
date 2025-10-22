@@ -197,5 +197,5 @@ if [ "${NODE_ENV}" = "development" ]; then
     echo "📝 Running in development mode from source..."
     exec bun run src/index.ts
 else
-    exec bun run dist/src/index.js
+    exec bun run dist/index.js
 fi
