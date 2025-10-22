@@ -145,7 +145,6 @@ class ProgressProcessor {
   private currentThinking: string = "";
   private chronologicalOutput: string = "";
   private lastSentContent: string = "";
-  private lastDeltaWasReplacement: boolean = false;
 
   /**
    * Process streaming update and return formatted content for Slack
@@ -240,13 +239,33 @@ class ProgressProcessor {
         } else if (block.type === "tool_use") {
           // Check for TodoWrite updates
           if (block.name === "TodoWrite" && block.input?.todos) {
-            this.currentTodos = block.input.todos;
+            // Append task updates as chronological events
+            const newTodos = block.input.todos;
+
+            newTodos.forEach((newTodo: any, index: number) => {
+              const oldTodo = this.currentTodos[index];
+
+              if (!oldTodo) {
+                // New task created
+                this.chronologicalOutput += `📝 ${newTodo.content}\n`;
+              } else if (oldTodo.status !== newTodo.status) {
+                // Task status changed
+                if (newTodo.status === "in_progress") {
+                  this.chronologicalOutput += `🪚 *${newTodo.activeForm}*\n`;
+                } else if (newTodo.status === "completed") {
+                  this.chronologicalOutput += `☑️ ${newTodo.content}\n`;
+                }
+              }
+            });
+
+            this.currentTodos = newTodos;
+            hasUpdate = true;
+          } else {
+            // Format and append non-TodoWrite tool execution
+            const toolExecution = this.formatToolExecution(block);
+            this.chronologicalOutput += `${toolExecution}\n`;
             hasUpdate = true;
           }
-          // Format and append tool execution
-          const toolExecution = this.formatToolExecution(block);
-          this.chronologicalOutput += `${toolExecution}\n`;
-          hasUpdate = true;
         }
       }
     }
@@ -402,41 +421,17 @@ class ProgressProcessor {
   }
 
   /**
-   * Format full update with tasks and chronological output
+   * Format full update with chronological output only (tasks are appended as events)
    */
   private formatFullUpdate(): string {
-    const sections: string[] = [];
-
-    // Section 1: Task Progress (if todos exist)
-    if (this.currentTodos.length > 0) {
-      const todoLines = this.currentTodos.map((todo) => {
-        const checkbox = todo.status === "completed" ? "☑️" : "☐";
-        if (todo.status === "in_progress") {
-          return `🪚 *${todo.activeForm}*`;
-        }
-        return `${checkbox} ${todo.content}`;
-      });
-      sections.push(`📝 **Task Progress**\n${todoLines.join("\n")}`);
-    }
-
-    // Section 2: Chronological output (text and tools mixed in order)
-    if (this.chronologicalOutput.trim()) {
-      const divider = this.currentTodos.length > 0 ? "━━━━━━━━━━━━━━" : "";
-      sections.push(
-        divider
-          ? `${divider}\n${this.chronologicalOutput.trim()}`
-          : this.chronologicalOutput.trim()
-      );
-    }
-
-    // Join all sections
-    return sections.filter((s) => s).join("\n");
+    // Return only chronological output - tasks are added as events during processing
+    return this.chronologicalOutput.trim();
   }
 
   /**
    * Get delta since last sent content
    * Returns null if no new content
-   * Handles both append-only and full replacement scenarios
+   * All content is append-only now (including task updates)
    */
   getDelta(): string | null {
     const fullContent = this.formatFullUpdate();
@@ -451,27 +446,17 @@ class ProgressProcessor {
       return null;
     }
 
-    // First send or content has changed
-    // Check if this is simple append (optimization for common case)
+    // Content should always be append-only now
     if (this.lastSentContent && fullContent.startsWith(this.lastSentContent)) {
       // Only new content was appended
       const delta = fullContent.slice(this.lastSentContent.length);
       this.lastSentContent = fullContent;
-      this.lastDeltaWasReplacement = false;
       return delta;
     }
 
-    // Content was regenerated (e.g., task status changed) - send full content
+    // First send or something unexpected happened - send full content
     this.lastSentContent = fullContent;
-    this.lastDeltaWasReplacement = true;
     return fullContent;
-  }
-
-  /**
-   * Check if the last delta was a full replacement (for stream restart)
-   */
-  wasLastDeltaReplacement(): boolean {
-    return this.lastDeltaWasReplacement;
   }
 
   /**
@@ -775,12 +760,8 @@ export class ClaudeWorker implements WorkerExecutor {
                 // Get delta and send if there's new content
                 const delta = this.progressProcessor.getDelta();
                 if (delta) {
-                  const isReplacement =
-                    this.progressProcessor.wasLastDeltaReplacement();
-                  await this.gatewayIntegration.sendStreamDelta(
-                    delta,
-                    isReplacement
-                  );
+                  // All content is append-only now, never replace
+                  await this.gatewayIntegration.sendStreamDelta(delta, false);
                 }
               }
             },
