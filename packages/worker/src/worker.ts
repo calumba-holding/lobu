@@ -277,6 +277,11 @@ class ProgressProcessor {
    * Process SDK tool call messages
    */
   private processToolCall(message: any): string | null {
+    // Skip TodoWrite - it's handled in assistant message with detailed task tracking
+    if (message.tool_name === "TodoWrite") {
+      return null;
+    }
+
     const toolExecution = this.formatToolExecution({
       name: message.tool_name,
       input: message.input,
