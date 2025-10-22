@@ -15,21 +15,21 @@ const logger = createLogger("worker-sdk");
  */
 function getToolStatus(toolName: string): string {
   const toolStatusMap: Record<string, string> = {
-    Bash: "Running command",
-    Read: "Reading file",
-    Write: "Writing file",
-    Edit: "Editing file",
-    Grep: "Searching",
-    Glob: "Finding files",
-    Task: "Launching agent",
-    WebFetch: "Fetching web page",
-    WebSearch: "Searching web",
-    SlashCommand: "Running command",
-    AskUserQuestion: "Asking question",
-    TodoWrite: "Updating tasks",
+    Bash: "is running command",
+    Read: "is reading file",
+    Write: "is writing file",
+    Edit: "is editing file",
+    Grep: "searching",
+    Glob: "is finding files",
+    Task: "launching agent",
+    WebFetch: "is fetching web page",
+    WebSearch: "is searching web",
+    SlashCommand: "running command",
+    AskUserQuestion: "is asking question",
+    TodoWrite: "is updating tasks",
   };
 
-  return toolStatusMap[toolName] || `Using ${toolName}`;
+  return toolStatusMap[toolName] || `is using ${toolName}`;
 }
 
 interface MCPServerConfig {
