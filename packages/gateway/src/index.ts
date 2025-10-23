@@ -68,14 +68,14 @@ function setupHealthEndpoints(
     logger.info("✅ Worker gateway routes enabled at :8080/worker/*");
   }
 
+  // Register module endpoints BEFORE MCP proxy to allow specific routes (like OAuth)
+  moduleRegistry.registerEndpoints(proxyApp);
+  logger.info("✅ Module endpoints registered");
+
   if (mcpProxy) {
     mcpProxy.setupRoutes(proxyApp);
     logger.info("✅ MCP proxy routes enabled at :8080/mcp/*");
   }
-
-  // Register module endpoints
-  moduleRegistry.registerEndpoints(proxyApp);
-  logger.info("✅ Module endpoints registered");
 
   // Create HTTP server with Express app
   healthServer = http.createServer(proxyApp);

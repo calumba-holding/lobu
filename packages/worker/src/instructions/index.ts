@@ -4,3 +4,4 @@ export { CoreInstructionProvider } from "./providers/core";
 export { SlackInstructionProvider } from "./providers/slack";
 export { ProjectsInstructionProvider } from "./providers/projects";
 export { ProcessManagerInstructionProvider } from "./providers/process-manager";
+export { McpInstructionProvider } from "./providers/mcp";

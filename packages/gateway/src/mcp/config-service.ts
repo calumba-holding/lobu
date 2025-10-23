@@ -1,4 +1,4 @@
-import { createLogger } from "@peerbot/core";
+import { createLogger, verifyWorkerToken } from "@peerbot/core";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,6 +7,8 @@ import type {
   McpOAuthDiscoveryService,
   DiscoveredOAuthMetadata,
 } from "./oauth-discovery";
+import type { McpCredentialStore } from "./credential-store";
+import type { McpInputStore } from "./input-store";
 
 const logger = createLogger("mcp-config-service");
 
@@ -38,10 +40,20 @@ export interface HttpMcpServerConfig {
   oauth?: OAuth2Config;
   inputs?: McpInput[];
   headers?: Record<string, string>;
+  loginUrl?: string; // Simple OAuth marker - indicates MCP requires auth
 }
 
 export interface WorkerMcpConfig {
   mcpServers: Record<string, any>;
+}
+
+export interface McpStatus {
+  id: string;
+  name: string;
+  requiresAuth: boolean;
+  requiresInput: boolean;
+  authenticated: boolean;
+  configured: boolean;
 }
 
 interface LoadedConfig {
@@ -57,12 +69,16 @@ export interface McpConfigServiceOptions {
   configUrl?: string;
   configPath?: string;
   discoveryService?: McpOAuthDiscoveryService;
+  credentialStore?: McpCredentialStore;
+  inputStore?: McpInputStore;
 }
 
 export class McpConfigService {
   private source?: ConfigSource;
   private cache?: LoadedConfig;
   private discoveryService?: McpOAuthDiscoveryService;
+  private credentialStore?: McpCredentialStore;
+  private inputStore?: McpInputStore;
   private discoveryEnriched = false;
 
   constructor(options: McpConfigServiceOptions = {}) {
@@ -72,16 +88,25 @@ export class McpConfigService {
       process.env.PEERBOT_MCP_SERVERS_URL ||
       process.env.PEERBOT_MCP_SERVERS_FILE;
 
+    this.discoveryService = options.discoveryService;
+    this.credentialStore = options.credentialStore;
+    this.inputStore = options.inputStore;
+    logger.info(
+      `McpConfigService initialized with discovery: ${!!this.discoveryService}, credential store: ${!!this.credentialStore}, input store: ${!!this.inputStore}`
+    );
+
     if (!rawLocation) {
+      logger.warn("No MCP config location provided");
       return;
     }
 
+    logger.info(`MCP config location: ${rawLocation}`);
     this.source = this.resolveConfigSource(rawLocation);
-    this.discoveryService = options.discoveryService;
   }
 
   /**
    * Return MCP config tailored for a worker request.
+   * Returns ALL MCPs - worker/SDK will gracefully handle auth failures
    */
   async getWorkerConfig(options: {
     baseUrl: string;
@@ -91,17 +116,94 @@ export class McpConfigService {
     const config = await this.loadConfig();
     const workerConfig: WorkerMcpConfig = { mcpServers: {} };
 
+    // Extract userId from worker token for logging
+    const tokenData = verifyWorkerToken(workerToken);
+    if (!tokenData) {
+      logger.warn("Failed to verify worker token");
+      return workerConfig;
+    }
+
+    const { userId } = tokenData;
+    logger.info(`Building MCP config for user ${userId}`);
+
     for (const [id, serverConfig] of Object.entries(config.rawServers)) {
       const cloned = cloneConfig(serverConfig);
-      if (config.httpServers.has(id)) {
+      const httpServer = config.httpServers.get(id);
+
+      if (httpServer) {
+        // Configure HTTP MCP - send ALL MCPs regardless of auth status
         const proxiedUrl = buildProxyUrl(baseUrl, id);
         cloned.url = proxiedUrl;
+        cloned.type = "sse"; // Mark as SSE server for SDK
         cloned.headers = mergeHeaders(cloned.headers, workerToken);
+
+        logger.debug(`Including MCP ${id} for user ${userId}`);
       }
+
       workerConfig.mcpServers[id] = cloned;
     }
 
+    logger.info(
+      `Returning worker config with ${Object.keys(workerConfig.mcpServers).length} MCPs for user ${userId}:`,
+      {
+        mcpIds: Object.keys(workerConfig.mcpServers),
+        configs: Object.entries(workerConfig.mcpServers).map(([id, cfg]) => ({
+          id,
+          type: cfg.type,
+          hasUrl: !!cfg.url,
+          hasCommand: !!cfg.command,
+        })),
+      }
+    );
+
     return workerConfig;
+  }
+
+  /**
+   * Get status of all MCPs for a specific user (auth/config state)
+   */
+  async getMcpStatus(userId: string): Promise<McpStatus[]> {
+    const config = await this.loadConfig();
+    const statuses: McpStatus[] = [];
+
+    for (const [id, httpServer] of config.httpServers) {
+      // Check if MCP requires authentication
+      const hasOAuth = !!httpServer.oauth;
+      const discoveredOAuth = await this.getDiscoveredOAuth(id);
+      const hasDiscoveredOAuth = !!discoveredOAuth;
+      const hasLoginUrl = !!httpServer.loginUrl;
+      const requiresAuth = hasOAuth || hasDiscoveredOAuth || hasLoginUrl;
+
+      // Check if MCP requires input configuration
+      const requiresInput = !!(
+        httpServer.inputs && httpServer.inputs.length > 0
+      );
+
+      // Check authentication status
+      let authenticated = false;
+      if (requiresAuth && this.credentialStore) {
+        const credentials = await this.credentialStore.get(userId, id);
+        authenticated = !!(credentials && credentials.accessToken);
+      }
+
+      // Check configuration status
+      let configured = false;
+      if (requiresInput && this.inputStore) {
+        const inputs = await this.inputStore.get(userId, id);
+        configured = !!inputs;
+      }
+
+      statuses.push({
+        id,
+        name: id,
+        requiresAuth,
+        requiresInput,
+        authenticated,
+        configured,
+      });
+    }
+
+    return statuses;
   }
 
   /**
@@ -122,12 +224,27 @@ export class McpConfigService {
 
   /**
    * Get discovered OAuth metadata for a specific MCP server
+   * This reads from the discovery service's cache (Redis) not the in-memory cache
    */
   async getDiscoveredOAuth(
     id: string
   ): Promise<DiscoveredOAuthMetadata | undefined> {
-    const config = await this.loadConfig();
-    return config.discoveredOAuth?.get(id);
+    if (!this.discoveryService) {
+      logger.debug(`getDiscoveredOAuth(${id}): no discovery service`);
+      return undefined;
+    }
+
+    // Read directly from discovery service cache (Redis)
+    try {
+      const cached = await (this.discoveryService as any).getCachedMetadata?.(
+        id
+      );
+      logger.info(`getDiscoveredOAuth(${id}): found=${!!cached}`);
+      return cached || undefined;
+    } catch (error) {
+      logger.error(`getDiscoveredOAuth(${id}) failed`, { error });
+      return undefined;
+    }
   }
 
   /**
@@ -143,18 +260,28 @@ export class McpConfigService {
    * Should be called once during gateway initialization
    */
   async enrichWithDiscovery(): Promise<void> {
-    if (this.discoveryEnriched || !this.discoveryService) {
+    if (!this.discoveryService) {
+      logger.warn("Discovery skipped - no discovery service");
+      return;
+    }
+
+    if (this.discoveryEnriched) {
+      logger.info("Discovery already completed, skipping");
       return;
     }
 
     logger.info("Starting OAuth discovery for all MCP servers...");
 
     const config = await this.loadConfig();
+    logger.info(`Found ${config.httpServers.size} HTTP MCP servers to check`);
+
     const discoveredOAuth = new Map<string, DiscoveredOAuthMetadata>();
     const discoveryPromises: Promise<void>[] = [];
 
     // Discover OAuth for each HTTP MCP that doesn't have static OAuth config
     for (const [id, serverConfig] of config.httpServers) {
+      logger.debug(`Checking MCP ${id} at ${serverConfig.upstreamUrl}`);
+
       // Skip if OAuth is already configured statically
       if (serverConfig.oauth) {
         logger.debug(
@@ -171,26 +298,32 @@ export class McpConfigService {
         continue;
       }
 
-      // Attempt discovery
+      logger.info(
+        `Attempting OAuth discovery for ${id} at ${serverConfig.upstreamUrl}`
+      );
+
+      // Attempt discovery - fail startup if discovery fails
       const discoveryPromise = this.discoveryService
         .discoverOAuthMetadata(id, serverConfig.upstreamUrl)
         .then((discovered) => {
           if (discovered) {
             discoveredOAuth.set(id, discovered);
             logger.info(
-              `Discovered OAuth for ${id}: ${discovered.metadata.issuer}`
+              `✅ Discovered OAuth for ${id}: ${discovered.metadata.issuer}`
+            );
+          } else {
+            throw new Error(
+              `OAuth discovery failed for MCP '${id}'. ` +
+                `Either add static OAuth config to the MCP JSON file, or ensure the MCP supports RFC 8414/9728 OAuth discovery.`
             );
           }
-        })
-        .catch((error) => {
-          logger.error(`Failed to discover OAuth for ${id}`, { error });
         });
 
       discoveryPromises.push(discoveryPromise);
     }
 
-    // Wait for all discovery attempts to complete
-    await Promise.allSettled(discoveryPromises);
+    // Wait for all discovery attempts - fail startup on any error
+    await Promise.all(discoveryPromises);
 
     // Update cache with discovered OAuth
     if (this.cache) {
@@ -199,7 +332,7 @@ export class McpConfigService {
 
     this.discoveryEnriched = true;
     logger.info(
-      `OAuth discovery completed. Discovered: ${discoveredOAuth.size} servers`
+      `Discovery completed. OAuth discovered: ${discoveredOAuth.size}`
     );
   }
 
@@ -306,6 +439,8 @@ export class McpConfigService {
         rawServers: normalized.rawServers,
         httpServers: normalized.httpServers,
         mtimeMs,
+        // Preserve discovery results from enrichWithDiscovery()
+        discoveredOAuth: this.cache?.discoveredOAuth,
       };
       return this.cache;
     } catch (error) {
@@ -361,6 +496,8 @@ function normalizeConfig(config: RawMcpConfig) {
           cloned.headers && typeof cloned.headers === "object"
             ? cloned.headers
             : undefined,
+        loginUrl:
+          typeof cloned.loginUrl === "string" ? cloned.loginUrl : undefined,
       });
     }
   }

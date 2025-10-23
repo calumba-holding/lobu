@@ -1,4 +1,4 @@
-import { BaseModule, createLogger } from "@peerbot/core";
+import { BaseModule, createLogger, encrypt, decrypt } from "@peerbot/core";
 import type { Request, Response } from "express";
 import type { McpConfigService } from "./config-service";
 import type { McpCredentialStore } from "./credential-store";
@@ -14,6 +14,7 @@ interface McpStatus {
   isAuthenticated: boolean;
   authType: "oauth" | "discovered-oauth" | "inputs";
   metadata?: Record<string, unknown>;
+  upstreamUrl: string;
 }
 
 /**
@@ -31,21 +32,56 @@ export class McpOAuthModule extends BaseModule {
     private inputStore: McpInputStore
   ) {
     super();
-    this.oauth2Client = new OAuth2Client();
-  }
 
-  /**
-   * Get the discovery service from config service
-   * Helper method to access discovery service through config service
-   */
-  private getDiscoveryService() {
-    // Access through config service's private field (using any to bypass TypeScript)
-    return (this.configService as any).discoveryService;
+    // Validate required environment variables
+    if (!process.env.PEERBOT_PUBLIC_GATEWAY_URL) {
+      throw new Error(
+        "PEERBOT_PUBLIC_GATEWAY_URL is required for MCP OAuth. " +
+          "Set it to your public gateway URL (e.g., https://your-domain.com)"
+      );
+    }
+
+    this.oauth2Client = new OAuth2Client();
   }
 
   isEnabled(): boolean {
     // Always enabled if MCP config service is available
     return true;
+  }
+
+  /**
+   * Generate a secure token for OAuth init URL
+   * Token contains encrypted userId, mcpId, and expiry
+   */
+  private generateSecureToken(userId: string, mcpId: string): string {
+    const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes
+    const payload = JSON.stringify({ userId, mcpId, expiresAt });
+    return encrypt(payload);
+  }
+
+  /**
+   * Validate and decode a secure token
+   * Returns { userId, mcpId } if valid, null if invalid or expired
+   */
+  private validateSecureToken(
+    token: string
+  ): { userId: string; mcpId: string } | null {
+    try {
+      const decrypted = decrypt(token);
+      const data = JSON.parse(decrypted);
+      const { userId, mcpId, expiresAt } = data;
+
+      // Check expiry
+      if (Date.now() > expiresAt) {
+        logger.warn("Token expired", { userId, mcpId });
+        return null;
+      }
+
+      return { userId, mcpId };
+    } catch (error) {
+      logger.error("Failed to validate token", { error });
+      return null;
+    }
   }
 
   /**
@@ -91,15 +127,13 @@ export class McpOAuthModule extends BaseModule {
         type: "section",
         text: {
           type: "mrkdwn",
-          text: "*🔌 MCP Connections*\n_Model Context Protocol integrations_",
+          text: "*🔌 MCP Connections*",
         },
       });
 
-      blocks.push({ type: "divider" });
-
       // Show each MCP status
       for (const mcp of mcpStatuses) {
-        const mcpBlocks = this.renderMcpStatus(mcp);
+        const mcpBlocks = this.renderMcpStatus(mcp, userId);
         blocks.push(...mcpBlocks);
       }
     } catch (error) {
@@ -124,124 +158,6 @@ export class McpOAuthModule extends BaseModule {
     userId: string,
     context: any
   ): Promise<boolean> {
-    // Handle login button (OAuth or discovered OAuth)
-    if (actionId.startsWith("mcp_login_")) {
-      const mcpId = actionId.replace("mcp_login_", "");
-
-      try {
-        const httpServer = await this.configService.getHttpServer(mcpId);
-        if (!httpServer) {
-          logger.error(`MCP ${mcpId} not found`);
-          return false;
-        }
-
-        let oauthConfig = httpServer.oauth;
-
-        // If no static OAuth config, check for discovered OAuth
-        if (!oauthConfig) {
-          const discoveredOAuth =
-            await this.configService.getDiscoveredOAuth(mcpId);
-          if (discoveredOAuth?.metadata) {
-            logger.info(
-              `Using discovered OAuth for ${mcpId} from ${discoveredOAuth.metadata.issuer}`
-            );
-
-            // Check if we have cached client credentials
-            let clientId = discoveredOAuth.clientCredentials?.client_id;
-            let clientSecret = discoveredOAuth.clientCredentials?.client_secret;
-
-            // If no cached credentials and registration is supported, perform dynamic registration
-            if (
-              !clientId &&
-              discoveredOAuth.metadata.registration_endpoint &&
-              this.getDiscoveryService()
-            ) {
-              logger.info(
-                `Performing dynamic client registration for ${mcpId}`
-              );
-              const discoveryService = this.getDiscoveryService()!;
-              const credentials =
-                await discoveryService.getOrCreateClientCredentials(
-                  mcpId,
-                  discoveredOAuth.metadata
-                );
-
-              if (credentials) {
-                clientId = credentials.client_id;
-                clientSecret = credentials.client_secret;
-                logger.info(`Registered client for ${mcpId}: ${clientId}`);
-              } else {
-                logger.error(`Failed to register client for ${mcpId}`);
-                return false;
-              }
-            }
-
-            // Build OAuth config from discovered metadata
-            oauthConfig = {
-              authUrl: discoveredOAuth.metadata.authorization_endpoint,
-              tokenUrl: discoveredOAuth.metadata.token_endpoint,
-              clientId: clientId || "",
-              clientSecret: clientSecret || "",
-              scopes: discoveredOAuth.metadata.scopes_supported || [],
-              grantType: "authorization_code",
-              responseType: "code",
-            };
-          } else {
-            logger.error(`MCP ${mcpId} has no OAuth configuration`);
-            return false;
-          }
-        }
-
-        // Generate state
-        const state = await this.stateStore.create({ userId, mcpId });
-
-        // Build OAuth URL
-        const redirectUri = this.getCallbackUrl();
-        const loginUrl = this.oauth2Client.buildAuthUrl(
-          oauthConfig,
-          state,
-          redirectUri
-        );
-
-        // Send DM with login link
-        if (context.client) {
-          await context.client.chat.postMessage({
-            channel: userId,
-            text: `🔐 Click the link below to authenticate with ${this.formatMcpName(mcpId)}:`,
-            blocks: [
-              {
-                type: "section",
-                text: {
-                  type: "mrkdwn",
-                  text: `🔐 *Authenticate with ${this.formatMcpName(mcpId)}*`,
-                },
-              },
-              {
-                type: "actions",
-                elements: [
-                  {
-                    type: "button",
-                    text: {
-                      type: "plain_text",
-                      text: `Login to ${this.formatMcpName(mcpId)}`,
-                    },
-                    url: loginUrl,
-                    style: "primary",
-                  },
-                ],
-              },
-            ],
-          });
-        }
-
-        logger.info(`Sent OAuth link to user ${userId} for MCP ${mcpId}`);
-        return true;
-      } catch (error) {
-        logger.error("Failed to handle login action", { error, mcpId, userId });
-        return false;
-      }
-    }
-
     // Handle configure button (inputs)
     if (actionId.startsWith("mcp_configure_")) {
       const mcpId = actionId.replace("mcp_configure_", "");
@@ -393,9 +309,13 @@ export class McpOAuthModule extends BaseModule {
    */
   private async getMcpStatuses(userId: string): Promise<McpStatus[]> {
     const httpServers = await this.configService.getAllHttpServers();
+    logger.info(`getMcpStatuses: Found ${httpServers.size} HTTP servers`);
+
     const statuses: McpStatus[] = [];
 
     for (const [id, serverConfig] of httpServers) {
+      logger.debug(`Checking MCP ${id} for status`);
+
       // Support OAuth, discovered OAuth, and input-based authentication
       const hasOAuth = !!serverConfig.oauth;
       const hasInputs = !!(
@@ -406,8 +326,13 @@ export class McpOAuthModule extends BaseModule {
       const discoveredOAuth = await this.configService.getDiscoveredOAuth(id);
       const hasDiscoveredOAuth = !!discoveredOAuth;
 
+      logger.info(
+        `MCP ${id}: hasOAuth=${hasOAuth}, hasInputs=${hasInputs}, hasDiscoveredOAuth=${hasDiscoveredOAuth}`
+      );
+
       // Skip MCPs without any authentication method
       if (!hasOAuth && !hasInputs && !hasDiscoveredOAuth) {
+        logger.debug(`Skipping MCP ${id} - no auth method configured`);
         continue;
       }
 
@@ -416,7 +341,7 @@ export class McpOAuthModule extends BaseModule {
       let authType: "oauth" | "discovered-oauth" | "inputs";
 
       if (hasOAuth || hasDiscoveredOAuth) {
-        // Check OAuth credentials (works for both static and discovered OAuth)
+        // Check OAuth credentials (works for static and discovered OAuth)
         authType = hasOAuth ? "oauth" : "discovered-oauth";
         const credentials = await this.credentialStore.get(userId, id);
         isAuthenticated = !!(
@@ -437,6 +362,7 @@ export class McpOAuthModule extends BaseModule {
         isAuthenticated,
         authType,
         metadata,
+        upstreamUrl: serverConfig.upstreamUrl,
       });
     }
 
@@ -446,29 +372,29 @@ export class McpOAuthModule extends BaseModule {
   /**
    * Render blocks for a single MCP status
    */
-  private renderMcpStatus(mcp: McpStatus): any[] {
+  private renderMcpStatus(mcp: McpStatus, userId: string): any[] {
     const blocks: any[] = [];
 
-    // MCP name and status
-    const statusIcon = mcp.isAuthenticated ? "✅" : "⚪";
-
-    // Determine status text based on auth type
+    // Determine status emoji and text
+    let statusIcon: string;
     let statusText: string;
+
     if (mcp.isAuthenticated) {
+      statusIcon = "🟢"; // Green for connected/configured
       statusText =
         mcp.authType === "oauth" || mcp.authType === "discovered-oauth"
           ? "Connected"
           : "Configured";
     } else {
+      // Red for OAuth not connected, white for not configured
+      statusIcon =
+        mcp.authType === "oauth" || mcp.authType === "discovered-oauth"
+          ? "🔴" // Red for OAuth not connected
+          : "⚪"; // White for not configured
       statusText =
         mcp.authType === "oauth" || mcp.authType === "discovered-oauth"
           ? "Not Connected"
           : "Not Configured";
-    }
-
-    // Add indicator for discovered OAuth
-    if (mcp.authType === "discovered-oauth") {
-      statusText += " (Auto-discovered)";
     }
 
     // Determine button based on auth type
@@ -490,32 +416,50 @@ export class McpOAuthModule extends BaseModule {
       };
     } else {
       // Show login/configure button
-      actionButton = {
-        type: "button",
-        text: {
-          type: "plain_text",
-          text:
-            mcp.authType === "oauth" || mcp.authType === "discovered-oauth"
-              ? "Login"
-              : "Configure",
-        },
-        style: "primary",
-        action_id:
-          mcp.authType === "oauth" || mcp.authType === "discovered-oauth"
-            ? `mcp_login_${mcp.id}`
-            : `mcp_configure_${mcp.id}`,
-        value: mcp.id,
-      };
+      if (mcp.authType === "oauth" || mcp.authType === "discovered-oauth") {
+        // OAuth: Use direct URL with secure token
+        const baseUrl = process.env.PEERBOT_PUBLIC_GATEWAY_URL!; // Validated in constructor
+        const token = this.generateSecureToken(userId, mcp.id);
+        const loginUrl = `${baseUrl}/mcp/oauth/init/${mcp.id}?token=${encodeURIComponent(token)}`;
+
+        actionButton = {
+          type: "button",
+          text: {
+            type: "plain_text",
+            text: "Login",
+          },
+          style: "primary",
+          url: loginUrl,
+        };
+      } else {
+        // Input-based: Use action_id to open modal
+        actionButton = {
+          type: "button",
+          text: {
+            type: "plain_text",
+            text: "Configure",
+          },
+          style: "primary",
+          action_id: `mcp_configure_${mcp.id}`,
+          value: mcp.id,
+        };
+      }
     }
 
-    blocks.push({
+    const sectionBlock: any = {
       type: "section",
       text: {
         type: "mrkdwn",
         text: `${statusIcon} *${mcp.name}*\n_${statusText}_`,
       },
-      accessory: actionButton,
-    });
+    };
+
+    // Add button if defined
+    if (actionButton) {
+      sectionBlock.accessory = actionButton;
+    }
+
+    blocks.push(sectionBlock);
 
     // Show metadata if authenticated (OAuth only)
     if (
@@ -545,10 +489,10 @@ export class McpOAuthModule extends BaseModule {
    */
   private async handleOAuthInit(req: Request, res: Response): Promise<void> {
     const { mcpId } = req.params;
-    const userId = req.query.userId as string;
+    const token = req.query.token as string;
 
-    if (!userId) {
-      res.status(400).json({ error: "Missing userId parameter" });
+    if (!token) {
+      res.status(400).json({ error: "Missing token parameter" });
       return;
     }
 
@@ -557,14 +501,65 @@ export class McpOAuthModule extends BaseModule {
       return;
     }
 
+    // Validate and decode token
+    const tokenData = this.validateSecureToken(token);
+    if (!tokenData) {
+      res.status(401).json({ error: "Invalid or expired token" });
+      return;
+    }
+
+    // Verify mcpId matches token
+    if (tokenData.mcpId !== mcpId) {
+      res.status(400).json({ error: "Token mcpId mismatch" });
+      return;
+    }
+
+    const userId = tokenData.userId;
+
     try {
       // Get MCP config
       const httpServer = await this.configService.getHttpServer(mcpId);
-      if (!httpServer || !httpServer.oauth) {
-        res
-          .status(404)
-          .json({ error: "MCP not found or OAuth not configured" });
+      if (!httpServer) {
+        res.status(404).json({ error: "MCP not found" });
         return;
+      }
+
+      let oauthConfig = httpServer.oauth;
+
+      // If no static OAuth config, check for discovered OAuth
+      if (!oauthConfig) {
+        const discoveredOAuth =
+          await this.configService.getDiscoveredOAuth(mcpId);
+        if (discoveredOAuth?.metadata) {
+          logger.info(
+            `Using discovered OAuth for ${mcpId} from ${discoveredOAuth.metadata.issuer}`
+          );
+
+          // Use cached client credentials
+          const clientId = discoveredOAuth.clientCredentials?.client_id;
+          const clientSecret = discoveredOAuth.clientCredentials?.client_secret;
+
+          if (!clientId) {
+            res
+              .status(400)
+              .json({ error: "OAuth client not registered for this MCP" });
+            return;
+          }
+
+          // Build OAuth config from discovered metadata
+          oauthConfig = {
+            authUrl: discoveredOAuth.metadata.authorization_endpoint,
+            tokenUrl: discoveredOAuth.metadata.token_endpoint,
+            clientId: clientId,
+            clientSecret: clientSecret || "",
+            scopes: discoveredOAuth.metadata.scopes_supported || [],
+            grantType: "authorization_code",
+            responseType: "code",
+          };
+        } else {
+          res.status(404).json({ error: "MCP has no OAuth configuration" });
+          return;
+        }
       }
 
       // Generate and store state
@@ -573,7 +568,7 @@ export class McpOAuthModule extends BaseModule {
       // Build OAuth URL
       const redirectUri = this.getCallbackUrl();
       const loginUrl = this.oauth2Client.buildAuthUrl(
-        httpServer.oauth,
+        oauthConfig,
         state,
         redirectUri
       );

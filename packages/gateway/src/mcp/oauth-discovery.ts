@@ -20,6 +20,17 @@ export interface OAuthServerMetadata {
 }
 
 /**
+ * OAuth 2.0 Protected Resource Metadata (RFC 9728)
+ */
+export interface ProtectedResourceMetadata {
+  resource?: string;
+  resource_name?: string;
+  authorization_servers?: string[];
+  bearer_methods_supported?: string[];
+  scopes_supported?: string[];
+}
+
+/**
  * Dynamic Client Registration Response (RFC 7591)
  */
 export interface ClientCredentials {
@@ -84,6 +95,21 @@ export class McpOAuthDiscoveryService {
   private readonly cacheStore?: McpOAuthDiscoveryServiceOptions["cacheStore"];
   private readonly callbackUrl: string;
 
+  // Well-known OAuth providers with hardcoded endpoints
+  private readonly knownProviders: Map<string, OAuthServerMetadata> = new Map([
+    [
+      "https://github.com/login/oauth",
+      {
+        issuer: "https://github.com/login/oauth",
+        authorization_endpoint: "https://github.com/login/oauth/authorize",
+        token_endpoint: "https://github.com/login/oauth/access_token",
+        grant_types_supported: ["authorization_code", "refresh_token"],
+        response_types_supported: ["code"],
+        code_challenge_methods_supported: ["S256"],
+      },
+    ],
+  ]);
+
   constructor(options: McpOAuthDiscoveryServiceOptions) {
     this.protocolVersion = options.protocolVersion || "2025-03-26";
     this.cacheTtl = options.cacheTtl || 86400; // 24 hours
@@ -93,6 +119,7 @@ export class McpOAuthDiscoveryService {
 
   /**
    * Discover OAuth metadata for an MCP server
+   * Tries RFC 8414 first, then RFC 9728 (Protected Resource Metadata)
    * Returns null if discovery fails or OAuth is not supported
    */
   async discoverOAuthMetadata(
@@ -109,22 +136,56 @@ export class McpOAuthDiscoveryService {
 
       logger.info(`Discovering OAuth metadata for ${mcpId} at ${mcpUrl}`);
 
+      // Try RFC 8414 first (Authorization Server Metadata)
+      const rfc8414Result = await this.discoverViaRFC8414(mcpId, mcpUrl);
+      if (rfc8414Result) {
+        return rfc8414Result;
+      }
+
+      // Try RFC 9728 (Protected Resource Metadata via 401 response)
+      logger.debug(`RFC 8414 failed for ${mcpId}, trying RFC 9728...`);
+      const rfc9728Result = await this.discoverViaRFC9728(mcpId, mcpUrl);
+      if (rfc9728Result) {
+        return rfc9728Result;
+      }
+
+      logger.debug(`No OAuth metadata found for ${mcpId}`);
+      return null;
+    } catch (error) {
+      logger.error(`Failed to discover OAuth for ${mcpId}`, {
+        error,
+        mcpUrl,
+      });
+      return null;
+    }
+  }
+
+  /**
+   * Discover OAuth via RFC 8414 (Authorization Server Metadata)
+   */
+  private async discoverViaRFC8414(
+    mcpId: string,
+    mcpUrl: string
+  ): Promise<DiscoveredOAuthMetadata | null> {
+    try {
       // Parse base URL from MCP URL
       const baseUrl = this.extractBaseUrl(mcpUrl);
-      logger.debug(`Base URL for ${mcpId}: ${baseUrl}`);
+      logger.debug(`RFC 8414: Base URL for ${mcpId}: ${baseUrl}`);
 
       // Query /.well-known/oauth-authorization-server
       const metadataUrl = `${baseUrl}/.well-known/oauth-authorization-server`;
       const metadata = await this.fetchOAuthMetadata(metadataUrl);
 
       if (!metadata) {
-        logger.debug(`No OAuth metadata found for ${mcpId}`);
+        logger.debug(`RFC 8414: No OAuth metadata found at ${metadataUrl}`);
         return null;
       }
 
       // Validate metadata
       if (!this.validateMetadata(metadata)) {
-        logger.warn(`Invalid OAuth metadata for ${mcpId}`, { metadata });
+        logger.warn(`RFC 8414: Invalid OAuth metadata for ${mcpId}`, {
+          metadata,
+        });
         return null;
       }
 
@@ -140,14 +201,164 @@ export class McpOAuthDiscoveryService {
       await this.cacheMetadata(discovered);
 
       logger.info(
-        `Successfully discovered OAuth for ${mcpId}. Endpoints: auth=${metadata.authorization_endpoint}, token=${metadata.token_endpoint}, registration=${metadata.registration_endpoint || "none"}`
+        `✅ RFC 8414: Discovered OAuth for ${mcpId}. Endpoints: auth=${metadata.authorization_endpoint}, token=${metadata.token_endpoint}`
       );
 
       return discovered;
     } catch (error) {
-      logger.error(`Failed to discover OAuth for ${mcpId}`, {
-        error,
+      logger.debug(`RFC 8414: Discovery failed for ${mcpId}`, { error });
+      return null;
+    }
+  }
+
+  /**
+   * Discover OAuth via RFC 9728 (Protected Resource Metadata)
+   * Makes a request to the MCP, checks for 401 with WWW-Authenticate header
+   */
+  private async discoverViaRFC9728(
+    mcpId: string,
+    mcpUrl: string
+  ): Promise<DiscoveredOAuthMetadata | null> {
+    try {
+      logger.debug(`RFC 9728: Probing ${mcpUrl} for WWW-Authenticate header`);
+
+      // Make request to MCP URL to get 401 response
+      const response = await fetch(mcpUrl, {
+        method: "GET",
+        headers: {
+          "MCP-Protocol-Version": this.protocolVersion,
+        },
+        redirect: "manual",
+      });
+
+      // Check for 401 with WWW-Authenticate header
+      if (response.status !== 401) {
+        logger.debug(`RFC 9728: Expected 401, got ${response.status}`);
+        return null;
+      }
+
+      const wwwAuth = response.headers.get("www-authenticate");
+      if (!wwwAuth) {
+        logger.debug(`RFC 9728: No WWW-Authenticate header in 401 response`);
+        return null;
+      }
+
+      // Parse resource_metadata URL from WWW-Authenticate header
+      const resourceMetadataUrl = this.parseResourceMetadataUrl(wwwAuth);
+      if (!resourceMetadataUrl) {
+        logger.debug(
+          `RFC 9728: No resource_metadata in WWW-Authenticate header`
+        );
+        return null;
+      }
+
+      logger.debug(
+        `RFC 9728: Fetching protected resource metadata from ${resourceMetadataUrl}`
+      );
+
+      // Fetch protected resource metadata
+      const prm =
+        await this.fetchProtectedResourceMetadata(resourceMetadataUrl);
+      if (
+        !prm ||
+        !prm.authorization_servers ||
+        prm.authorization_servers.length === 0
+      ) {
+        logger.debug(
+          `RFC 9728: No authorization servers in protected resource metadata`
+        );
+        return null;
+      }
+
+      // Get authorization server URL
+      const authServerUrl = prm.authorization_servers[0];
+      if (!authServerUrl) {
+        logger.debug(`RFC 9728: First authorization server is undefined`);
+        return null;
+      }
+
+      logger.debug(`RFC 9728: Authorization server: ${authServerUrl}`);
+
+      // Check if we have hardcoded metadata for this provider
+      const providerMetadata = this.knownProviders.get(authServerUrl);
+
+      if (!providerMetadata) {
+        logger.debug(
+          `RFC 9728: Authorization server not in known providers, discovery not implemented`
+        );
+        return null;
+      }
+
+      logger.info(
+        `✅ RFC 9728: Using hardcoded OAuth endpoints for ${authServerUrl}`
+      );
+
+      // Add scopes from protected resource metadata if available
+      let metadata = providerMetadata;
+      if (prm.scopes_supported && prm.scopes_supported.length > 0) {
+        metadata = {
+          ...providerMetadata,
+          scopes_supported: prm.scopes_supported,
+        };
+      }
+
+      const discovered: DiscoveredOAuthMetadata = {
+        mcpId,
         mcpUrl,
+        metadata,
+        discoveredAt: Date.now(),
+        expiresAt: Date.now() + this.cacheTtl * 1000,
+      };
+
+      // Cache the discovered metadata
+      await this.cacheMetadata(discovered);
+
+      logger.info(
+        `✅ RFC 9728: Discovered OAuth for ${mcpId} via ${authServerUrl}. Endpoints: auth=${metadata.authorization_endpoint}, token=${metadata.token_endpoint}`
+      );
+
+      return discovered;
+    } catch (error) {
+      logger.debug(`RFC 9728: Discovery failed for ${mcpId}`, { error });
+      return null;
+    }
+  }
+
+  /**
+   * Parse resource_metadata URL from WWW-Authenticate header
+   * Example: Bearer error="invalid_request", resource_metadata="https://..."
+   */
+  private parseResourceMetadataUrl(wwwAuth: string): string | null {
+    const match = wwwAuth.match(/resource_metadata="([^"]+)"/);
+    return match?.[1] || null;
+  }
+
+  /**
+   * Fetch Protected Resource Metadata (RFC 9728)
+   */
+  private async fetchProtectedResourceMetadata(
+    url: string
+  ): Promise<ProtectedResourceMetadata | null> {
+    try {
+      const response = await fetch(url, {
+        method: "GET",
+        headers: {
+          "MCP-Protocol-Version": this.protocolVersion,
+        },
+      });
+
+      if (!response.ok) {
+        logger.debug(
+          `Failed to fetch protected resource metadata: ${response.status}`
+        );
+        return null;
+      }
+
+      const metadata = (await response.json()) as ProtectedResourceMetadata;
+      return metadata;
+    } catch (error) {
+      logger.debug(`Error fetching protected resource metadata from ${url}`, {
+        error,
       });
       return null;
     }
@@ -353,7 +564,7 @@ export class McpOAuthDiscoveryService {
   /**
    * Get cached metadata
    */
-  private async getCachedMetadata(
+  async getCachedMetadata(
     mcpId: string
   ): Promise<DiscoveredOAuthMetadata | null> {
     if (!this.cacheStore) {

@@ -45,6 +45,9 @@ export class WorkerGateway {
       app.get("/worker/mcp/config", (req: Request, res: Response) =>
         this.handleMcpConfigRequest(req, res)
       );
+      app.get("/worker/mcp/status", (req: Request, res: Response) =>
+        this.handleMcpStatusRequest(req, res)
+      );
     }
 
     logger.info("Worker gateway routes registered");
@@ -70,17 +73,13 @@ export class WorkerGateway {
     // Register connection with connection manager
     this.connectionManager.addConnection(deploymentName, userId, threadId, res);
 
-    // Register job router for this worker (if not already registered)
-    const isRegistered =
-      await this.jobRouter.isWorkerRegistered(deploymentName);
-    if (!isRegistered) {
-      await this.jobRouter.registerWorker(deploymentName);
-    }
+    // Register job router for this worker (idempotent - safe to call multiple times)
+    await this.jobRouter.registerWorker(deploymentName);
 
     // Handle client disconnect
     req.on("close", () => {
       this.connectionManager.removeConnection(deploymentName);
-      // Note: We don't unregister the job router - worker might reconnect
+      // BullMQ worker remains registered - will resume when worker reconnects
     });
   }
 
@@ -147,6 +146,28 @@ export class WorkerGateway {
     } catch (error) {
       logger.error("Failed to generate MCP config", { error });
       res.status(500).json({ error: "mcp_config_error" });
+    }
+  }
+
+  private async handleMcpStatusRequest(req: Request, res: Response) {
+    if (!this.mcpConfigService) {
+      res.status(503).json({ error: "mcp_config_unavailable" });
+      return;
+    }
+
+    const auth = this.authenticateWorker(req, res);
+    if (!auth) {
+      return;
+    }
+
+    try {
+      const status = await this.mcpConfigService.getMcpStatus(
+        auth.tokenData.userId
+      );
+      res.json({ mcps: status });
+    } catch (error) {
+      logger.error("Failed to get MCP status", { error });
+      res.status(500).json({ error: "mcp_status_error" });
     }
   }
 

@@ -14,6 +14,7 @@ import {
   SlackInstructionProvider,
   ProjectsInstructionProvider,
   ProcessManagerInstructionProvider,
+  McpInstructionProvider,
 } from "./instructions";
 
 const logger = createLogger("worker");
@@ -148,10 +149,10 @@ class ProgressProcessor {
 
   /**
    * Process streaming update and return formatted content for Slack
-   * Returns null if the update should be skipped
+   * Always returns { text: string, isFinal: boolean } or null
    * Now handles SDK message format directly
    */
-  processUpdate(data: any): string | null {
+  processUpdate(data: any): { text: string; isFinal: boolean } | null {
     try {
       // Skip if no data
       if (!data || typeof data !== "object") {
@@ -167,7 +168,7 @@ class ProgressProcessor {
           return this.processToolCall(data);
 
         case "result":
-          // Final result from SDK - compare with what we accumulated
+          // Final result from SDK - send as safety net with isFinal flag
           if (data.result && String(data.result).trim()) {
             const resultText = String(data.result).trim();
             const accumulatedText = this.chronologicalOutput.trim();
@@ -186,6 +187,9 @@ class ProgressProcessor {
               );
               logger.warn(`Result preview: ${resultText.substring(0, 200)}`);
             }
+
+            // Return final result with isFinal flag - gateway will deduplicate
+            return { text: resultText, isFinal: true };
           }
           return null;
 
@@ -211,7 +215,9 @@ class ProgressProcessor {
    * Process SDK assistant messages
    * SDK wraps content in message.message.content structure
    */
-  private processAssistantMessage(message: any): string | null {
+  private processAssistantMessage(
+    message: any
+  ): { text: string; isFinal: boolean } | null {
     let hasUpdate = false;
 
     // SDK format: message.message.content (nested)
@@ -270,13 +276,19 @@ class ProgressProcessor {
       }
     }
 
-    return hasUpdate ? this.formatFullUpdate() : null;
+    if (!hasUpdate) {
+      return null;
+    }
+
+    return { text: this.formatFullUpdate(), isFinal: false };
   }
 
   /**
    * Process SDK tool call messages
    */
-  private processToolCall(message: any): string | null {
+  private processToolCall(
+    message: any
+  ): { text: string; isFinal: boolean } | null {
     // Skip TodoWrite - it's handled in assistant message with detailed task tracking
     if (message.tool_name === "TodoWrite") {
       return null;
@@ -288,19 +300,21 @@ class ProgressProcessor {
     });
     logger.info(`🔧 Tool call: ${toolExecution}`);
     this.chronologicalOutput += `${toolExecution}\n`;
-    return this.formatFullUpdate();
+    return { text: this.formatFullUpdate(), isFinal: false };
   }
 
   /**
    * Process legacy subprocess JSON format (for backwards compatibility)
    */
-  private processLegacyFormat(data: any): string | null {
+  private processLegacyFormat(
+    data: any
+  ): { text: string; isFinal: boolean } | null {
     // Try to extract TodoWrite from old format
     const dataStr = JSON.stringify(data);
     const todoData = this.extractTodoList(dataStr);
     if (todoData) {
       this.currentTodos = todoData;
-      return this.formatFullUpdate();
+      return { text: this.formatFullUpdate(), isFinal: false };
     }
 
     // Try old assistant message format
@@ -317,7 +331,7 @@ class ProgressProcessor {
         }
       }
       if (hasUpdate) {
-        return this.formatFullUpdate();
+        return { text: this.formatFullUpdate(), isFinal: false };
       }
     }
 
@@ -462,6 +476,27 @@ class ProgressProcessor {
     // First send or something unexpected happened - send full content
     this.lastSentContent = fullContent;
     return fullContent;
+  }
+
+  /**
+   * Store final result for later processing
+   */
+  private finalResult: { text: string; isFinal: boolean } | null = null;
+
+  /**
+   * Set the final result from processUpdate
+   */
+  setFinalResult(result: { text: string; isFinal: boolean }): void {
+    this.finalResult = result;
+  }
+
+  /**
+   * Get and clear the final result
+   */
+  getFinalResult(): { text: string; isFinal: boolean } | null {
+    const result = this.finalResult;
+    this.finalResult = null;
+    return result;
   }
 
   /**
@@ -745,7 +780,18 @@ export class ClaudeWorker implements WorkerExecutor {
                 }
 
                 // Process the update to extract user-friendly content
-                this.progressProcessor.processUpdate(update.data);
+                const processResult = this.progressProcessor.processUpdate(
+                  update.data
+                );
+
+                // Check if this is a final result message
+                if (processResult?.isFinal) {
+                  this.progressProcessor.setFinalResult(processResult);
+                  logger.info(
+                    `📦 Stored final result (${processResult.text.length} chars) for deduplication`
+                  );
+                  return;
+                }
 
                 // Show thinking content as status if present
                 const thinkingContent =
@@ -784,11 +830,22 @@ export class ClaudeWorker implements WorkerExecutor {
       this.gatewayIntegration.setModuleData(moduleData);
 
       if (result.success) {
-        // All content has already been streamed during execution
-        // No need to send final delta - just signal completion
-        logger.info(
-          "Session completed successfully - all content already streamed"
-        );
+        // Check if we have a final result to send as safety net
+        const finalResult = this.progressProcessor.getFinalResult();
+        if (finalResult) {
+          logger.info(
+            `📤 Sending final result (${finalResult.text.length} chars) with deduplication flag`
+          );
+          await this.gatewayIntegration.sendStreamDelta(
+            finalResult.text,
+            false,
+            finalResult.isFinal
+          );
+        } else {
+          logger.info(
+            "Session completed successfully - all content already streamed"
+          );
+        }
         await this.gatewayIntegration.signalDone();
       } else {
         const errorMsg = result.error || "Unknown error";
@@ -835,6 +892,7 @@ export class ClaudeWorker implements WorkerExecutor {
 
       // Register all instruction providers
       builder.registerProvider(new CoreInstructionProvider());
+      builder.registerProvider(new McpInstructionProvider());
       builder.registerProvider(new SlackInstructionProvider());
       builder.registerProvider(new ProjectsInstructionProvider());
       builder.registerProvider(new ProcessManagerInstructionProvider());

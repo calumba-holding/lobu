@@ -39,6 +39,7 @@ interface MCPServerConfig {
   command?: string;
   args?: string[];
   env?: Record<string, string>;
+  headers?: Record<string, string>;
 }
 
 interface MCPConfigResponse {
@@ -77,6 +78,19 @@ async function getMCPServersForSDK(): Promise<Record<string, any> | undefined> {
       return undefined;
     }
 
+    logger.info(
+      `Received ${Object.keys(data.mcpServers).length} MCPs from gateway:`,
+      {
+        mcpIds: Object.keys(data.mcpServers),
+        configs: Object.entries(data.mcpServers).map(([id, cfg]) => ({
+          id,
+          type: cfg.type,
+          hasUrl: !!cfg.url,
+          hasCommand: !!cfg.command,
+        })),
+      }
+    );
+
     // Convert gateway format to SDK format
     const sdkServers: Record<string, any> = {};
 
@@ -85,7 +99,9 @@ async function getMCPServersForSDK(): Promise<Record<string, any> | undefined> {
         // SSE server
         sdkServers[name] = {
           url: config.url,
+          headers: config.headers || {}, // Include auth headers from gateway
         };
+        logger.info(`Including SSE MCP server: ${name}`);
       } else if (config.command) {
         // stdio server
         sdkServers[name] = {
@@ -93,11 +109,18 @@ async function getMCPServersForSDK(): Promise<Record<string, any> | undefined> {
           args: config.args || [],
           env: config.env || {},
         };
+        logger.info(`Including stdio MCP server: ${name}`);
+      } else {
+        logger.warn(`Skipping MCP ${name} - no type=sse or command property`, {
+          type: config.type,
+          hasUrl: !!config.url,
+          hasCommand: !!config.command,
+        });
       }
     }
 
     logger.info(
-      `Configured ${Object.keys(sdkServers).length} MCP servers for SDK`
+      `Configured ${Object.keys(sdkServers).length} MCP servers for SDK (filtered from ${Object.keys(data.mcpServers).length})`
     );
     return Object.keys(sdkServers).length > 0 ? sdkServers : undefined;
   } catch (error) {

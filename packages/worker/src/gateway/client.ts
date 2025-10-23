@@ -265,6 +265,7 @@ export class GatewayIntegration implements GatewayIntegrationInterface {
   private usedStreaming: boolean = false;
   private finalContent?: string;
   private lastStatus?: string;
+  private accumulatedStreamContent: string = "";
 
   constructor(
     dispatcherUrl: string,
@@ -367,10 +368,60 @@ export class GatewayIntegration implements GatewayIntegrationInterface {
 
   async sendStreamDelta(
     delta: string,
-    isFullReplacement: boolean = false
+    isFullReplacement: boolean = false,
+    isFinal: boolean = false
   ): Promise<void> {
     // Mark that streaming was used
     this.usedStreaming = true;
+
+    let actualDelta = delta;
+
+    // Handle final result with deduplication
+    if (isFinal) {
+      logger.info(`🔍 Processing final result with deduplication`);
+      logger.info(`Final text length: ${delta.length} chars`);
+      logger.info(
+        `Accumulated length: ${this.accumulatedStreamContent.length} chars`
+      );
+
+      // Check if final result is identical to what we've already sent
+      if (delta === this.accumulatedStreamContent) {
+        logger.info(
+          `✅ Final result is identical to accumulated content - skipping duplicate`
+        );
+        return;
+      }
+
+      // Check if accumulated content is a prefix of final result
+      if (delta.startsWith(this.accumulatedStreamContent)) {
+        // Only send the missing part
+        actualDelta = delta.slice(this.accumulatedStreamContent.length);
+        if (actualDelta.length === 0) {
+          logger.info(
+            `✅ Final result fully contained in accumulated content - skipping`
+          );
+          return;
+        }
+        logger.info(
+          `📝 Final result has ${actualDelta.length} new chars - sending delta only`
+        );
+      } else if (this.accumulatedStreamContent.length > 0) {
+        // Content differs - log warning and send full final result
+        logger.warn(`⚠️  Final result differs from accumulated content!`);
+        logger.warn(
+          `First 100 chars of accumulated: ${this.accumulatedStreamContent.substring(0, 100)}`
+        );
+        logger.warn(`First 100 chars of final: ${delta.substring(0, 100)}`);
+        logger.info(`📤 Sending full final result (${delta.length} chars)`);
+      }
+    }
+
+    // Track accumulated content for deduplication
+    if (!isFullReplacement) {
+      this.accumulatedStreamContent += actualDelta;
+    } else {
+      this.accumulatedStreamContent = actualDelta;
+    }
 
     await this.sendResponse({
       messageId: this.originalMessageTs,
@@ -378,7 +429,7 @@ export class GatewayIntegration implements GatewayIntegrationInterface {
       threadTs: this.threadId,
       userId: this.userId,
       teamId: this.teamId,
-      delta,
+      delta: actualDelta,
       timestamp: Date.now(),
       originalMessageTs: this.originalMessageTs,
       claudeSessionId: this.claudeSessionId,

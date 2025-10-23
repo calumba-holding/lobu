@@ -166,14 +166,16 @@ export class SlackDispatcher {
       });
       logger.info("✅ MCP OAuth Discovery Service initialized");
 
+      const oauthStateStore = new OAuthStateStore(this.queue);
+      const mcpInputStore = new McpInputStore(this.queue);
       const mcpConfigService = new McpConfigService({
         configUrl:
           process.env.PEERBOT_MCP_SERVERS_URL ||
           process.env.PEERBOT_MCP_SERVERS_FILE,
         discoveryService: mcpDiscoveryService,
+        credentialStore: mcpCredentialStore,
+        inputStore: mcpInputStore,
       });
-      const oauthStateStore = new OAuthStateStore(this.queue);
-      const mcpInputStore = new McpInputStore(this.queue);
       this.workerGateway = new WorkerGateway(this.queue, mcpConfigService);
       this.mcpProxy = new McpProxy(
         mcpConfigService,

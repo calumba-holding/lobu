@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import type { IMessageQueue } from "@peerbot/core";
-import { createLogger, type IRedisClient, RedisClient } from "@peerbot/core";
+import { createLogger } from "@peerbot/core";
 import type { WorkerConnectionManager } from "./connection-manager";
 
 const logger = createLogger("worker-job-router");
@@ -18,46 +18,31 @@ interface PendingJob {
  * Manages job acknowledgments and timeouts
  */
 export class WorkerJobRouter {
-  private readonly QUEUE_WORKERS_KEY = "worker_job_router:queue_workers";
   private pendingJobs: Map<string, PendingJob> = new Map(); // In-memory timeouts only
-  private redis: IRedisClient;
 
   constructor(
     private queue: IMessageQueue,
     private connectionManager: WorkerConnectionManager
-  ) {
-    // Get Redis client from queue connection pool
-    this.redis = new RedisClient(queue.getRedisClient());
-  }
+  ) {}
 
   /**
    * Register a worker to receive jobs from its deployment queue
    * Each worker listens on its own queue: thread_message_{deploymentName}
+   *
+   * Note: This is idempotent - BullMQ's queue.work() handles duplicate registrations gracefully.
+   * Safe to call multiple times (e.g., on worker reconnection or gateway restart).
    */
   async registerWorker(deploymentName: string): Promise<void> {
     const queueName = `thread_message_${deploymentName}`;
 
-    // Check if already registered in Redis
-    const isRegistered = await this.redis.sismember(
-      this.QUEUE_WORKERS_KEY,
-      queueName
-    );
-
-    if (isRegistered) {
-      logger.debug(`Worker already registered for queue ${queueName}`);
-      return;
-    }
-
     // Create queue if it doesn't exist
     await this.queue.createQueue(queueName);
 
-    // Register job handler
+    // Register job handler (idempotent - BullMQ handles duplicates)
     await this.queue.work(queueName, async (job: unknown) => {
       await this.handleJob(deploymentName, job);
     });
 
-    // Mark as registered in Redis
-    await this.redis.sadd(this.QUEUE_WORKERS_KEY, queueName);
     logger.info(`Registered worker for queue ${queueName}`);
   }
 
@@ -127,14 +112,6 @@ export class WorkerJobRouter {
     } else {
       logger.warn(`Received acknowledgment for unknown job ${jobId}`);
     }
-  }
-
-  /**
-   * Check if a worker is registered
-   */
-  async isWorkerRegistered(deploymentName: string): Promise<boolean> {
-    const queueName = `thread_message_${deploymentName}`;
-    return await this.redis.sismember(this.QUEUE_WORKERS_KEY, queueName);
   }
 
   /**
