@@ -800,7 +800,7 @@ export class ClaudeWorker implements WorkerExecutor {
                   const maxLength = 100;
                   const displayThinking =
                     thinkingContent.length > maxLength
-                      ? thinkingContent.substring(0, maxLength) + "..."
+                      ? `${thinkingContent.substring(0, maxLength)}...`
                       : thinkingContent;
                   logger.info(
                     `💭 Sending thinking status update: ${displayThinking}`

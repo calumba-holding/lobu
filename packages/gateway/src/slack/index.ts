@@ -215,10 +215,8 @@ export class SlackDispatcher {
       // This ensures handlers have access to bot IDs during initialization
       await this.initializeBotInfo(this.config);
 
-      // Start thread response consumer (after event handlers are created)
       if (this.threadResponseConsumer) {
         await this.threadResponseConsumer.start();
-        logger.info("✅ Thread response consumer started");
       }
 
       // We'll test auth after starting the server
@@ -257,25 +255,8 @@ export class SlackDispatcher {
           }
         });
       } else {
-        // In socket mode, add connection event handlers first
-        logger.info("Socket Mode debugging - checking client availability");
-        logger.info(
-          "App receiver type:",
-          (this.app as any).receiver?.constructor.name
-        );
-        logger.info(
-          "Socket Mode client exists:",
-          !!(this.app as any).receiver?.client
-        );
-
         const socketModeClient = (this.app as any).receiver?.client;
         if (socketModeClient) {
-          logger.info("Setting up Socket Mode event handlers...");
-          logger.info(
-            "Socket Mode client type:",
-            socketModeClient.constructor.name
-          );
-
           // Circuit breaker: detect reconnection loops and exit
           let connectionCount = 0;
           let lastConnectionTime = Date.now();
@@ -428,7 +409,6 @@ export class SlackDispatcher {
           // Wait for connection or timeout
           await connectionPromise.catch((error) => {
             logger.warn("Socket Mode connection warning:", error.message);
-            // Don't throw here - the client might still connect
           });
 
           // Give it a moment to stabilize

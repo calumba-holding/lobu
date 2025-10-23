@@ -51,8 +51,6 @@ export class MessageConsumer {
               },
             },
             async () => {
-              logger.info("=== REDIS JOB RECEIVED ===");
-              logger.info("Raw job:", JSON.stringify(job, null, 2));
               return this.handleMessage(job);
             }
           );
@@ -81,13 +79,10 @@ export class MessageConsumer {
   private async handleMessage(
     job: SharedQueueJob<QueueJobData>
   ): Promise<void> {
-    logger.info("=== ORCHESTRATOR RECEIVED JOB ===");
-
     const data = job?.data;
     const jobId = job?.id || "unknown";
 
     logger.info("Processing job:", jobId);
-    logger.info("Job data:", JSON.stringify(data, null, 2));
 
     logger.info(
       `Processing message job ${jobId} for user ${data?.userId}, thread ${data?.threadId}`

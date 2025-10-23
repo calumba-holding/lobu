@@ -318,7 +318,7 @@ export class ActionHandler {
           type: "mrkdwn",
           text:
             "*💡 Quick Tips:*\n" +
-            "• Mention @_peerbot in any channel or DM me directly\n" +
+            "• Mention me in any channel or DM me directly\n" +
             "• Ask questions about code, create features, or fix bugs\n" +
             "• Use `/peerbot help` for all commands",
         },

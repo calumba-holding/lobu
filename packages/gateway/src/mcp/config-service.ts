@@ -132,12 +132,15 @@ export class McpConfigService {
 
       if (httpServer) {
         // Configure HTTP MCP - send ALL MCPs regardless of auth status
-        const proxiedUrl = buildProxyUrl(baseUrl, id);
-        cloned.url = proxiedUrl;
+        // Since Claude Code HTTP transport strips paths, use root URL with X-Mcp-Id header
+        logger.info(`🔧 Configuring MCP ${id}: baseUrl=${baseUrl}`);
+        cloned.url = baseUrl; // Use base URL only (e.g., http://gateway:8080)
         cloned.type = "sse"; // Mark as SSE server for SDK
-        cloned.headers = mergeHeaders(cloned.headers, workerToken);
+        cloned.headers = mergeHeaders(cloned.headers, workerToken, id);
 
-        logger.debug(`Including MCP ${id} for user ${userId}`);
+        logger.info(
+          `✅ Including MCP ${id} with URL=${cloned.url} and X-Mcp-Id header`
+        );
       }
 
       workerConfig.mcpServers[id] = cloned;
@@ -183,7 +186,7 @@ export class McpConfigService {
       let authenticated = false;
       if (requiresAuth && this.credentialStore) {
         const credentials = await this.credentialStore.get(userId, id);
-        authenticated = !!(credentials && credentials.accessToken);
+        authenticated = !!credentials?.accessToken;
       }
 
       // Check configuration status
@@ -253,6 +256,13 @@ export class McpConfigService {
   async getAllDiscoveredOAuth(): Promise<Map<string, DiscoveredOAuthMetadata>> {
     const config = await this.loadConfig();
     return config.discoveredOAuth || new Map();
+  }
+
+  /**
+   * Get the OAuth discovery service
+   */
+  getDiscoveryService(): McpOAuthDiscoveryService | undefined {
+    return this.discoveryService;
   }
 
   /**
@@ -509,28 +519,14 @@ function cloneConfig(config: any) {
   return JSON.parse(JSON.stringify(config));
 }
 
-function buildProxyUrl(baseUrl: string, id: string) {
-  const url = new URL(
-    `/mcp/${encodeURIComponent(id)}`,
-    ensureTrailingSlash(baseUrl)
-  );
-  return url.toString();
-}
-
-function ensureTrailingSlash(baseUrl: string): string {
-  if (!baseUrl.endsWith("/")) {
-    return `${baseUrl}/`;
-  }
-  return baseUrl;
-}
-
 function isHttpUrl(candidate: string): boolean {
   return candidate.startsWith("http://") || candidate.startsWith("https://");
 }
 
 function mergeHeaders(
   existingHeaders: unknown,
-  workerToken: string
+  workerToken: string,
+  mcpId: string
 ): Record<string, string> {
   const normalized: Record<string, string> = {};
 
@@ -545,5 +541,6 @@ function mergeHeaders(
   }
 
   normalized.Authorization = `Bearer ${workerToken}`;
+  normalized["X-Mcp-Id"] = mcpId; // Add MCP identifier header
   return normalized;
 }

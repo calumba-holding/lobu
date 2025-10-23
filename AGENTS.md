@@ -96,7 +96,7 @@ https://buraks-macbook-pro.brill-kanyu.ts.net/mcp/oauth/callback
         "authUrl": "https://github.com/login/oauth/authorize",
         "tokenUrl": "https://github.com/login/oauth/access_token",
         "clientId": "YOUR_GITHUB_CLIENT_ID",
-        "clientSecretEnv": "GITHUB_CLIENT_SECRET",
+        "clientSecret": "${env:GITHUB_CLIENT_SECRET}",
         "scopes": ["repo", "read:user"],
         "grantType": "authorization_code",
         "responseType": "code"
@@ -108,13 +108,12 @@ https://buraks-macbook-pro.brill-kanyu.ts.net/mcp/oauth/callback
         "authUrl": "https://accounts.google.com/o/oauth2/v2/auth",
         "tokenUrl": "https://oauth2.googleapis.com/token",
         "clientId": "YOUR_GOOGLE_CLIENT_ID",
-        "clientSecretEnv": "GOOGLE_CLIENT_SECRET",
+        "clientSecret": "${env:GOOGLE_CLIENT_SECRET}",
         "scopes": ["https://www.googleapis.com/auth/userinfo.profile"]
       }
     }
   }
 }
-```
 
 **Option B: Simple Login URL (Basic)**
 ```json

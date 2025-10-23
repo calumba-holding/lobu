@@ -344,10 +344,9 @@ export class McpOAuthModule extends BaseModule {
         // Check OAuth credentials (works for static and discovered OAuth)
         authType = hasOAuth ? "oauth" : "discovered-oauth";
         const credentials = await this.credentialStore.get(userId, id);
-        isAuthenticated = !!(
-          credentials?.accessToken &&
-          (!credentials.expiresAt || credentials.expiresAt > Date.now())
-        );
+        // Show as authenticated if credentials exist, even if expired
+        // Auto-refresh will handle expired tokens when MCP is used
+        isAuthenticated = !!credentials?.accessToken;
         metadata = credentials?.metadata;
       } else {
         // Input-based authentication
@@ -535,23 +534,61 @@ export class McpOAuthModule extends BaseModule {
             `Using discovered OAuth for ${mcpId} from ${discoveredOAuth.metadata.issuer}`
           );
 
-          // Use cached client credentials
-          const clientId = discoveredOAuth.clientCredentials?.client_id;
-          const clientSecret = discoveredOAuth.clientCredentials?.client_secret;
-
-          if (!clientId) {
+          // Get or create client credentials via dynamic registration
+          const discoveryService = this.configService.getDiscoveryService();
+          if (!discoveryService) {
             res
-              .status(400)
-              .json({ error: "OAuth client not registered for this MCP" });
+              .status(500)
+              .json({ error: "OAuth discovery service not available" });
             return;
           }
+
+          const clientCredentials =
+            await discoveryService.getOrCreateClientCredentials(
+              mcpId,
+              discoveredOAuth.metadata
+            );
+
+          if (!clientCredentials?.client_id) {
+            // Check if MCP supports dynamic registration
+            const hasRegistrationEndpoint =
+              !!discoveredOAuth.metadata.registration_endpoint;
+
+            if (!hasRegistrationEndpoint) {
+              logger.warn(
+                `MCP ${mcpId} does not support dynamic client registration (RFC 7591)`
+              );
+              res.status(400).json({
+                error: `${this.formatMcpName(mcpId)} requires manual OAuth app setup`,
+                details: `This MCP does not support automatic client registration. Please:
+1. Create an OAuth app at the provider's website
+2. Configure the OAuth client ID and secret in your MCP configuration
+3. Add the callback URL: ${this.getCallbackUrl()}`,
+              });
+            } else {
+              logger.error(
+                `Failed to register OAuth client for ${mcpId} despite having registration endpoint`
+              );
+              res.status(400).json({
+                error: "Failed to register OAuth client for this MCP",
+                details:
+                  "Dynamic registration failed. Check server logs for details.",
+              });
+            }
+            return;
+          }
+
+          logger.info(`Using client credentials for ${mcpId}`, {
+            client_id: clientCredentials.client_id,
+            has_secret: !!clientCredentials.client_secret,
+          });
 
           // Build OAuth config from discovered metadata
           oauthConfig = {
             authUrl: discoveredOAuth.metadata.authorization_endpoint,
             tokenUrl: discoveredOAuth.metadata.token_endpoint,
-            clientId: clientId,
-            clientSecret: clientSecret || "",
+            clientId: clientCredentials.client_id,
+            clientSecret: clientCredentials.client_secret || "",
             scopes: discoveredOAuth.metadata.scopes_supported || [],
             grantType: "authorization_code",
             responseType: "code",
@@ -659,16 +696,12 @@ export class McpOAuthModule extends BaseModule {
         };
       }
 
-      // Store credentials
-      const ttl = credentials.expiresAt
-        ? Math.floor((credentials.expiresAt - Date.now()) / 1000)
-        : 3600;
-
+      // Store credentials without TTL to preserve refresh token
+      // Even if access token expires, we keep credentials so we can refresh
       await this.credentialStore.set(
         stateData.userId,
         stateData.mcpId,
-        credentials,
-        ttl
+        credentials
       );
 
       logger.info(

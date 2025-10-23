@@ -367,8 +367,7 @@ export class ThreadResponseConsumer {
       const existingBotMessageTs = data.botResponseTs || redisBotMessageTs;
       const isFirstResponse = !existingBotMessageTs;
 
-      // Handle streaming delta FIRST before status updates
-      // This is critical because setThreadStatus interferes with chatStream
+      // Handle streaming delta
       if (data.isStreamDelta && data.delta) {
         logger.info(
           `Processing stream delta length=${data.delta.length} for session ${sessionKey}, isFullReplacement=${data.isFullReplacement || false}`
@@ -383,11 +382,10 @@ export class ThreadResponseConsumer {
           data.isFullReplacement || false,
           data.teamId
         );
-        // Don't set status when streaming - it interferes with chatStream
-        return;
+        // Continue to apply status updates - assistant threads API supports both streaming and status
       }
 
-      // Apply status update if provided (only when NOT streaming)
+      // Apply status update if provided (works alongside streaming)
       if (data.statusUpdate) {
         logger.info(
           `Setting thread status to: "${data.statusUpdate.status}" for thread ${data.threadTs}`
@@ -398,6 +396,11 @@ export class ThreadResponseConsumer {
           data.statusUpdate.status,
           data.statusUpdate.loadingMessages
         );
+      }
+
+      // Early return after stream delta if no other content to process
+      if (data.isStreamDelta && !data.content && !data.error) {
+        return;
       }
 
       // Handle message content

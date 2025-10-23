@@ -3,11 +3,14 @@ import type { Request, Response } from "express";
 import type { McpCredentialStore } from "./credential-store";
 import type { McpConfigService } from "./config-service";
 import type { McpInputStore } from "./input-store";
-import { substituteObject } from "./string-substitution";
+import { OAuth2Client } from "./oauth-client";
 
 const logger = createLogger("mcp-proxy");
 
 export class McpProxy {
+  private readonly sessions = new Map<string, string>(); // userId:mcpId -> sessionId
+  private readonly oauth2Client = new OAuth2Client();
+
   constructor(
     private readonly configService: McpConfigService,
     private readonly credentialStore: McpCredentialStore,
@@ -15,6 +18,30 @@ export class McpProxy {
   ) {}
 
   setupRoutes(app: any) {
+    // Handle MCP HTTP protocol endpoints (Claude Code HTTP transport)
+    // Claude Code HTTP transport POSTs to the exact URL configured
+    // Since we configure http://gateway:8080, it POSTs to http://gateway:8080/
+    // We use X-Mcp-Id header to identify which MCP server
+
+    // Main endpoint - Claude Code POSTs JSON-RPC to root path
+    app.all("/", (req: Request, res: Response, next: any) => {
+      // Only handle requests with X-Mcp-Id header as MCP proxy requests
+      if (req.headers["x-mcp-id"]) {
+        return this.handleProxyRequest(req, res);
+      }
+      // Pass through other requests to next handler
+      next();
+    });
+
+    // Legacy endpoints (if needed for other MCP transports)
+    app.all("/register", (req: Request, res: Response) =>
+      this.handleProxyRequest(req, res)
+    );
+    app.all("/message", (req: Request, res: Response) =>
+      this.handleProxyRequest(req, res)
+    );
+
+    // Path-based routes (for SSE or other transports)
     app.all("/mcp/:mcpId", (req: Request, res: Response) =>
       this.handleProxyRequest(req, res)
     );
@@ -24,8 +51,21 @@ export class McpProxy {
   }
 
   private async handleProxyRequest(req: Request, res: Response) {
-    const { mcpId } = req.params;
+    // Extract MCP ID from either URL path or X-Mcp-Id header
+    const mcpId = req.params.mcpId || (req.headers["x-mcp-id"] as string);
     const sessionToken = this.extractSessionToken(req);
+
+    logger.info("Handling MCP proxy request", {
+      method: req.method,
+      path: req.path,
+      mcpId,
+      hasSessionToken: !!sessionToken,
+    });
+
+    if (!mcpId) {
+      res.status(400).json({ error: "missing_mcp_id" });
+      return;
+    }
 
     if (!sessionToken) {
       res.status(401).json({ error: "missing_token" });
@@ -48,8 +88,13 @@ export class McpProxy {
     let credentials = null;
     let inputValues = null;
 
-    // Try OAuth credentials first
-    if (httpServer.oauth) {
+    // Check if MCP requires OAuth (static or discovered)
+    const hasOAuth = !!httpServer.oauth;
+    const discoveredOAuth = await this.configService.getDiscoveredOAuth(mcpId!);
+    const hasDiscoveredOAuth = !!discoveredOAuth;
+
+    // Try OAuth credentials first (supports both static and discovered OAuth)
+    if (hasOAuth || hasDiscoveredOAuth) {
       credentials = await this.credentialStore.get(tokenData.userId, mcpId!);
 
       if (!credentials || !credentials.accessToken) {
@@ -65,16 +110,95 @@ export class McpProxy {
         return;
       }
 
+      // Check if token is expired and attempt refresh
       if (credentials.expiresAt && credentials.expiresAt <= Date.now()) {
-        logger.warn("MCP credentials expired", {
+        logger.info("MCP access token expired, attempting refresh", {
           userId: tokenData.userId,
           mcpId,
+          hasRefreshToken: !!credentials.refreshToken,
         });
-        res.status(401).json({
-          error: "token_expired",
-          message: "OAuth token expired. Please re-authenticate via home tab.",
-        });
-        return;
+
+        if (credentials.refreshToken) {
+          try {
+            // Get OAuth config (static or discovered)
+            let oauthConfig = httpServer.oauth;
+
+            if (!oauthConfig && discoveredOAuth?.metadata) {
+              // Build OAuth config from discovered metadata
+              const discoveryService = this.configService.getDiscoveryService();
+              if (!discoveryService) {
+                throw new Error("OAuth discovery service not available");
+              }
+
+              const clientCredentials =
+                await discoveryService.getOrCreateClientCredentials(
+                  mcpId!,
+                  discoveredOAuth.metadata
+                );
+
+              if (!clientCredentials?.client_id) {
+                throw new Error("Failed to get client credentials for refresh");
+              }
+
+              oauthConfig = {
+                authUrl: discoveredOAuth.metadata.authorization_endpoint,
+                tokenUrl: discoveredOAuth.metadata.token_endpoint,
+                clientId: clientCredentials.client_id,
+                clientSecret: clientCredentials.client_secret || "",
+                scopes: discoveredOAuth.metadata.scopes_supported || [],
+                grantType: "authorization_code",
+                responseType: "code",
+              };
+            }
+
+            if (!oauthConfig) {
+              throw new Error("No OAuth config available for refresh");
+            }
+
+            // Attempt to refresh the token
+            const refreshedCredentials = await this.oauth2Client.refreshToken(
+              credentials.refreshToken,
+              oauthConfig
+            );
+
+            // Store the new credentials (without TTL)
+            await this.credentialStore.set(
+              tokenData.userId,
+              mcpId!,
+              refreshedCredentials
+            );
+
+            // Use the refreshed credentials
+            credentials = refreshedCredentials;
+
+            logger.info("Successfully refreshed MCP access token", {
+              userId: tokenData.userId,
+              mcpId,
+            });
+          } catch (error) {
+            logger.error("Failed to refresh MCP access token", {
+              error,
+              userId: tokenData.userId,
+              mcpId,
+            });
+            res.status(401).json({
+              error: "token_refresh_failed",
+              message:
+                "Failed to refresh expired token. Please re-authenticate via home tab.",
+            });
+            return;
+          }
+        } else {
+          logger.warn("MCP credentials expired with no refresh token", {
+            userId: tokenData.userId,
+            mcpId,
+          });
+          res.status(401).json({
+            error: "token_expired",
+            message: "Token expired. Please re-authenticate via home tab.",
+          });
+          return;
+        }
       }
     }
 
@@ -97,13 +221,14 @@ export class McpProxy {
     }
 
     try {
-      await this.forwardRequest(
+      await this.forwardRequestWithProtocolTranslation(
         req,
         res,
-        httpServer.upstreamUrl,
         httpServer,
         credentials,
-        inputValues || {}
+        inputValues || {},
+        tokenData.userId,
+        mcpId!
       );
     } catch (error) {
       logger.error("Failed to proxy MCP request", { error, mcpId });
@@ -132,136 +257,98 @@ export class McpProxy {
     return null;
   }
 
-  private async forwardRequest(
+  private async forwardRequestWithProtocolTranslation(
     req: Request,
     res: Response,
-    upstreamBaseUrl: string,
     httpServer: any,
     credentials: { accessToken: string; tokenType?: string } | null,
-    inputValues: Record<string, string>
+    _inputValues: Record<string, string>,
+    userId: string,
+    mcpId: string
   ): Promise<void> {
-    const upstreamUrl = this.buildUpstreamUrl(req, upstreamBaseUrl);
-    const headers = this.buildUpstreamHeaders(
-      req,
-      httpServer,
-      credentials,
-      inputValues
-    );
-    const body = this.getRequestBody(req);
+    const sessionKey = `${userId}:${mcpId}`;
+    const sessionId = this.sessions.get(sessionKey);
 
-    const response = await fetch(upstreamUrl, {
+    // Get request body
+    const bodyText = await this.getRequestBodyAsText(req);
+
+    logger.info("Proxying MCP request", {
+      mcpId,
+      userId,
       method: req.method,
-      headers,
-      body,
-      redirect: "manual",
+      hasSession: !!sessionId,
+      bodyLength: bodyText.length,
     });
 
-    res.status(response.status);
-    response.headers.forEach((value, key) => {
-      if (key.toLowerCase() === "content-length") {
-        return;
-      }
-      res.setHeader(key, value);
-    });
+    // Build headers for upstream request
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
+    };
 
-    if (!response.body) {
-      res.end();
-      return;
+    // Add session ID if we have one
+    if (sessionId) {
+      headers["Mcp-Session-Id"] = sessionId;
     }
 
-    const reader = response.body.getReader();
+    // Add OAuth token if provided
+    if (credentials?.accessToken) {
+      headers.Authorization = `Bearer ${credentials.accessToken}`;
+    }
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
-      }
-      if (value) {
-        res.write(typeof value === "string" ? value : Buffer.from(value));
+    // Forward to upstream MCP - stream response directly back
+    const response = await fetch(httpServer.upstreamUrl, {
+      method: req.method,
+      headers,
+      body: bodyText || undefined,
+    });
+
+    // Extract and store session ID from response
+    const newSessionId = response.headers.get("Mcp-Session-Id");
+    if (newSessionId) {
+      this.sessions.set(sessionKey, newSessionId);
+      logger.debug("Stored MCP session ID", {
+        mcpId,
+        userId,
+        sessionId: newSessionId,
+      });
+    }
+
+    // Stream response back to Claude Code
+    const contentType = response.headers.get("content-type");
+    if (contentType) {
+      res.setHeader("Content-Type", contentType);
+    }
+    if (newSessionId) {
+      res.setHeader("Mcp-Session-Id", newSessionId);
+    }
+
+    res.status(response.status);
+
+    // Stream the response body
+    if (response.body) {
+      const reader = response.body.getReader();
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          res.write(value);
+        }
+      } finally {
+        reader.releaseLock();
       }
     }
 
     res.end();
   }
 
-  private buildUpstreamUrl(req: Request, upstreamBaseUrl: string): string {
-    const baseUrl = new URL(upstreamBaseUrl);
-    const remainder = (req.params as any)[0]
-      ? `/${(req.params as any)[0]}`
-      : "";
-    baseUrl.pathname = joinPaths(baseUrl.pathname, remainder);
-
-    const searchParams = new URLSearchParams();
-    for (const [key, value] of Object.entries(req.query)) {
-      if (key === "workerToken") {
-        continue;
-      }
-      if (Array.isArray(value)) {
-        for (const entry of value) {
-          if (entry !== undefined) {
-            searchParams.append(key, String(entry));
-          }
-        }
-      } else if (value !== undefined) {
-        searchParams.append(key, String(value));
-      }
-    }
-
-    baseUrl.search = searchParams.toString();
-    return baseUrl.toString();
-  }
-
-  private buildUpstreamHeaders(
-    req: Request,
-    httpServer: any,
-    credentials: { accessToken: string; tokenType?: string } | null,
-    inputValues: Record<string, string>
-  ): Record<string, string> {
-    const headers: Record<string, string> = {};
-
-    // Copy request headers (excluding sensitive ones)
-    for (const [key, value] of Object.entries(req.headers)) {
-      const lowerKey = key.toLowerCase();
-      if (
-        lowerKey === "host" ||
-        lowerKey === "content-length" ||
-        lowerKey === "authorization"
-      ) {
-        continue; // Skip these - we'll set them explicitly
-      }
-      if (Array.isArray(value)) {
-        headers[key] = value.join(",");
-      } else if (typeof value === "string") {
-        headers[key] = value;
-      }
-    }
-
-    // Apply headers from MCP server config (with placeholder substitution)
-    if (httpServer.headers && typeof httpServer.headers === "object") {
-      const substitutedHeaders = substituteObject(
-        httpServer.headers,
-        inputValues
-      );
-      Object.assign(headers, substitutedHeaders);
-    }
-
-    // Set OAuth authorization header if available
-    if (credentials) {
-      headers.authorization = `${
-        credentials.tokenType || "Bearer"
-      } ${credentials.accessToken}`;
-    }
-
-    return headers;
-  }
-
-  private getRequestBody(req: Request): string | Buffer | undefined {
+  private async getRequestBodyAsText(req: Request): Promise<string> {
     if (req.method === "GET" || req.method === "HEAD") {
-      return undefined;
+      return "";
     }
 
     if (Buffer.isBuffer(req.body)) {
-      return req.body;
+      return req.body.toString("utf-8");
     }
 
     if (typeof req.body === "string") {
@@ -272,15 +359,6 @@ export class McpProxy {
       return JSON.stringify(req.body);
     }
 
-    return undefined;
+    return "";
   }
-}
-
-function joinPaths(basePath: string, suffix: string): string {
-  const trimmedBase = basePath.endsWith("/") ? basePath.slice(0, -1) : basePath;
-  if (!suffix) {
-    return trimmedBase || "/";
-  }
-  const extra = suffix.startsWith("/") ? suffix : `/${suffix}`;
-  return `${trimmedBase}${extra}`;
 }

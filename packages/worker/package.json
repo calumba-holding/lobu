@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.1.19",
+    "@anthropic-ai/claude-agent-sdk": "^0.1.25",
     "@peerbot/core": "workspace:*"
   },
   "devDependencies": {

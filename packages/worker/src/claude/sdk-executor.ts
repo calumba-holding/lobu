@@ -96,12 +96,14 @@ async function getMCPServersForSDK(): Promise<Record<string, any> | undefined> {
 
     for (const [name, config] of Object.entries(data.mcpServers)) {
       if (config.type === "sse" && config.url) {
-        // SSE server
+        // HTTP MCP server - uses X-Mcp-Id header for routing
+        // Claude Code HTTP transport will POST to /register, /message, etc.
         sdkServers[name] = {
+          type: "http",
           url: config.url,
-          headers: config.headers || {}, // Include auth headers from gateway
+          headers: config.headers || {},
         };
-        logger.info(`Including SSE MCP server: ${name}`);
+        logger.info(`Including HTTP MCP server: ${name}`);
       } else if (config.command) {
         // stdio server
         sdkServers[name] = {
@@ -156,6 +158,14 @@ export async function runClaudeWithSDK(
       model: options.model,
       workingDirectory: workingDirectory || process.cwd(),
       permissionMode: "bypassPermissions", // Non-interactive mode
+      env: {
+        ...process.env,
+        DEBUG: "1", // Enable debug output for crash investigation
+      },
+      stderr: (message: string) => {
+        // Log stderr output for debugging crashes
+        logger.error(`[Claude CLI stderr] ${message}`);
+      },
       // TODO: Re-enable thinking once we verify SDK version supports it
       // maxThinkingTokens: 5000,
     };

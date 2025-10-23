@@ -33,24 +33,14 @@ services:
       HOST_PROJECT_PATH: ${PWD}
       PEERBOT_MCP_SERVERS_FILE: ${PEERBOT_MCP_SERVERS_FILE:-examples/mcp/oauth.json}
       PEERBOT_PUBLIC_GATEWAY_URL: ${PEERBOT_PUBLIC_GATEWAY_URL}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
     volumes:
       # Mount Docker socket for Docker mode
       - /var/run/docker.sock:/var/run/docker.sock
       # Persistent env storage
       - env_storage:/app/.peerbot/env
-      # HOT RELOAD: Mount entire packages directory for live changes
-      - ./packages:/app/packages
-      # Mount TypeScript config
-      - ./tsconfig.json:/app/tsconfig.json:ro
       # Mount MCP config for live editing
       - ./examples:/app/examples:ro
-      # Use anonymous volumes for node_modules to prevent conflicts with host
-      - /app/packages/gateway/node_modules
-      - /app/packages/core/node_modules
-      - /app/packages/github/node_modules
-      - /app/node_modules
-    working_dir: /app
-    command: bun --watch /app/packages/gateway/src/index.ts
     ports:
       - "3000:3000"
       - "8080:8080"  # OAuth and health endpoints

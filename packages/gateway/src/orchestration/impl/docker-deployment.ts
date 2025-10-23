@@ -149,6 +149,8 @@ export class DockerDeploymentManager extends BaseDeploymentManager {
         `ANTHROPIC_API_KEY=${username}:`,
         // Pass NODE_ENV to worker container
         `NODE_ENV=${process.env.NODE_ENV || "production"}`,
+        // Enable SDK debugging for crash investigation
+        "DEBUG=1",
         // Convert common environment variables to Docker format
         ...Object.entries(commonEnvVars).map(
           ([key, value]) => `${key}=${value}`
