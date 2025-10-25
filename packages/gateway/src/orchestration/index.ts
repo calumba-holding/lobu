@@ -1,16 +1,14 @@
 export * from "./impl";
 export { MessageConsumer as QueueConsumer } from "./message-consumer";
-export * from "./types";
+export * from "./deployment-utils";
+export * from "./base-deployment-manager";
 
-import {
-  type BaseDeploymentManager,
-  createLogger,
-  moduleRegistry,
-  type OrchestratorConfig,
-} from "@peerbot/core";
+import { createLogger, moduleRegistry } from "@peerbot/core";
+import type { OrchestratorConfig } from "./base-deployment-manager";
 import { buildModuleEnvVars } from "./deployment-utils";
 import { DockerDeploymentManager, K8sDeploymentManager } from "./impl";
 import { MessageConsumer } from "./message-consumer";
+import type { BaseDeploymentManager } from "./base-deployment-manager";
 
 const logger = createLogger("orchestrator");
 
@@ -179,11 +177,5 @@ export class Orchestrator {
   }
 }
 
-export type {
-  BaseDeploymentManager,
-  DeploymentInfo,
-  generateDeploymentName,
-  ModuleEnvVarsBuilder,
-  OrchestratorConfig,
-  QueueJobData,
-} from "@peerbot/core";
+// Re-export orchestration types for convenience
+export type { generateDeploymentName } from "./base-deployment-manager";

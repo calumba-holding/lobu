@@ -1,16 +1,15 @@
 import path from "node:path";
+import { createLogger, ErrorCode, OrchestratorError } from "@peerbot/core";
+import Docker from "dockerode";
 import {
   BaseDeploymentManager,
-  createLogger,
   type DeploymentInfo,
-  ErrorCode,
   type ModuleEnvVarsBuilder,
   type OrchestratorConfig,
-  OrchestratorError,
   type QueueJobData,
-} from "@peerbot/core";
-import Docker from "dockerode";
+} from "../base-deployment-manager";
 import { buildPlatformMetadata, ResourceParser } from "../deployment-utils";
+import { platformRegistry } from "../../platform";
 
 const logger = createLogger("orchestrator");
 
@@ -174,14 +173,21 @@ export class DockerDeploymentManager extends BaseDeploymentManager {
           "com.docker.compose.service": deploymentName, // Use unique service name
           "com.docker.compose.oneoff": "False",
           // Add platform-specific metadata
-          ...(messageData?.channelId &&
+          ...(messageData?.platform &&
+          messageData?.channelId &&
           messageData?.threadId &&
-          messageData?.platformMetadata?.teamId
-            ? buildPlatformMetadata(
-                messageData.threadId,
-                messageData.channelId,
-                messageData.platformMetadata.teamId
-              )
+          messageData?.platformMetadata
+            ? (() => {
+                const platform = platformRegistry.get(messageData.platform);
+                return platform
+                  ? buildPlatformMetadata(
+                      platform,
+                      messageData.threadId,
+                      messageData.channelId,
+                      messageData.platformMetadata
+                    )
+                  : {};
+              })()
             : {}),
         },
         HostConfig: {

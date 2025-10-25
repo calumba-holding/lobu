@@ -14,8 +14,8 @@ COPY packages/core/package.json ./packages/core/
 COPY packages/github/package.json ./packages/github/
 COPY packages/gateway/package.json ./packages/gateway/
 
-# Install dependencies for gateway + core + github only
-# Allow one package to fail (likely a post install script) but keep all other packages
+# Install dependencies for gateway + core + github
+# Allow some packages to fail (post-install scripts) but keep others
 RUN --mount=type=cache,target=/root/.bun/install/cache bun install || true
 
 # Copy source code
@@ -32,6 +32,7 @@ WORKDIR /app/packages/github
 RUN bun run build
 
 # Build gateway - Skip build due to pre-existing type errors, run from source
+# Gateway build has type errors that are pre-existing
 WORKDIR /app/packages/gateway
 # RUN bun run build
 

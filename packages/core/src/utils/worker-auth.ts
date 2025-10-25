@@ -13,6 +13,8 @@ export interface WorkerTokenData {
   threadId: string;
   deploymentName: string;
   timestamp: number;
+  platform?: string;
+  sessionKey?: string;
 }
 
 /**
@@ -21,7 +23,8 @@ export interface WorkerTokenData {
 export function generateWorkerToken(
   userId: string,
   threadId: string,
-  deploymentName: string
+  deploymentName: string,
+  options: { platform?: string; sessionKey?: string } = {}
 ): string {
   const timestamp = Date.now();
   const payload = JSON.stringify({
@@ -29,6 +32,8 @@ export function generateWorkerToken(
     threadId,
     deploymentName,
     timestamp,
+    platform: options.platform,
+    sessionKey: options.sessionKey,
   });
 
   // Encrypt the payload

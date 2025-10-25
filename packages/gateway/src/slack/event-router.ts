@@ -1,21 +1,25 @@
 #!/usr/bin/env bun
 
 import { createLogger } from "@peerbot/core";
+import type { IModuleRegistry } from "@peerbot/core";
+import type { ISessionManager } from "../session";
+import type { QueueProducer } from "../infrastructure/queue";
 import type { App } from "@slack/bolt";
+import type {
+  GenericMessageEvent,
+  FileSharedEvent,
+  FileDeletedEvent,
+} from "@slack/types";
 
 const logger = createLogger("slack-events");
-
-import type { createMessageQueue, IModuleRegistry } from "@peerbot/core";
-import type { GatewayConfig } from "../cli/config";
-import type { QueueProducer } from "../session/queue-producer";
-import { RedisSessionStore, SessionManager } from "../session/session-manager";
+import type { MessageHandlerConfig } from "./config";
 import { ActionHandler } from "./events/actions";
 import { handleBlockkitFormSubmission } from "./events/forms";
 import { MessageHandler } from "./events/messages";
 import { ShortcutCommandHandler } from "./events/shortcuts";
 import { setupTeamJoinHandler } from "./events/welcome";
-import type { SlackContext, SlackWebClient } from "./types";
-import { isSelfGeneratedEvent } from "./utils/event-filters";
+import type { SlackContext, WebClient } from "./types";
+import { isSelfGeneratedEvent } from "./utils";
 
 /**
  * Queue-based Slack event handlers that route messages to appropriate queues
@@ -25,18 +29,18 @@ export class SlackEventHandlers {
   private messageHandler: MessageHandler;
   private actionHandler: ActionHandler;
   private shortcutCommandHandler: ShortcutCommandHandler;
-  private sessionManager: SessionManager;
+  private sessionManager: ISessionManager;
+  private config: MessageHandlerConfig;
 
   constructor(
     private app: App,
     queueProducer: QueueProducer,
-    private config: GatewayConfig,
+    config: MessageHandlerConfig,
     private moduleRegistry: IModuleRegistry,
-    queue: ReturnType<typeof createMessageQueue>
+    sessionManager: ISessionManager
   ) {
-    // Initialize session manager with Redis store using the provided started queue
-    const sessionStore = new RedisSessionStore(queue);
-    this.sessionManager = new SessionManager(sessionStore);
+    this.config = config;
+    this.sessionManager = sessionManager;
 
     // Initialize specialized handlers
     this.messageHandler = new MessageHandler(
@@ -62,14 +66,14 @@ export class SlackEventHandlers {
 
     // Setup message event handlers
     this.app.event("message", async ({ event }) => {
-      const messageEvent = event as any;
+      const messageEvent = event as GenericMessageEvent;
 
       // Handle message edits
       if (messageEvent.subtype === "message_changed") {
         logger.debug("Message changed", {
           channel: messageEvent.channel,
           ts: messageEvent.ts,
-          user: messageEvent.message?.user,
+          user: messageEvent.user,
         });
       }
 
@@ -77,42 +81,49 @@ export class SlackEventHandlers {
       if (messageEvent.subtype === "message_deleted") {
         logger.debug("Message deleted", {
           channel: messageEvent.channel,
-          ts: messageEvent.deleted_ts,
+          ts: messageEvent.ts,
         });
       }
     });
 
     // Setup file event handlers
     this.app.event("file_shared", async ({ event }) => {
+      const fileEvent = event as FileSharedEvent;
       logger.debug("File shared", {
-        channel: (event as any).channel_id,
-        fileId: (event as any).file_id,
-        user: (event as any).user_id,
+        channel: fileEvent.channel_id,
+        fileId: fileEvent.file_id,
+        user: fileEvent.user_id,
       });
     });
 
     this.app.event("file_deleted", async ({ event }) => {
+      const fileEvent = event as FileDeletedEvent;
       logger.debug("File deleted", {
-        fileId: (event as any).file_id,
+        fileId: fileEvent.file_id,
       });
     });
 
     // Setup user event handlers
     this.app.event("team_join", async ({ event }) => {
+      const teamJoinEvent = event as { user?: { id: string } };
       logger.debug("Team join", {
-        user: (event as any).user?.id,
+        user: teamJoinEvent.user?.id,
       });
     });
 
     this.app.event("presence_change", async ({ event }) => {
+      const presenceEvent = event as unknown as {
+        user: string;
+        presence: string;
+      };
       logger.debug("Presence change", {
-        user: (event as any).user,
-        presence: (event as any).presence,
+        user: presenceEvent.user,
+        presence: presenceEvent.presence,
       });
     });
 
     this.app.event("member_joined_channel", async ({ event, client }) => {
-      const memberEvent = event as any;
+      const memberEvent = event as { user: string; channel: string };
       logger.debug("Member joined channel", {
         user: memberEvent.user,
         channel: memberEvent.channel,
@@ -136,7 +147,7 @@ export class SlackEventHandlers {
         await this.shortcutCommandHandler.sendContextAwareWelcome(
           memberEvent.user,
           memberEvent.channel,
-          client
+          client as WebClient
         );
       } catch (error) {
         logger.error("Failed to send welcome message:", error);
@@ -149,7 +160,7 @@ export class SlackEventHandlers {
       (
         userId: string,
         channelId: string,
-        client: SlackWebClient,
+        client: WebClient,
         threadTs?: string
       ) =>
         this.shortcutCommandHandler.sendContextAwareWelcome(
@@ -190,8 +201,9 @@ export class SlackEventHandlers {
     this.app.event("app_mention", async ({ event, client, say }) => {
       // Ignore mentions generated by our own bot only (not other bots)
       if (isSelfGeneratedEvent(event, this.config)) {
+        const eventWithBotId = event as { bot_id?: string };
         logger.debug(
-          `Ignoring self-generated app_mention (bot_id=${(event as any).bot_id}, user=${event.user})`
+          `Ignoring self-generated app_mention (bot_id=${eventWithBotId.bot_id}, user=${event.user})`
         );
         return;
       }
@@ -224,15 +236,21 @@ export class SlackEventHandlers {
           "welcome",
           event.user || "",
           event.channel,
-          client,
+          client as WebClient,
           event.thread_ts || event.ts
         );
         return;
       }
 
       // Normal message processing
-      const context = this.messageHandler.extractSlackContext(event);
-      await this.messageHandler.handleUserRequest(context, userRequest, client);
+      const context = this.messageHandler.extractSlackContext(
+        event as unknown as SlackMessageEvent
+      );
+      await this.messageHandler.handleUserRequest(
+        context,
+        userRequest,
+        client as WebClient
+      );
     });
   }
 
@@ -243,7 +261,7 @@ export class SlackEventHandlers {
     logger.info("Registering direct message handler");
 
     this.app.message(async ({ message, client }) => {
-      const event = message as any;
+      const event = message as GenericMessageEvent;
 
       // Log all message events for debugging
       logger.info(
@@ -261,8 +279,9 @@ export class SlackEventHandlers {
       if (!message.subtype && isDM) {
         // Ignore messages generated by our own bot only (not other bots)
         if (isSelfGeneratedEvent(event, this.config)) {
+          const eventWithBotId = event as { bot_id?: string };
           logger.debug(
-            `Ignoring self DM message (bot_id=${event.bot_id}, user=${event.user})`
+            `Ignoring self DM message (bot_id=${eventWithBotId.bot_id}, user=${event.user})`
           );
           return;
         }
@@ -295,9 +314,9 @@ export class SlackEventHandlers {
           // Reuse the slash command handler's welcome functionality
           await this.shortcutCommandHandler.handleTextCommand(
             "welcome",
-            event.user,
+            event.user || "",
             event.channel,
-            client,
+            client as WebClient,
             event.thread_ts || event.ts
           );
           return;
@@ -305,12 +324,14 @@ export class SlackEventHandlers {
 
         // Normal message processing
         const context = this.messageHandler.extractSlackContext(event);
-        const userRequest = this.messageHandler.extractUserRequest(event.text);
+        const userRequest = this.messageHandler.extractUserRequest(
+          event.text || ""
+        );
 
         await this.messageHandler.handleUserRequest(
           context,
           userRequest,
-          client
+          client as WebClient
         );
       }
     });
@@ -327,11 +348,19 @@ export class SlackEventHandlers {
     this.app.action(/.*/, async ({ action, ack, client, body }) => {
       await ack();
 
-      const actionId = (action as any).action_id;
+      const actionWithId = action as { action_id: string };
+      const actionId = actionWithId.action_id;
       const userId = body.user.id;
+      const bodyWithChannel = body as {
+        channel?: { id: string };
+        container?: { channel_id: string };
+        message?: { ts: string };
+      };
       const channelId =
-        (body as any).channel?.id || (body as any).container?.channel_id;
-      const messageTs = (body as any).message?.ts || "";
+        bodyWithChannel.channel?.id ||
+        bodyWithChannel.container?.channel_id ||
+        "";
+      const messageTs = bodyWithChannel.message?.ts || "";
 
       logger.info(`Action received: ${actionId} from user ${userId}`);
 
@@ -341,8 +370,8 @@ export class SlackEventHandlers {
         userId,
         channelId,
         messageTs,
-        body,
-        client
+        body as import("./types").SlackActionBody,
+        client as WebClient
       );
     });
   }
@@ -367,12 +396,12 @@ export class SlackEventHandlers {
 
         await handleBlockkitFormSubmission(
           userId,
-          view,
-          client,
+          view as import("./types").View,
+          client as WebClient,
           async (
             context: SlackContext,
             userRequest: string,
-            client: SlackWebClient
+            client: WebClient
           ) =>
             this.messageHandler.handleUserRequest(context, userRequest, client)
         );
@@ -417,7 +446,7 @@ export class SlackEventHandlers {
       }
 
       // Update app home after successful submission
-      await this.actionHandler.updateAppHome(userId, client);
+      await this.actionHandler.updateAppHome(userId, client as WebClient);
     });
   }
 
@@ -430,7 +459,10 @@ export class SlackEventHandlers {
     this.app.event("app_home_opened", async ({ event, client }) => {
       try {
         if (event.tab === "home") {
-          await this.actionHandler.updateAppHome(event.user, client);
+          await this.actionHandler.updateAppHome(
+            event.user,
+            client as WebClient
+          );
         }
       } catch (error) {
         logger.error("Error handling app home opened:", error);

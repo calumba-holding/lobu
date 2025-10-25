@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { createLogger } from "@peerbot/core";
-import type { SlackContext, SlackView, SlackWebClient } from "../types";
+import type { SlackContext, View, WebClient, AnyBlock } from "../types";
 
 const logger = createLogger("dispatcher");
 
@@ -14,12 +14,12 @@ const logger = createLogger("dispatcher");
  */
 export async function handleBlockkitFormSubmission(
   userId: string,
-  view: SlackView,
-  client: SlackWebClient,
+  view: View,
+  client: WebClient,
   handleUserRequestFn: (
     context: SlackContext,
     userInput: string,
-    client: SlackWebClient
+    client: WebClient
   ) => Promise<void>
 ): Promise<void> {
   logger.info(`Handling blockkit form submission for user: ${userId}`);
@@ -40,7 +40,7 @@ export async function handleBlockkitFormSubmission(
 
   // Form processing
   // Extract input fields from state values
-  const inputFieldsData = extractViewInputs(view.state.values);
+  const inputFieldsData = extractViewInputs(view.state?.values || {});
 
   // Extract action selections from view blocks (for button-based forms)
   const actionSelections = extractActionSelections(view);
@@ -74,7 +74,7 @@ export async function handleBlockkitFormSubmission(
             {
               type: "mrkdwn",
               text: `<@${userId}> submitted form from "${buttonText}" button`,
-            },
+            } as any,
           ],
         },
         {
@@ -84,7 +84,7 @@ export async function handleBlockkitFormSubmission(
             text: userInput,
           },
         },
-      ],
+      ] as any,
     });
 
     const context = {
@@ -115,7 +115,7 @@ export async function handleBlockkitFormSubmission(
             {
               type: "mrkdwn",
               text: `<@${userId}> submitted form from "${buttonText}" button`,
-            },
+            } as any,
           ],
         },
         {
@@ -125,7 +125,7 @@ export async function handleBlockkitFormSubmission(
             text: userInput,
           },
         },
-      ],
+      ] as any,
     });
 
     const context = {
@@ -149,48 +149,67 @@ export async function handleBlockkitFormSubmission(
   }
 }
 
-function extractViewInputs(stateValues: any): string {
+/**
+ * Type for view state values
+ */
+interface ViewStateAction {
+  value?: string;
+  selected_option?: { value: string };
+  selected_options?: Array<{ value: string }>;
+  selected_date?: string;
+  selected_time?: string;
+  selected_button?: { value: string };
+  selected_user?: string;
+  selected_channel?: string;
+  selected_conversation?: string;
+  actions?: Array<{
+    selected?: boolean;
+    value?: string;
+    text?: { text?: string };
+    action_id?: string;
+  }>;
+}
+
+function extractViewInputs(
+  stateValues: Record<string, Record<string, ViewStateAction>>
+): string {
   const inputs: string[] = [];
   for (const [blockId, block] of Object.entries(stateValues || {})) {
-    for (const [actionId, action] of Object.entries(block as any)) {
+    for (const [actionId, action] of Object.entries(block)) {
       let value = "";
 
       // Handle different types of Slack form inputs
-      if ((action as any).value) {
-        value = (action as any).value;
-      } else if ((action as any).selected_option?.value) {
-        value = (action as any).selected_option.value;
-      } else if ((action as any).selected_options) {
+      if (action.value) {
+        value = action.value;
+      } else if (action.selected_option?.value) {
+        value = action.selected_option.value;
+      } else if (action.selected_options) {
         // Multi-select
-        const options = (action as any).selected_options;
-        value = options.map((opt: any) => opt.value).join(", ");
-      } else if ((action as any).selected_date) {
-        value = (action as any).selected_date;
-      } else if ((action as any).selected_time) {
-        value = (action as any).selected_time;
-      } else if ((action as any).selected_button) {
+        value = action.selected_options.map((opt) => opt.value).join(", ");
+      } else if (action.selected_date) {
+        value = action.selected_date;
+      } else if (action.selected_time) {
+        value = action.selected_time;
+      } else if (action.selected_button) {
         // Handle button selections (radio buttons, etc.)
-        value = (action as any).selected_button.value;
-      } else if ((action as any).selected_user) {
+        value = action.selected_button.value;
+      } else if (action.selected_user) {
         // Handle user picker
-        value = (action as any).selected_user;
-      } else if ((action as any).selected_channel) {
+        value = action.selected_user;
+      } else if (action.selected_channel) {
         // Handle channel picker
-        value = (action as any).selected_channel;
-      } else if ((action as any).selected_conversation) {
+        value = action.selected_channel;
+      } else if (action.selected_conversation) {
         // Handle conversation picker
-        value = (action as any).selected_conversation;
-      } else if (
-        (action as any).actions &&
-        Array.isArray((action as any).actions)
-      ) {
+        value = action.selected_conversation;
+      } else if (action.actions && Array.isArray(action.actions)) {
         // Handle action blocks with button selections
-        const selectedActions = (action as any).actions.filter(
-          (act: any) => act.selected || act.value
+        const selectedActions = action.actions.filter(
+          (act) => act.selected || act.value
         );
         if (selectedActions.length > 0) {
           value = selectedActions
-            .map((act: any) => act.value || act.text?.text || act.action_id)
+            .map((act) => act.value || act.text?.text || act.action_id)
             .join(", ");
         }
       }
@@ -223,7 +242,7 @@ function extractViewInputs(stateValues: any): string {
 /**
  * Extract text content from modal blocks (for display-only forms)
  */
-function extractModalContent(blocks: any[]): string {
+function extractModalContent(blocks: AnyBlock[]): string {
   const content: string[] = [];
 
   if (!blocks || !Array.isArray(blocks)) {
@@ -258,7 +277,7 @@ function extractModalContent(blocks: any[]): string {
 /**
  * Extract action selections from view blocks (for button-based forms)
  */
-function extractActionSelections(view: any): string {
+function extractActionSelections(view: View): string {
   const selections: string[] = [];
 
   if (!view.blocks || !Array.isArray(view.blocks)) {

@@ -3,7 +3,12 @@ import { createLogger } from "@peerbot/core";
 const logger = createLogger("dispatcher");
 
 import type { IModuleRegistry } from "@peerbot/core";
-import type { SlackActionBody, SlackContext, SlackWebClient } from "../types";
+import type {
+  SlackActionBody,
+  SlackContext,
+  WebClient,
+  AnyBlock,
+} from "../types";
 import type { MessageHandler } from "./messages";
 
 /**
@@ -20,18 +25,21 @@ export async function handleExecutableCodeBlock(
   channelId: string,
   messageTs: string,
   body: SlackActionBody,
-  client: SlackWebClient,
+  client: WebClient,
   handleUserRequestFn: (
     context: SlackContext,
     userInput: string,
-    client: SlackWebClient
+    client: WebClient
   ) => Promise<void>
 ): Promise<void> {
   logger.info(`Handling executable code block: ${actionId}`);
 
   try {
     // Extract the code from the button's value
-    const action = (body as any).actions?.[0];
+    const bodyWithActions = body as {
+      actions?: Array<{ value?: string; text?: { text?: string } }>;
+    };
+    const action = bodyWithActions.actions?.[0];
     if (!action?.value) {
       throw new Error("No code content found in button");
     }
@@ -45,7 +53,8 @@ export async function handleExecutableCodeBlock(
 
     // Get the actual thread_ts from the message (messageTs is where button was clicked)
     // If message has thread_ts, use it; otherwise this IS the thread root
-    const actualThreadTs = (body as any).message?.thread_ts || messageTs;
+    const bodyWithMessage = body as { message?: { thread_ts?: string } };
+    const actualThreadTs = bodyWithMessage.message?.thread_ts || messageTs;
 
     const inputMessage = await client.chat.postMessage({
       channel: channelId,
@@ -58,7 +67,7 @@ export async function handleExecutableCodeBlock(
             {
               type: "mrkdwn",
               text: `<@${userId}> executed "${buttonText}" button`,
-            },
+            } as any,
           ],
         },
         {
@@ -102,7 +111,7 @@ export async function handleBlockkitForm(
   channelId: string,
   messageTs: string,
   body: SlackActionBody,
-  client: SlackWebClient
+  client: WebClient
 ): Promise<void> {
   logger.info(`Handling blockkit form: ${actionId}`);
 
@@ -163,18 +172,24 @@ export async function handleBlockkitForm(
         submit: { type: "plain_text", text: "Submit" },
         close: { type: "plain_text", text: "Cancel" },
         blocks: blocks,
-      },
+      } as any,
     });
 
     logger.info(
       `Modal opened successfully for action ${actionId}, ok: ${modalResult.ok}`
     );
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const err = error as {
+      message?: string;
+      data?: unknown;
+      code?: string;
+      stack?: string;
+    };
     logger.error(`Failed to handle blockkit form ${actionId}:`, {
-      error: error.message,
-      data: error.data,
-      code: error.code,
-      stack: error.stack,
+      error: err.message,
+      data: err.data,
+      code: err.code,
+      stack: err.stack,
     });
 
     // Show the raw Block Kit content for troubleshooting
@@ -184,7 +199,8 @@ export async function handleBlockkitForm(
         ? `${rawBlocksJson.substring(0, 2500)}\n...[truncated]`
         : rawBlocksJson;
 
-    const actualThreadTs = (body as any)?.message?.thread_ts || messageTs;
+    const bodyWithMessage = body as { message?: { thread_ts?: string } };
+    const actualThreadTs = bodyWithMessage?.message?.thread_ts || messageTs;
     await client.chat.postMessage({
       channel: channelId,
       thread_ts: actualThreadTs,
@@ -208,7 +224,7 @@ export class ActionHandler {
     channelId: string,
     messageTs: string,
     body: SlackActionBody,
-    client: SlackWebClient
+    client: WebClient
   ): Promise<void> {
     logger.info(`Handling block action: ${actionId}`);
 
@@ -256,11 +272,7 @@ export class ActionHandler {
               messageTs,
               body,
               client,
-              (
-                context: SlackContext,
-                userRequest: string,
-                client: SlackWebClient
-              ) =>
+              (context: SlackContext, userRequest: string, client: WebClient) =>
                 this.messageHandler.handleUserRequest(
                   context,
                   userRequest,
@@ -281,13 +293,13 @@ export class ActionHandler {
   /**
    * Update App Home tab with repository information and README
    */
-  async updateAppHome(userId: string, client: SlackWebClient): Promise<void> {
+  async updateAppHome(userId: string, client: WebClient): Promise<void> {
     logger.info(
       `Updating app home for user: ${userId} with README from active repository`
     );
 
     try {
-      const blocks: any[] = [
+      const blocks: AnyBlock[] = [
         {
           type: "section",
           text: { type: "mrkdwn", text: "*Welcome to Peerbot!* 👋" },
@@ -334,7 +346,7 @@ export class ActionHandler {
         view: {
           type: "home",
           blocks,
-        },
+        } as any,
       });
 
       logger.info(`App home updated for user ${userId}`);

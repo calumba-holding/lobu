@@ -1,9 +1,11 @@
 #!/usr/bin/env bun
 
-import type { IMessageQueue, WorkerTokenData } from "@peerbot/core";
+import type { WorkerTokenData, InstructionContext } from "@peerbot/core";
 import { createLogger, verifyWorkerToken } from "@peerbot/core";
+import type { IMessageQueue } from "../infrastructure/queue";
 import type { Request, Response } from "express";
-import type { McpConfigService } from "../mcp/config-service";
+import type { McpConfigService } from "../auth/mcp/config-service";
+import type { InstructionService } from "../services/instruction-service";
 import { WorkerConnectionManager } from "./connection-manager";
 import { WorkerJobRouter } from "./job-router";
 
@@ -19,18 +21,21 @@ export class WorkerGateway {
   private jobRouter: WorkerJobRouter;
   private queue: IMessageQueue;
   private mcpConfigService?: McpConfigService;
+  private instructionService?: InstructionService;
   private publicGatewayUrl: string;
 
   constructor(
     queue: IMessageQueue,
     publicGatewayUrl: string,
-    mcpConfigService?: McpConfigService
+    mcpConfigService?: McpConfigService,
+    instructionService?: InstructionService
   ) {
     this.queue = queue;
     this.publicGatewayUrl = publicGatewayUrl;
     this.connectionManager = new WorkerConnectionManager();
     this.jobRouter = new WorkerJobRouter(queue, this.connectionManager);
     this.mcpConfigService = mcpConfigService;
+    this.instructionService = instructionService;
   }
 
   /**
@@ -47,14 +52,10 @@ export class WorkerGateway {
       this.handleWorkerResponse(req, res)
     );
 
-    if (this.mcpConfigService) {
-      app.get("/worker/mcp/config", (req: Request, res: Response) =>
-        this.handleMcpConfigRequest(req, res)
-      );
-      app.get("/worker/mcp/status", (req: Request, res: Response) =>
-        this.handleMcpStatusRequest(req, res)
-      );
-    }
+    // Unified session context endpoint (includes MCP + instructions)
+    app.get("/worker/session-context", (req: Request, res: Response) =>
+      this.handleSessionContextRequest(req, res)
+    );
 
     logger.info("Worker gateway routes registered");
   }
@@ -117,7 +118,7 @@ export class WorkerGateway {
       );
       if (responseData.isStreamDelta) {
         logger.info(
-          `[WORKER-GATEWAY] Stream delta: seq=${responseData.seq}, deltaLength=${responseData.delta?.length}`
+          `[WORKER-GATEWAY] Stream delta: deltaLength=${responseData.delta?.length}`
         );
       }
 
@@ -131,9 +132,14 @@ export class WorkerGateway {
     }
   }
 
-  private async handleMcpConfigRequest(req: Request, res: Response) {
-    if (!this.mcpConfigService) {
-      res.status(503).json({ error: "mcp_config_unavailable" });
+  /**
+   * Unified session context endpoint
+   * Returns MCP config, platform instructions, and MCP status data
+   * Worker builds final instructions from this data
+   */
+  private async handleSessionContextRequest(req: Request, res: Response) {
+    if (!this.mcpConfigService || !this.instructionService) {
+      res.status(503).json({ error: "session_context_unavailable" });
       return;
     }
 
@@ -143,37 +149,41 @@ export class WorkerGateway {
     }
 
     try {
+      const { userId, platform, sessionKey } = auth.tokenData;
       const baseUrl = this.getRequestBaseUrl(req);
-      const config = await this.mcpConfigService.getWorkerConfig({
-        baseUrl,
-        workerToken: auth.token,
-      });
-      res.json(config);
-    } catch (error) {
-      logger.error("Failed to generate MCP config", { error });
-      res.status(500).json({ error: "mcp_config_error" });
-    }
-  }
 
-  private async handleMcpStatusRequest(req: Request, res: Response) {
-    if (!this.mcpConfigService) {
-      res.status(503).json({ error: "mcp_config_unavailable" });
-      return;
-    }
+      // Build instruction context
+      const instructionContext: InstructionContext = {
+        userId,
+        sessionKey: sessionKey || "", // Use empty string if sessionKey is undefined
+        workingDirectory: "/workspace",
+        availableProjects: [],
+      };
 
-    const auth = this.authenticateWorker(req, res);
-    if (!auth) {
-      return;
-    }
+      // Fetch MCP config and session context data in parallel
+      const [mcpConfig, contextData] = await Promise.all([
+        this.mcpConfigService.getWorkerConfig({
+          baseUrl,
+          workerToken: auth.token,
+        }),
+        this.instructionService.getSessionContext(
+          platform || "unknown",
+          instructionContext
+        ),
+      ]);
 
-    try {
-      const status = await this.mcpConfigService.getMcpStatus(
-        auth.tokenData.userId
+      logger.info(
+        `Session context for ${userId}: ${Object.keys(mcpConfig.mcpServers || {}).length} MCPs, ${contextData.platformInstructions.length} chars platform instructions, ${contextData.mcpStatus.length} MCP status entries`
       );
-      res.json({ mcps: status });
+
+      res.json({
+        mcpConfig,
+        platformInstructions: contextData.platformInstructions,
+        mcpStatus: contextData.mcpStatus,
+      });
     } catch (error) {
-      logger.error("Failed to get MCP status", { error });
-      res.status(500).json({ error: "mcp_status_error" });
+      logger.error("Failed to generate session context", { error });
+      res.status(500).json({ error: "session_context_error" });
     }
   }
 

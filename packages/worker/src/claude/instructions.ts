@@ -1,7 +1,4 @@
-import type {
-  InstructionContext,
-  InstructionProvider,
-} from "../instructions/types";
+import type { InstructionContext, InstructionProvider } from "@peerbot/core";
 
 /**
  * Claude Code specific core instructions

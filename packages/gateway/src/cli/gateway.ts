@@ -3,7 +3,8 @@
 import http from "node:http";
 import { createLogger } from "@peerbot/core";
 import express from "express";
-import type { GatewayConfig } from "./config";
+import type { GatewayConfig } from "../config";
+import type { SlackConfig } from "../slack/config";
 
 const logger = createLogger("gateway-startup");
 
@@ -76,13 +77,16 @@ function setupHealthEndpoints(
 /**
  * Start the gateway with the provided configuration
  */
-export async function startGateway(config: GatewayConfig): Promise<void> {
+export async function startGateway(
+  config: GatewayConfig,
+  slackConfig: SlackConfig
+): Promise<void> {
   logger.info("🚀 Starting Peerbot Gateway");
 
   // Import dependencies (after config is loaded)
   const { Orchestrator } = await import("../orchestration");
   const { Gateway } = await import("../gateway-main");
-  const { SlackPlatform } = await import("../platform/slack-platform");
+  const { SlackPlatform } = await import("../slack/platform");
 
   // Create and start orchestrator
   const orchestrator = new Orchestrator(config.orchestration);
@@ -91,7 +95,27 @@ export async function startGateway(config: GatewayConfig): Promise<void> {
 
   // Create Gateway with Slack platform
   const gateway = new Gateway(config);
-  gateway.registerPlatform(new SlackPlatform(config));
+
+  // Construct Slack platform config
+  const slackPlatformConfig = {
+    slack: slackConfig,
+    logLevel: config.logLevel as any, // Core LogLevel is compatible with Slack LogLevel
+    health: config.health,
+  };
+
+  const agentOptions = {
+    allowedTools: config.claude.allowedTools,
+    model: config.claude.model,
+    timeoutMinutes: config.claude.timeoutMinutes,
+  };
+
+  gateway.registerPlatform(
+    new SlackPlatform(
+      slackPlatformConfig,
+      agentOptions,
+      config.sessionTimeoutMinutes
+    )
+  );
 
   // Start gateway (initializes core services + platforms)
   await gateway.start();
@@ -108,10 +132,6 @@ export async function startGateway(config: GatewayConfig): Promise<void> {
   );
 
   logger.info("✅ Peerbot Gateway is running!");
-  logger.info(
-    `Mode: ${config.slack.socketMode ? "Socket Mode" : `HTTP on port ${config.slack.port}`}`
-  );
-
   // Setup graceful shutdown
   const cleanup = async () => {
     logger.info("Shutting down gateway...");

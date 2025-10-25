@@ -1,15 +1,15 @@
+import { createLogger, ErrorCode, OrchestratorError } from "@peerbot/core";
 import {
   type BaseDeploymentManager,
-  createLogger,
-  createMessageQueue,
-  ErrorCode,
   generateDeploymentName,
-  type IMessageQueue,
   type OrchestratorConfig,
-  OrchestratorError,
   type QueueJobData,
-  type QueueJob as SharedQueueJob,
-} from "@peerbot/core";
+} from "./base-deployment-manager";
+import { RedisQueue, type RedisQueueConfig } from "../infrastructure/queue";
+import type {
+  IMessageQueue,
+  QueueJob as SharedQueueJob,
+} from "../infrastructure/queue";
 import * as Sentry from "@sentry/node";
 
 const logger = createLogger("orchestrator");
@@ -26,7 +26,24 @@ export class MessageConsumer {
   ) {
     this.config = config;
     this.deploymentManager = deploymentManager;
-    this.queue = createMessageQueue(config.queues.connectionString);
+
+    // Parse Redis connection string
+    const url = new URL(config.queues.connectionString);
+    if (url.protocol !== "redis:") {
+      throw new Error(
+        `Unsupported queue protocol: ${url.protocol}. Only redis:// is supported.`
+      );
+    }
+
+    const queueConfig: RedisQueueConfig = {
+      host: url.hostname,
+      port: Number.parseInt(url.port, 10) || 6379,
+      password: url.password || undefined,
+      db: url.pathname ? Number.parseInt(url.pathname.slice(1), 10) : 0,
+      maxRetriesPerRequest: 3,
+    };
+
+    this.queue = new RedisQueue(queueConfig);
   }
 
   async start(): Promise<void> {

@@ -1,6 +1,6 @@
 import { createLogger } from "@peerbot/core";
 import type { App } from "@slack/bolt";
-import type { SlackWebClient } from "../types";
+import type { AnyBlock, View, WebClient } from "../types";
 
 const logger = createLogger("dispatcher");
 
@@ -23,7 +23,7 @@ export class ShortcutCommandHandler {
     command: string,
     userId: string,
     channelId: string,
-    client: SlackWebClient,
+    client: WebClient,
     threadTs?: string
   ): Promise<void> {
     logger.info(`Handling text command '${command}' from user ${userId}`);
@@ -104,7 +104,7 @@ export class ShortcutCommandHandler {
       );
 
       // Send context-aware welcome message (no thread for slash commands)
-      await this.sendContextAwareWelcome(user_id, channel_id, client);
+      await this.sendContextAwareWelcome(user_id, channel_id, client as any);
     });
   }
 
@@ -114,11 +114,11 @@ export class ShortcutCommandHandler {
   public async sendContextAwareWelcome(
     userId: string,
     channelId: string,
-    client: SlackWebClient,
+    client: WebClient,
     threadTs?: string
   ): Promise<void> {
     // Build simple welcome blocks
-    const blocks: any[] = [
+    const blocks: AnyBlock[] = [
       {
         type: "header",
         text: {
@@ -157,7 +157,12 @@ export class ShortcutCommandHandler {
     const isDM = channelId.startsWith("D");
 
     if (isDM) {
-      const messagePayload: any = {
+      const messagePayload: {
+        channel: string;
+        text: string;
+        blocks: AnyBlock[];
+        thread_ts?: string;
+      } = {
         channel: channelId,
         text: "Welcome to Peerbot! 👋",
         blocks,
@@ -170,6 +175,7 @@ export class ShortcutCommandHandler {
 
       await client.chat.postMessage(messagePayload);
     } else {
+      // postEphemeral is part of WebClient
       await client.chat.postEphemeral({
         channel: channelId,
         user: userId,
@@ -207,8 +213,8 @@ export class ShortcutCommandHandler {
    */
   private async handleSetEnvironment(
     userId: string,
-    view: any,
-    client: any
+    view: View,
+    client: WebClient
   ): Promise<void> {
     try {
       // Extract input values
@@ -238,7 +244,9 @@ export class ShortcutCommandHandler {
   /**
    * Extract view inputs from Slack modal state
    */
-  private extractViewInputs(stateValues: any): string {
+  private extractViewInputs(
+    stateValues: Record<string, Record<string, { value?: string }>>
+  ): string {
     const inputs: string[] = [];
 
     for (const blockId of Object.keys(stateValues)) {

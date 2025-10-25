@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import type { IMessageQueue } from "@peerbot/core";
+import type { IMessageQueue } from "../infrastructure/queue";
 import { createLogger } from "@peerbot/core";
 import type { WorkerConnectionManager } from "./connection-manager";
 
@@ -48,6 +48,9 @@ export class WorkerJobRouter {
 
   /**
    * Handle a job from the queue and route it to the worker
+   *
+   * Jobs are sent immediately without blocking the queue, allowing multiple messages
+   * to reach the worker's MessageBatcher for proper batching during active sessions.
    */
   private async handleJob(deploymentName: string, job: unknown): Promise<void> {
     const connection = this.connectionManager.getConnection(deploymentName);
@@ -65,24 +68,6 @@ export class WorkerJobRouter {
       (job as { id?: string }).id ||
       `job-${Date.now()}-${Math.random().toString(36).substring(7)}`;
 
-    // Create promise that resolves when worker sends response
-    const responsePromise = new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(
-        () => {
-          this.pendingJobs.delete(jobId);
-          reject(new Error(`Worker response timeout for job ${jobId}`));
-        },
-        5 * 60 * 1000
-      ); // 5 minute timeout
-
-      this.pendingJobs.set(jobId, {
-        resolve: resolve as (value: unknown) => void,
-        reject,
-        timeout,
-        jobId,
-      });
-    });
-
     // Send job to worker via SSE with jobId
     const jobPayload =
       typeof jobData === "object" && jobData !== null
@@ -92,10 +77,39 @@ export class WorkerJobRouter {
     this.connectionManager.sendSSE(connection.res, "job", jobPayload);
     this.connectionManager.touchConnection(deploymentName);
 
-    // Wait for worker to acknowledge/complete the job
-    await responsePromise;
+    // Track job for monitoring but don't block queue
+    this.trackJobTimeout(jobId, deploymentName);
 
-    logger.debug(`Job ${jobId} completed by worker ${deploymentName}`);
+    logger.debug(`Job ${jobId} sent to worker ${deploymentName}`);
+  }
+
+  /**
+   * Track job timeout for monitoring without blocking queue processing
+   */
+  private trackJobTimeout(jobId: string, deploymentName: string): void {
+    const timeout = setTimeout(
+      () => {
+        const pending = this.pendingJobs.get(jobId);
+        if (pending) {
+          logger.warn(
+            `Job ${jobId} timeout - worker ${deploymentName} may be stuck or overwhelmed`
+          );
+          this.pendingJobs.delete(jobId);
+        }
+      },
+      5 * 60 * 1000
+    ); // 5 minute timeout for monitoring
+
+    this.pendingJobs.set(jobId, {
+      resolve: () => {
+        // No-op, we don't block on acknowledgment
+      },
+      reject: () => {
+        // No-op
+      },
+      timeout,
+      jobId,
+    });
   }
 
   /**

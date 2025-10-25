@@ -1,113 +1,187 @@
 #!/usr/bin/env bun
 
-import {
-  createLogger,
-  createMessageQueue,
-  type IMessageQueue,
-  moduleRegistry,
-} from "@peerbot/core";
-import { ClaudeCredentialStore } from "../claude-oauth/credential-store";
-import { ClaudeModelPreferenceStore } from "../claude-oauth/model-preference-store";
-import { ClaudeModelService } from "../claude-oauth/model-service";
-import { ClaudeOAuthModule } from "../claude-oauth/oauth-module";
-import { ClaudeOAuthStateStore } from "../claude-oauth/oauth-state-store";
-import type { GatewayConfig } from "../cli/config";
+import { createLogger, moduleRegistry } from "@peerbot/core";
+import { RedisQueue, type RedisQueueConfig } from "../infrastructure/queue";
+import type { IMessageQueue } from "../infrastructure/queue";
+import { QueueProducer } from "../infrastructure/queue";
+import { ClaudeCredentialStore } from "../auth/claude/credential-store";
+import { ClaudeModelPreferenceStore } from "../auth/claude/model-preference-store";
+import { ClaudeModelService } from "../auth/claude/model-service";
+import { ClaudeOAuthModule } from "../auth/claude/oauth-module";
+import { ClaudeOAuthStateStore } from "../auth/claude/oauth-state-store";
+import type { GatewayConfig } from "../config";
 import { WorkerGateway } from "../gateway";
-import { McpConfigService } from "../mcp/config-service";
-import { McpCredentialStore } from "../mcp/credential-store";
-import { McpInputStore } from "../mcp/input-store";
-import { McpOAuthDiscoveryService } from "../mcp/oauth-discovery";
-import { McpOAuthModule } from "../mcp/oauth-module";
-import { OAuthStateStore } from "../mcp/oauth-state-store";
-import { McpProxy } from "../mcp/proxy";
-import { AnthropicProxy } from "../model-provider/anthropic-proxy";
-import { QueueProducer } from "../session/queue-producer";
+import { McpConfigService } from "../auth/mcp/config-service";
+import { McpCredentialStore } from "../auth/mcp/credential-store";
+import { McpInputStore } from "../auth/mcp/input-store";
+import { McpOAuthDiscoveryService } from "../auth/mcp/oauth-discovery";
+import { McpOAuthModule } from "../auth/mcp/oauth-module";
+import { OAuthStateStore } from "../auth/mcp/oauth-state-store";
+import { McpProxy } from "../auth/mcp/proxy";
+import { AnthropicProxy } from "../infrastructure/model-provider";
+import { RedisSessionStore, SessionManager } from "./session-manager";
+import { InstructionService } from "./instruction-service";
 
 const logger = createLogger("core-services");
 
 /**
- * Manages all platform-agnostic core services
- * Including: Redis, Claude OAuth, Anthropic proxy, MCP services, Worker Gateway
- * These services are shared across all platform adapters (Slack, Discord, etc.)
+ * Core Services - Centralized service initialization and lifecycle management
+ *
+ * Manages all platform-agnostic services shared across platform adapters.
+ * Organized into logical groups:
+ *
+ * 1. Queue Services: Redis queue and producer for job management
+ * 2. Session Services: Session tracking and instruction providers
+ * 3. Claude Services: OAuth, credentials, model preferences, Anthropic proxy
+ * 4. MCP Services: Config, discovery, OAuth, proxy for Model Context Protocol
+ * 5. Worker Gateway: Worker connection management and routing
+ *
+ * Initialization order is important - dependencies are initialized in sequence.
  */
 export class CoreServices {
+  // ============================================================================
+  // Queue Services
+  // ============================================================================
   private queue?: IMessageQueue;
   private queueProducer?: QueueProducer;
-  private anthropicProxy?: AnthropicProxy;
-  private workerGateway?: WorkerGateway;
-  private mcpProxy?: McpProxy;
+
+  // ============================================================================
+  // Session Services
+  // ============================================================================
+  private sessionManager?: SessionManager;
+  private instructionService?: InstructionService;
+
+  // ============================================================================
+  // Claude Services
+  // ============================================================================
   private claudeCredentialStore?: ClaudeCredentialStore;
   private claudeModelPreferenceStore?: ClaudeModelPreferenceStore;
+  private anthropicProxy?: AnthropicProxy;
+
+  // ============================================================================
+  // MCP Services
+  // ============================================================================
+  private mcpConfigService?: McpConfigService;
+  private mcpProxy?: McpProxy;
+
+  // ============================================================================
+  // Worker Gateway
+  // ============================================================================
+  private workerGateway?: WorkerGateway;
 
   constructor(private readonly config: GatewayConfig) {}
 
   /**
-   * Initialize all core services
+   * Initialize all core services in dependency order
    */
   async initialize(): Promise<void> {
     logger.info("Initializing core services...");
 
-    // Initialize Redis/Queue
+    // 1. Queue (foundation for everything else)
     await this.initializeQueue();
 
-    // Initialize Claude OAuth
-    await this.initializeClaudeOAuth();
+    // 2. Session management
+    await this.initializeSessionServices();
 
-    // Initialize Anthropic proxy
-    await this.initializeAnthropicProxy();
+    // 3. Claude authentication & API
+    await this.initializeClaudeServices();
 
-    // Initialize MCP services
+    // 4. MCP ecosystem (depends on queue and Claude services)
     await this.initializeMcpServices();
 
-    // Initialize queue producer
+    // 5. Queue producer (depends on queue being ready)
     await this.initializeQueueProducer();
 
     logger.info("✅ Core services initialized successfully");
   }
 
-  /**
-   * Initialize Redis/Queue connection
-   */
+  // ============================================================================
+  // 1. Queue Services Initialization
+  // ============================================================================
+
   private async initializeQueue(): Promise<void> {
     if (!this.config.queues?.connectionString) {
       throw new Error("Queue connection string is required");
     }
 
-    this.queue = createMessageQueue(this.config.queues.connectionString);
+    const url = new URL(this.config.queues.connectionString);
+    if (url.protocol !== "redis:") {
+      throw new Error(
+        `Unsupported queue protocol: ${url.protocol}. Only redis:// is supported.`
+      );
+    }
+
+    const config: RedisQueueConfig = {
+      host: url.hostname,
+      port: Number.parseInt(url.port, 10) || 6379,
+      password: url.password || undefined,
+      db: url.pathname ? Number.parseInt(url.pathname.slice(1), 10) : 0,
+      maxRetriesPerRequest: 3,
+    };
+
+    this.queue = new RedisQueue(config);
     await this.queue.start();
     logger.info("✅ Queue connection established");
   }
 
-  /**
-   * Initialize Claude OAuth services
-   */
-  private async initializeClaudeOAuth(): Promise<void> {
+  private async initializeQueueProducer(): Promise<void> {
     if (!this.queue) {
-      throw new Error("Queue must be initialized before Claude OAuth");
+      throw new Error("Queue must be initialized before queue producer");
+    }
+
+    this.queueProducer = new QueueProducer(this.queue);
+    await this.queueProducer.start();
+    logger.info("✅ Queue producer initialized");
+  }
+
+  // ============================================================================
+  // 2. Session Services Initialization
+  // ============================================================================
+
+  private async initializeSessionServices(): Promise<void> {
+    if (!this.queue) {
+      throw new Error("Queue must be initialized before session services");
+    }
+
+    const sessionStore = new RedisSessionStore(this.queue);
+    this.sessionManager = new SessionManager(sessionStore);
+    logger.info("✅ Session manager initialized");
+  }
+
+  // ============================================================================
+  // 3. Claude Services Initialization
+  // ============================================================================
+
+  private async initializeClaudeServices(): Promise<void> {
+    if (!this.queue) {
+      throw new Error("Queue must be initialized before Claude services");
     }
 
     const redisClient = this.queue.getRedisClient();
 
-    // Initialize Claude credential store
+    // Initialize credential and preference stores
     this.claudeCredentialStore = new ClaudeCredentialStore(redisClient);
-    logger.info("✅ Claude credential store initialized");
-
-    // Initialize Claude model preference store
     this.claudeModelPreferenceStore = new ClaudeModelPreferenceStore(
       redisClient
     );
-    logger.info("✅ Claude model preference store initialized");
+    logger.info("✅ Claude credential & preference stores initialized");
 
-    // Initialize Claude model service
+    // Initialize model service
     const claudeModelService = new ClaudeModelService(
       redisClient,
       this.config.anthropicProxy.anthropicApiKey
     );
     logger.info("✅ Claude model service initialized");
 
-    // Check if system token is available
-    const systemTokenAvailable = !!this.config.anthropicProxy.anthropicApiKey;
+    // Initialize Anthropic API proxy
+    this.anthropicProxy = new AnthropicProxy(
+      this.config.anthropicProxy,
+      this.claudeCredentialStore
+    );
+    logger.info("✅ Anthropic proxy initialized");
 
+    // Register Claude OAuth module
+    const systemTokenAvailable = !!this.config.anthropicProxy.anthropicApiKey;
     const claudeOAuthStateStore = new ClaudeOAuthStateStore(redisClient);
     const claudeOAuthModule = new ClaudeOAuthModule(
       this.claudeCredentialStore,
@@ -123,20 +197,10 @@ export class CoreServices {
     );
   }
 
-  /**
-   * Initialize Anthropic proxy service
-   */
-  private async initializeAnthropicProxy(): Promise<void> {
-    this.anthropicProxy = new AnthropicProxy(
-      this.config.anthropicProxy,
-      this.claudeCredentialStore
-    );
-    logger.info("✅ Anthropic proxy initialized");
-  }
+  // ============================================================================
+  // 4. MCP Services Initialization
+  // ============================================================================
 
-  /**
-   * Initialize MCP services (config, discovery, OAuth, proxy)
-   */
   private async initializeMcpServices(): Promise<void> {
     if (!this.queue) {
       throw new Error("Queue must be initialized before MCP services");
@@ -144,14 +208,17 @@ export class CoreServices {
 
     const redisClient = this.queue.getRedisClient();
 
-    // Initialize MCP OAuth Discovery Service
+    // Initialize MCP credential and state management
     const mcpCredentialStore = new McpCredentialStore(this.queue);
+    const oauthStateStore = new OAuthStateStore(this.queue);
+    const mcpInputStore = new McpInputStore(this.queue);
+
+    // Initialize MCP OAuth discovery service
     const mcpDiscoveryService = new McpOAuthDiscoveryService({
       cacheStore: {
         get: async (key: string) => {
           try {
-            const value = await redisClient.get(key);
-            return value;
+            return await redisClient.get(key);
           } catch (error) {
             logger.error("Failed to get from cache", { key, error });
             return null;
@@ -174,42 +241,48 @@ export class CoreServices {
       },
       callbackUrl: this.config.mcp.callbackUrl,
       protocolVersion: "2025-03-26",
-      cacheTtl: 86400, // 24 hours
+      cacheTtl: 86400,
     });
     logger.info("✅ MCP OAuth Discovery Service initialized");
 
-    const oauthStateStore = new OAuthStateStore(this.queue);
-    const mcpInputStore = new McpInputStore(this.queue);
-    const mcpConfigService = new McpConfigService({
+    // Initialize MCP config service
+    this.mcpConfigService = new McpConfigService({
       configUrl: this.config.mcp.serversUrl,
       discoveryService: mcpDiscoveryService,
       credentialStore: mcpCredentialStore,
       inputStore: mcpInputStore,
     });
 
+    // Initialize instruction service (needed by WorkerGateway)
+    this.instructionService = new InstructionService(this.mcpConfigService);
+    logger.info("✅ Instruction service initialized");
+
+    // Initialize worker gateway
     this.workerGateway = new WorkerGateway(
       this.queue,
       this.config.mcp.publicGatewayUrl,
-      mcpConfigService
+      this.mcpConfigService,
+      this.instructionService
     );
     logger.info("✅ Worker gateway initialized");
 
+    // Initialize MCP proxy
     this.mcpProxy = new McpProxy(
-      mcpConfigService,
+      this.mcpConfigService,
       mcpCredentialStore,
       mcpInputStore,
       this.queue
     );
     logger.info("✅ MCP proxy initialized");
 
-    // Perform OAuth discovery for all MCP servers
+    // Discover OAuth capabilities for all MCP servers
     logger.info("🔍 Discovering OAuth capabilities for MCP servers...");
-    await mcpConfigService.enrichWithDiscovery();
+    await this.mcpConfigService.enrichWithDiscovery();
     logger.info("✅ MCP OAuth discovery completed");
 
     // Register MCP OAuth module
     const mcpOAuthModule = new McpOAuthModule(
-      mcpConfigService,
+      this.mcpConfigService,
       mcpCredentialStore,
       oauthStateStore,
       mcpInputStore,
@@ -219,30 +292,16 @@ export class CoreServices {
     moduleRegistry.register(mcpOAuthModule);
     logger.info("✅ MCP OAuth module registered");
 
-    // Discover and register available modules
+    // Discover and initialize all available modules
     await moduleRegistry.registerAvailableModules();
-
-    // Initialize all registered modules
     await moduleRegistry.initAll();
     logger.info("✅ Modules initialized");
   }
 
-  /**
-   * Initialize queue producer
-   */
-  private async initializeQueueProducer(): Promise<void> {
-    if (!this.config.queues?.connectionString) {
-      throw new Error("Queue connection string is required");
-    }
+  // ============================================================================
+  // Shutdown
+  // ============================================================================
 
-    this.queueProducer = new QueueProducer(this.config.queues.connectionString);
-    await this.queueProducer.start();
-    logger.info("✅ Queue producer started");
-  }
-
-  /**
-   * Shutdown all services gracefully
-   */
   async shutdown(): Promise<void> {
     logger.info("Shutting down core services...");
 
@@ -262,7 +321,10 @@ export class CoreServices {
     logger.info("✅ Core services shutdown complete");
   }
 
-  // Getters for services
+  // ============================================================================
+  // Service Accessors (implements ICoreServices interface)
+  // ============================================================================
+
   getQueue(): IMessageQueue {
     if (!this.queue) throw new Error("Queue not initialized");
     return this.queue;
@@ -291,5 +353,15 @@ export class CoreServices {
 
   getClaudeModelPreferenceStore(): ClaudeModelPreferenceStore | undefined {
     return this.claudeModelPreferenceStore;
+  }
+
+  getSessionManager(): SessionManager {
+    if (!this.sessionManager)
+      throw new Error("Session manager not initialized");
+    return this.sessionManager;
+  }
+
+  getInstructionService(): InstructionService | undefined {
+    return this.instructionService;
   }
 }

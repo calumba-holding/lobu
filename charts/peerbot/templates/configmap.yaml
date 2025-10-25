@@ -13,9 +13,6 @@ data:
   {{- if .Values.config.githubClientId }}
   github-client-id: {{ .Values.config.githubClientId | quote }}
   {{- end }}
-  {{- if .Values.config.demoRepository }}
-  demo-repository: {{ .Values.config.demoRepository | quote }}
-  {{- end }}
   {{- if .Values.config.ingressUrl }}
   ingress-url: {{ .Values.config.ingressUrl | quote }}
   {{- end }}

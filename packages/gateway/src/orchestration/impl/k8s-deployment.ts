@@ -1,15 +1,14 @@
 import * as k8s from "@kubernetes/client-node";
+import { createLogger, ErrorCode, OrchestratorError } from "@peerbot/core";
 import {
   BaseDeploymentManager,
-  createLogger,
   type DeploymentInfo,
-  ErrorCode,
   type ModuleEnvVarsBuilder,
   type OrchestratorConfig,
-  OrchestratorError,
   type QueueJobData,
-} from "@peerbot/core";
+} from "../base-deployment-manager";
 import { buildPlatformMetadata } from "../deployment-utils";
+import { platformRegistry } from "../../platform";
 
 const logger = createLogger("k8s-deployment");
 
@@ -300,12 +299,22 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
           metadata: {
             annotations: {
               // Add platform-specific metadata
-              ...(messageData &&
-                buildPlatformMetadata(
-                  messageData.threadId,
-                  messageData.channelId,
-                  messageData.platformMetadata?.teamId
-                )),
+              ...(messageData?.platform &&
+              messageData?.channelId &&
+              messageData?.threadId &&
+              messageData?.platformMetadata
+                ? (() => {
+                    const platform = platformRegistry.get(messageData.platform);
+                    return platform
+                      ? buildPlatformMetadata(
+                          platform,
+                          messageData.threadId,
+                          messageData.channelId,
+                          messageData.platformMetadata
+                        )
+                      : {};
+                  })()
+                : {}),
               "peerbot.io/created": new Date().toISOString(),
             },
             labels: {

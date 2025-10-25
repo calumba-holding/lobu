@@ -1,6 +1,6 @@
 # Peerbot
 
-**Turn Claude Code into a Slack bot.** Create your own AI coding assistant that works directly in Slack threads.
+**Claude Code as a custom Slack bot.** Create your own custom sandboxedagents that works directly in Slack threads.
 
 ## Quick Start
 
@@ -21,17 +21,14 @@ That's it! Your bot is now running and ready to help in Slack.
    - Bot Token (xoxb-...)
    - App Token (xapp-...)
 
-2. **Anthropic API Key** ([Get one here](https://console.anthropic.com/))
-
-3. **Docker** installed and running
+2. **Docker Compose** installed and running
 
 ## Features
 
-- 💬 **Thread-based conversations** - Each Slack thread = dedicated AI session
+- 💬 **Thread-based conversations** - Each Slack thread = dedicated AI session in a sandboxed environment
 - 🔄 **Persistent memory** - Full conversation history across interactions
 - 🛠️ **Customizable workers** - Add Python packages, system tools, custom scripts
 - 🔐 **MCP OAuth** - Authenticate external services via Slack home tab
-- 🚀 **Multi-platform** - Run locally (Docker), Kubernetes, or cloud providers
 
 ## Worker Customization
 
@@ -88,32 +85,6 @@ Slack Thread → Gateway → Worker Pod → Claude Code
 npm run dev  # Uses Docker Compose
 ```
 
-### Kubernetes (Production)
-```bash
-peerbot deploy --target kubernetes
-```
-
-### Other Platforms
-- AWS ECS/Fargate
-- GCP Cloud Run
-- Cloudflare Containers
-- Azure Container Apps
-
-See [CLI documentation](./packages/cli/README.md) for deployment guides.
-
-## Project Structure
-
-```
-peerbot/
-├── packages/
-│   ├── gateway/         # Slack integration & worker orchestration
-│   ├── worker/          # Claude Code runtime
-│   ├── cli/             # Deployment CLI tool
-│   └── create-peerbot/  # Project scaffolding
-├── charts/              # Helm chart for Kubernetes
-└── scripts/             # Development utilities
-```
-
 ## Contributing
 
 This is a monorepo managed by Bun workspaces.
@@ -132,8 +103,6 @@ make dev
 ./slack-qa-bot.js "test prompt"
 ```
 
-See [CLAUDE.md](./CLAUDE.md) for development guidelines.
-
 ## Published Packages
 
 **NPM:**
@@ -144,13 +113,3 @@ See [CLAUDE.md](./CLAUDE.md) for development guidelines.
 **Docker Hub:**
 - [`buremba/peerbot-gateway`](https://hub.docker.com/r/buremba/peerbot-gateway)
 - [`buremba/peerbot-worker-base`](https://hub.docker.com/r/buremba/peerbot-worker-base)
-
-## License
-
-MIT
-
-## Support
-
-- [GitHub Issues](https://github.com/buremba/peerbot/issues)
-- [Documentation](./packages/cli/README.md)
-- [Custom Base Images Guide](./packages/worker/docs/custom-base-image.md)

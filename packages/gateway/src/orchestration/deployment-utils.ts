@@ -1,9 +1,44 @@
 import { moduleRegistry } from "@peerbot/core";
+import type { PlatformAdapter } from "../platform";
 
 /**
- * Shared utilities for deployment managers
+ * Shared types and utilities for deployment managers
  * Reduces code duplication between Docker and K8s implementations
  */
+
+// ============================================================================
+// Metadata Types
+// ============================================================================
+
+export interface PlatformMetadata {
+  teamId?: string;
+  originalMessageTs?: string;
+  botResponseTs?: string;
+}
+
+export interface RoutingMetadata {
+  targetThreadId?: string;
+  deploymentName?: string;
+  threadId?: string;
+  userId?: string;
+  timestamp?: string;
+}
+
+// Re-export core error types for convenience
+export type {
+  ErrorCode,
+  OrchestratorError,
+} from "@peerbot/core";
+
+// Re-export orchestration types
+export type {
+  OrchestratorConfig,
+  QueueJobData,
+} from "./base-deployment-manager";
+
+// ============================================================================
+// Utility Functions
+// ============================================================================
 
 /**
  * Resource parsing utilities for memory and CPU limits
@@ -68,22 +103,19 @@ export function buildDeploymentLabels(
 
 /**
  * Build platform metadata annotations
- * Creates platform-specific URLs and metadata for deployments
+ * Delegates to the platform adapter to create platform-specific metadata
  */
 export function buildPlatformMetadata(
+  platform: PlatformAdapter,
   threadId: string,
   channelId: string,
-  teamId?: string
+  platformMetadata: Record<string, any>
 ): Record<string, string> {
-  const metadata: Record<string, string> = {};
-
-  // Add platform thread URL if we have team ID (currently Slack-specific)
-  if (teamId) {
-    metadata.thread_url = `https://app.slack.com/client/${teamId}/${channelId}/thread/${threadId}`;
-    metadata.team_id = teamId;
-  }
-
-  return metadata;
+  return platform.buildDeploymentMetadata(
+    threadId,
+    channelId,
+    platformMetadata
+  );
 }
 
 /**

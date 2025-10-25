@@ -1,12 +1,15 @@
 #!/usr/bin/env bun
 
-import { createLogger } from "@peerbot/core";
+import {
+  createLogger,
+  type AgentOptions,
+  type ThreadResponsePayload,
+} from "@peerbot/core";
 import type {
   GatewayIntegrationInterface,
   WorkerExecutor,
-} from "../interfaces";
-import type { WorkerConfig } from "../types";
-import { ActivityTracker } from "./activity-tracker";
+  WorkerConfig,
+} from "../core/types";
 
 const logger = createLogger("gateway");
 
@@ -26,22 +29,9 @@ export interface PlatformMetadata {
 }
 
 /**
- * Agent execution options (model, tools, timeouts)
+ * Message payload for agent execution
  */
-export interface AgentOptions {
-  model?: string;
-  maxTokens?: number;
-  temperature?: number;
-  allowedTools?: string | string[];
-  disallowedTools?: string | string[];
-  timeoutMinutes?: number | string;
-  [key: string]: string | number | boolean | string[] | undefined;
-}
-
-/**
- * Thread message payload for agent execution
- */
-interface ThreadMessagePayload {
+export interface MessagePayload {
   botId: string;
   userId: string;
   threadId: string;
@@ -51,16 +41,12 @@ interface ThreadMessagePayload {
   messageText: string;
   platformMetadata: PlatformMetadata;
   agentOptions: AgentOptions;
+  jobId?: string; // Optional job ID from gateway
   routingMetadata?: {
     targetThreadId: string;
     userId: string;
   };
 }
-
-/**
- * Generic message payload (can be extended for different message types)
- */
-export type MessagePayload = ThreadMessagePayload;
 
 export interface QueuedMessage {
   payload: MessagePayload;
@@ -70,46 +56,13 @@ export interface QueuedMessage {
 /**
  * Response data sent back to gateway
  */
-interface ResponseData {
-  messageId: string;
-  channelId: string;
-  threadId: string;
-  userId: string;
-  timestamp: number;
+type ResponseData = ThreadResponsePayload & {
   originalMessageId: string;
-  claudeSessionId?: string;
-  botResponseId?: string;
-  teamId?: string;
-  // Content-related fields
-  content?: string;
-  delta?: string;
-  finalContent?: string;
-  // Status and metadata
-  statusUpdate?: unknown;
-  moduleData?: unknown;
-  processedMessageIds?: string[];
-  // Streaming-related
-  isStreamDelta?: boolean;
-  isFullReplacement?: boolean;
-  seq?: number;
-  usedStreaming?: boolean;
-  // Error handling
-  error?: string;
-}
-
-/**
- * Data received from gateway for thread messages
- */
-interface ThreadMessageData extends ThreadMessagePayload {
-  jobId?: string;
-}
+};
 
 export interface BatcherConfig {
-  idleThreshold?: number;
-  initialCollectionWindow?: number;
-  subsequentCollectionWindow?: number;
-  quietPeriodMs?: number;
   onBatchReady?: (messages: QueuedMessage[]) => Promise<void>;
+  batchWindowMs?: number;
 }
 
 // ============================================================================
@@ -117,189 +70,90 @@ export interface BatcherConfig {
 // ============================================================================
 
 /**
- * Handles intelligent message batching with adaptive timing
+ * Simple message batcher - collects messages for a short window, then processes
  */
 export class MessageBatcher {
-  private collectionTimer: NodeJS.Timeout | null = null;
-  private collectionQuietTimer: NodeJS.Timeout | null = null;
-  private isFinalizingCollection = false;
-  private collectingMessages: QueuedMessage[] = [];
-  private lastActivityTime = 0;
-  private hasStartedSession = false;
-  private isProcessing = false;
   private messageQueue: QueuedMessage[] = [];
-
-  // Configurable timing parameters
-  private idleThreshold: number;
-  private initialCollectionWindow: number;
-  private subsequentCollectionWindow: number;
-  private quietPeriodMs: number;
-  private onBatchReady?: (messages: QueuedMessage[]) => Promise<void>;
+  private isProcessing = false;
+  private batchTimer: NodeJS.Timeout | null = null;
+  private readonly batchWindowMs: number;
+  private readonly onBatchReady?: (messages: QueuedMessage[]) => Promise<void>;
 
   constructor(config: BatcherConfig = {}) {
-    this.idleThreshold = config.idleThreshold ?? 5000;
-    this.initialCollectionWindow = config.initialCollectionWindow ?? 5000;
-    this.subsequentCollectionWindow = config.subsequentCollectionWindow ?? 5000;
-    this.quietPeriodMs = config.quietPeriodMs ?? 3000;
+    this.batchWindowMs = config.batchWindowMs ?? 2000; // 2 second window by default
     this.onBatchReady = config.onBatchReady;
   }
 
   async addMessage(message: QueuedMessage): Promise<void> {
-    const now = Date.now();
-    const timeSinceLastActivity = now - this.lastActivityTime;
+    this.messageQueue.push(message);
 
-    if (this.collectionTimer) {
+    // If already processing, message will be picked up in next batch
+    if (this.isProcessing) {
       logger.info(
-        `Adding message to ongoing collection (${this.collectingMessages.length + 1} messages)`
+        `Message queued (${this.messageQueue.length} pending, processing in progress)`
       );
-      this.collectingMessages.push(message);
-      this.resetQuietTimer();
-    } else if (!this.hasStartedSession && !this.isProcessing) {
+      return;
+    }
+
+    // If no batch timer running, start one
+    if (!this.batchTimer) {
       logger.info(
-        `Starting initial ${this.initialCollectionWindow}ms collection window for first message`
+        `Starting ${this.batchWindowMs}ms batch window (${this.messageQueue.length} message(s))`
       );
-      this.startCollectionWindow(this.initialCollectionWindow, message);
-    } else if (this.isProcessing) {
-      logger.info(
-        `Queueing message for processing after current batch completes`
-      );
-      this.messageQueue.push(message);
-    } else if (timeSinceLastActivity > this.idleThreshold) {
-      logger.info(
-        `Starting ${this.subsequentCollectionWindow}ms collection window after ${timeSinceLastActivity}ms idle`
-      );
-      this.startCollectionWindow(this.subsequentCollectionWindow, message);
+      this.batchTimer = setTimeout(() => {
+        this.processBatch();
+      }, this.batchWindowMs);
     } else {
       logger.info(
-        `Processing message immediately (${timeSinceLastActivity}ms since last activity)`
+        `Message added to batch window (${this.messageQueue.length} pending)`
       );
-      this.messageQueue.push(message);
-      await this.processQueueSequentially();
     }
   }
 
-  private startCollectionWindow(
-    duration: number,
-    firstMessage: QueuedMessage
-  ): void {
-    this.collectingMessages = [firstMessage];
-
-    const finalizeCollection = async () => {
-      if (this.isFinalizingCollection) return;
-      this.isFinalizingCollection = true;
-
-      logger.info(
-        `Collection window ended, processing ${this.collectingMessages.length} message(s)`
-      );
-
-      this.messageQueue.push(...this.collectingMessages);
-      this.collectingMessages = [];
-
-      if (this.collectionTimer) {
-        clearTimeout(this.collectionTimer);
-        this.collectionTimer = null;
-      }
-      if (this.collectionQuietTimer) {
-        clearTimeout(this.collectionQuietTimer);
-        this.collectionQuietTimer = null;
-      }
-
-      this.isFinalizingCollection = false;
-
-      if (!this.isProcessing) {
-        await this.processQueueSequentially();
-      }
-    };
-
-    this.collectionTimer = setTimeout(finalizeCollection, duration);
-    this.scheduleQuietTimer(finalizeCollection);
-  }
-
-  private scheduleQuietTimer(finalizeCallback: () => Promise<void>): void {
-    if (this.collectionQuietTimer) {
-      clearTimeout(this.collectionQuietTimer);
+  private async processBatch(): Promise<void> {
+    if (this.batchTimer) {
+      clearTimeout(this.batchTimer);
+      this.batchTimer = null;
     }
-    this.collectionQuietTimer = setTimeout(
-      finalizeCallback,
-      this.quietPeriodMs
-    );
-  }
 
-  private resetQuietTimer(): void {
-    const finalizeCollection = async () => {
-      if (this.isFinalizingCollection) return;
-      this.isFinalizingCollection = true;
+    if (this.messageQueue.length === 0) {
+      return;
+    }
 
-      logger.info(
-        `Quiet period ended, processing ${this.collectingMessages.length} message(s)`
-      );
-
-      this.messageQueue.push(...this.collectingMessages);
-      this.collectingMessages = [];
-
-      if (this.collectionTimer) {
-        clearTimeout(this.collectionTimer);
-        this.collectionTimer = null;
-      }
-      if (this.collectionQuietTimer) {
-        clearTimeout(this.collectionQuietTimer);
-        this.collectionQuietTimer = null;
-      }
-
-      this.isFinalizingCollection = false;
-
-      if (!this.isProcessing) {
-        await this.processQueueSequentially();
-      }
-    };
-
-    this.scheduleQuietTimer(finalizeCollection);
-  }
-
-  private async processQueueSequentially(): Promise<void> {
     this.isProcessing = true;
-    this.lastActivityTime = Date.now();
 
     try {
-      while (this.messageQueue.length > 0) {
-        const messagesToProcess = [...this.messageQueue];
-        this.messageQueue = [];
+      const messagesToProcess = [...this.messageQueue];
+      this.messageQueue = [];
 
+      logger.info(`Processing batch of ${messagesToProcess.length} messages`);
+      messagesToProcess.sort((a, b) => a.timestamp - b.timestamp);
+
+      if (this.onBatchReady) {
+        await this.onBatchReady(messagesToProcess);
+      }
+
+      // If more messages arrived during processing, start new batch
+      if (this.messageQueue.length > 0 && !this.batchTimer) {
         logger.info(
-          `Processing batch of ${messagesToProcess.length} messages sequentially`
+          `Starting new batch window for ${this.messageQueue.length} queued messages`
         );
-
-        messagesToProcess.sort((a, b) => a.timestamp - b.timestamp);
-
-        if (this.onBatchReady) {
-          await this.onBatchReady(messagesToProcess);
-        }
-
-        this.lastActivityTime = Date.now();
+        this.batchTimer = setTimeout(() => {
+          this.processBatch();
+        }, this.batchWindowMs);
       }
     } catch (error) {
-      logger.error("Error during sequential message processing:", error);
+      logger.error("Error during batch processing:", error);
       throw error;
     } finally {
       this.isProcessing = false;
-      this.lastActivityTime = Date.now();
-      this.hasStartedSession = true;
     }
   }
 
   stop(): void {
-    if (this.collectionTimer) {
-      clearTimeout(this.collectionTimer);
-      this.collectionTimer = null;
-    }
-    if (this.collectionQuietTimer) {
-      clearTimeout(this.collectionQuietTimer);
-      this.collectionQuietTimer = null;
-    }
-
-    if (this.collectingMessages.length > 0) {
-      this.messageQueue.push(...this.collectingMessages);
-      this.collectingMessages = [];
+    if (this.batchTimer) {
+      clearTimeout(this.batchTimer);
+      this.batchTimer = null;
     }
   }
 
@@ -308,7 +162,7 @@ export class MessageBatcher {
   }
 
   getPendingCount(): number {
-    return this.messageQueue.length + this.collectingMessages.length;
+    return this.messageQueue.length;
   }
 }
 
@@ -336,7 +190,8 @@ export class GatewayIntegration implements GatewayIntegrationInterface {
   private finalContent?: string;
   private lastStatus?: string;
   private accumulatedStreamContent: string = "";
-  private activityTracker: ActivityTracker;
+  private recentActivities: string[] = [];
+  private readonly maxActivities = 5;
 
   constructor(
     dispatcherUrl: string,
@@ -347,7 +202,8 @@ export class GatewayIntegration implements GatewayIntegrationInterface {
     originalMessageTs: string,
     claudeSessionId: string | undefined = undefined,
     botResponseTs: string | undefined = undefined,
-    teamId: string | undefined = undefined
+    teamId: string | undefined = undefined,
+    processedMessageIds: string[] = []
   ) {
     this.dispatcherUrl = dispatcherUrl;
     this.workerToken = workerToken;
@@ -358,23 +214,54 @@ export class GatewayIntegration implements GatewayIntegrationInterface {
     this.claudeSessionId = claudeSessionId;
     this.botResponseTs = botResponseTs;
     this.teamId = teamId;
-    this.activityTracker = new ActivityTracker(5);
+    this.processedMessageIds = processedMessageIds;
   }
 
   setJobId(jobId: string): void {
     this.jobId = jobId;
   }
 
-  setProcessedMessages(messageIds: string[]): void {
-    this.processedMessageIds = messageIds;
-  }
-
-  setBotResponseTs(botResponseTs: string): void {
-    this.botResponseTs = botResponseTs;
-  }
-
   setModuleData(moduleData: Record<string, unknown>): void {
     this.moduleData = moduleData;
+  }
+
+  /**
+   * Add emoji prefix to activity based on content
+   */
+  private addEmojiToActivity(activity: string): string {
+    // If already has emoji, return as-is
+    if (/^[\u{1F300}-\u{1F9FF}]|^[\u{2600}-\u{26FF}]/u.test(activity)) {
+      return activity;
+    }
+
+    // Add appropriate emoji based on activity type
+    if (activity.includes("running") || activity.includes("executing"))
+      return `⚡ ${activity}`;
+    if (activity.includes("reading") || activity.includes("loading"))
+      return `📖 ${activity}`;
+    if (activity.includes("writing") || activity.includes("saving"))
+      return `📝 ${activity}`;
+    if (activity.includes("editing")) return `✏️ ${activity}`;
+    if (activity.includes("searching") || activity.includes("finding"))
+      return `🔍 ${activity}`;
+    if (activity.includes("thinking") || activity.includes("analyzing"))
+      return `💭 ${activity}`;
+    if (activity.includes("launching") || activity.includes("starting"))
+      return `🚀 ${activity}`;
+    if (activity.includes("fetching") || activity.includes("downloading"))
+      return `🌐 ${activity}`;
+    if (activity.includes("asking")) return `❓ ${activity}`;
+    if (activity.includes("updating")) return `🔄 ${activity}`;
+    if (
+      activity.includes("setting up") ||
+      activity.includes("preparing") ||
+      activity.includes("resuming")
+    )
+      return `⚙️ ${activity}`;
+    if (activity.includes("burning")) return `🔥 ${activity}`;
+
+    // Default emoji
+    return `🔧 ${activity}`;
   }
 
   async updateStatus(
@@ -388,20 +275,25 @@ export class GatewayIntegration implements GatewayIntegrationInterface {
 
     this.lastStatus = status || undefined;
 
-    // Add status to activity tracker if non-empty
+    // Add status to recent activities if non-empty
     if (status && status.trim() !== "") {
-      this.activityTracker.addActivity(status);
+      const activityWithEmoji = this.addEmojiToActivity(status);
+      this.recentActivities.push(activityWithEmoji);
+
+      // Keep only last N activities
+      if (this.recentActivities.length > this.maxActivities) {
+        this.recentActivities.shift();
+      }
     }
 
-    // Get all activities for loading messages
-    const activities = this.activityTracker.getActivities();
-
-    const statusPayload: Record<string, unknown> = { status };
+    const statusPayload: NonNullable<ThreadResponsePayload["statusUpdate"]> = {
+      status,
+    };
     // Use provided loadingMessages or fall back to tracked activities
     if (loadingMessages && loadingMessages.length > 0) {
       statusPayload.loadingMessages = loadingMessages;
-    } else if (activities.length > 0) {
-      statusPayload.loadingMessages = activities;
+    } else if (this.recentActivities.length > 0) {
+      statusPayload.loadingMessages = [...this.recentActivities];
     }
 
     await this.sendResponse({
@@ -417,11 +309,7 @@ export class GatewayIntegration implements GatewayIntegrationInterface {
     });
   }
 
-  async signalDone(
-    finalDelta?: string,
-    _seq?: number,
-    fullContent?: string
-  ): Promise<void> {
+  async signalDone(finalDelta?: string, fullContent?: string): Promise<void> {
     // Store full content for completion signal
     if (fullContent) {
       this.finalContent = fullContent;
@@ -570,7 +458,7 @@ export class GatewayIntegration implements GatewayIntegrationInterface {
         );
         if (payload.isStreamDelta) {
           logger.info(
-            `[WORKER-HTTP] Stream delta payload: isStreamDelta=${payload.isStreamDelta}, seq=${payload.seq}, deltaLength=${payload.delta?.length}`
+            `[WORKER-HTTP] Stream delta payload: isStreamDelta=${payload.isStreamDelta}, deltaLength=${payload.delta?.length}`
           );
         }
 
@@ -806,24 +694,22 @@ export class GatewayClient {
     }
   }
 
-  private async handleThreadMessage(data: ThreadMessageData): Promise<void> {
-    const { jobId, ...payload } = data;
-    if (jobId) {
-      this.currentJobId = jobId;
-      logger.debug(`Received job ${jobId}`);
+  private async handleThreadMessage(data: MessagePayload): Promise<void> {
+    if (data.jobId) {
+      this.currentJobId = data.jobId;
+      logger.debug(`Received job ${data.jobId}`);
     }
 
-    if (payload.userId.toLowerCase() !== this.userId.toLowerCase()) {
+    if (data.userId.toLowerCase() !== this.userId.toLowerCase()) {
       logger.warn(
-        `Received message for user ${payload.userId}, but this worker is for user ${this.userId}`
+        `Received message for user ${data.userId}, but this worker is for user ${this.userId}`
       );
       return;
     }
 
-    const now = Date.now();
     const queuedMessage: QueuedMessage = {
-      payload: payload as ThreadMessagePayload,
-      timestamp: now,
+      payload: data,
+      timestamp: Date.now(),
     };
 
     await this.messageBatcher.addMessage(queuedMessage);
@@ -909,11 +795,15 @@ export class GatewayClient {
           gatewayIntegration.setJobId(this.currentJobId);
         }
 
-        if (processedIds && processedIds.length > 0) {
-          gatewayIntegration.setProcessedMessages(processedIds);
-        } else if (message?.payload?.messageId) {
-          gatewayIntegration.setProcessedMessages([message.payload.messageId]);
-        }
+        // Set processedMessageIds directly on the integration instance
+        const messageIds =
+          processedIds && processedIds.length > 0
+            ? processedIds
+            : message?.payload?.messageId
+              ? [message.payload.messageId]
+              : [];
+
+        (gatewayIntegration as any).processedMessageIds = messageIds;
       }
 
       await this.currentWorker.execute();
@@ -953,7 +843,7 @@ export class GatewayClient {
     }
   }
 
-  private payloadToWorkerConfig(payload: ThreadMessagePayload): WorkerConfig {
+  private payloadToWorkerConfig(payload: MessagePayload): WorkerConfig {
     const platformMetadata = payload.platformMetadata;
 
     const agentOptions = {

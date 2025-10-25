@@ -24,7 +24,6 @@ kubernetes:
 config:
   githubOrganization: "peerbot-community"
   githubClientId: ""  # Add your GitHub OAuth App Client ID
-  demoRepository: "https://github.com/buremba/peerbot.ai"  # Enable demo feature
   ingressUrl: "https://gateway.peerbot.ai"  # Critical for OAuth redirects
   sessionTimeoutMinutes: "5"
 

@@ -57,7 +57,6 @@ This script:
 - **No Repository**: Tests behavior when user has no repo configured
 - **Access Denied**: Tests error handling for repository access issues
 - **Valid Repository**: Tests successful repository access
-- **Demo Flow**: Tests the "Try Demo" button and repository setup
 
 ## Architecture
 

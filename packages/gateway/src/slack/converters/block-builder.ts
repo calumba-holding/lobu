@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { createLogger } from "@peerbot/core";
-import { SLACK } from "../constants";
+import { SLACK } from "../config";
 import type { SlackBlock, SlackBlockElement } from "../types";
 import { convertMarkdownToSlack } from "./markdown";
 
@@ -20,6 +20,9 @@ export interface BlockBuilderOptions {
   maxBlocks?: number;
   maxTextLength?: number;
 }
+
+// Helper type for building blocks - use any to bypass Slack's strict Block union
+type BlockBuilder = any;
 
 /**
  * Builds Slack Block Kit blocks from markdown content with proper validation
@@ -44,7 +47,7 @@ export class SlackBlockBuilder {
 
     // Convert markdown to Slack format
     const text = convertMarkdownToSlack(content);
-    const blocks: SlackBlock[] = [];
+    const blocks: BlockBuilder[] = [];
 
     // Split long text into multiple section blocks
     if (text) {
@@ -76,7 +79,7 @@ export class SlackBlockBuilder {
     const errorContent = `❌ **Error occurred**\n\n**Error:** \`${errorMessage}\``;
     const text = convertMarkdownToSlack(errorContent);
 
-    const blocks: SlackBlock[] = [
+    const blocks: BlockBuilder[] = [
       {
         type: "section",
         text: {
@@ -97,7 +100,7 @@ export class SlackBlockBuilder {
    * Add text content as section blocks, splitting if too long
    */
   private addTextBlocks(
-    blocks: SlackBlock[],
+    blocks: BlockBuilder[],
     text: string,
     maxTextLength: number
   ): void {
@@ -141,7 +144,7 @@ export class SlackBlockBuilder {
    * Add action buttons as an actions block
    */
   private addActionButtons(
-    blocks: SlackBlock[],
+    blocks: BlockBuilder[],
     buttons: ModuleButton[]
   ): void {
     // Validate buttons
@@ -181,7 +184,7 @@ export class SlackBlockBuilder {
    * Validate blocks and truncate if exceeding limits
    */
   private validateBlocks(
-    blocks: SlackBlock[],
+    blocks: BlockBuilder[],
     maxBlocks: number
   ): SlackBlock[] {
     if (blocks.length <= maxBlocks) {

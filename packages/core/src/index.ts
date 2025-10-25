@@ -1,27 +1,34 @@
-// Export shared types
+// Export shared types and utilities that are truly used by both worker and gateway
 
-// Export deployment management
-export * from "./deployment/base-deployment-manager";
 // Export error classes
 export * from "./errors";
 
-// Export centralized utilities
+// Export centralized logger
 export * from "./logger";
+
 // Export module system
-export * from "./modules/module-registry";
-// Export queue system
-export * from "./queue";
-// Export Redis client
-export { type IRedisClient, RedisClient } from "./redis/redis-client";
+export * from "./modules";
+
+// Export Sentry
 export { initSentry } from "./sentry";
-// Export utilities
-export { SessionUtils } from "./session-utils";
+
+// Export core types
 export type {
   ClaudeExecutionOptions,
   ConversationMessage,
   SessionContext,
+  LogLevel,
+  AgentOptions,
+  InstructionProvider,
+  InstructionContext,
+  ThreadResponsePayload,
 } from "./types";
+
 // Export encryption utilities
 export * from "./utils/encryption";
+
 // Export worker authentication
 export * from "./utils/worker-auth";
+
+// Export constants
+export { TIME, REDIS_KEYS, DEFAULTS } from "./constants";

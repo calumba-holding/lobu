@@ -1,26 +1,24 @@
-import { createLogger, SessionUtils } from "@peerbot/core";
-import { DEFAULTS } from "../../constants";
-import { setThreadStatus } from "../utils/thread-status";
-
-const logger = createLogger("dispatcher");
-
+import { createLogger, DEFAULTS } from "@peerbot/core";
+import type { QueueProducer } from "../../infrastructure/queue/queue-producer";
 import type {
-  QueueProducer,
   ThreadMessagePayload,
   WorkerDeploymentPayload,
-} from "@peerbot/gateway/session/queue-producer";
-import type { SessionManager } from "@peerbot/gateway/session/session-manager";
-import type { GatewayConfig } from "../../cli/config";
-import type { ThreadSession } from "../../types";
-import type { SlackContext, SlackWebClient } from "../types";
+} from "../../infrastructure/queue/queue-producer";
+import type { ThreadSession, ISessionManager } from "../../session";
+import { generateSessionKey } from "../../session";
+import { setThreadStatus } from "../utils";
+import type { MessageHandlerConfig } from "../config";
+import type { SlackContext, WebClient, SlackMessageEvent } from "../types";
+
+const logger = createLogger("dispatcher");
 
 export class MessageHandler {
   private readonly SESSION_TTL = DEFAULTS.SESSION_TTL_MS;
 
   constructor(
     private queueProducer: QueueProducer,
-    private config: GatewayConfig,
-    private sessionManager: SessionManager
+    private config: MessageHandlerConfig,
+    private sessionManager: ISessionManager
   ) {}
 
   /**
@@ -36,7 +34,7 @@ export class MessageHandler {
   async handleUserRequest(
     context: SlackContext,
     userRequest: string,
-    client: SlackWebClient
+    client: WebClient
   ): Promise<void> {
     const requestStartTime = Date.now();
     logger.info(
@@ -58,7 +56,7 @@ export class MessageHandler {
     );
 
     // Generate session key with normalized threadTs - use thread creator as userId for consistency
-    const threadCreatorSessionKey = SessionUtils.generateSessionKey({
+    const threadCreatorSessionKey = generateSessionKey({
       platform: "slack",
       channelId: context.channelId,
       userId: context.userId,
@@ -152,8 +150,8 @@ export class MessageHandler {
             botResponseId: threadSession.botResponseId,
           },
           agentOptions: {
-            allowedTools: this.config.claude.allowedTools,
-            model: this.config.claude.model,
+            allowedTools: this.config.agentOptions.allowedTools,
+            model: this.config.agentOptions.model,
             timeoutMinutes: this.config.sessionTimeoutMinutes.toString(),
           },
           routingMetadata: {
@@ -188,7 +186,7 @@ export class MessageHandler {
             botResponseId: threadSession.botResponseId,
           },
           agentOptions: {
-            ...this.config.claude,
+            ...this.config.agentOptions,
             timeoutMinutes: this.config.sessionTimeoutMinutes.toString(),
           },
           routingMetadata: {
@@ -243,15 +241,17 @@ export class MessageHandler {
   /**
    * Extract Slack context from event
    */
-  extractSlackContext(event: any): SlackContext {
+  extractSlackContext(event: SlackMessageEvent): SlackContext {
     return {
       channelId: event.channel,
-      userId: event.user,
+      userId: event.user || "",
       teamId: event.team || "",
       threadTs: event.thread_ts,
       messageTs: event.ts,
       text: event.text || "",
-      userDisplayName: event.user_profile?.display_name || "Unknown User",
+      userDisplayName:
+        (event as { user_profile?: { display_name?: string } }).user_profile
+          ?.display_name || "Unknown User",
     };
   }
 

@@ -1,30 +1,44 @@
 #!/usr/bin/env bun
 
 import type { IModuleRegistry } from "@peerbot/core";
-import {
-  createLogger,
-  type createMessageQueue,
-  type IMessageQueue,
-  type IRedisClient,
-  RedisClient,
-} from "@peerbot/core";
+import type { ThreadResponsePayload } from "../infrastructure/queue";
+import type { IMessageQueue } from "../infrastructure/queue";
+import type Redis from "ioredis";
+import { createLogger, DEFAULTS, REDIS_KEYS } from "@peerbot/core";
 import { WebClient } from "@slack/web-api";
-import { DEFAULTS, REDIS_KEYS } from "../constants";
+import type { AnyBlock } from "@slack/types";
 import {
   type ModuleButton,
   SlackBlockBuilder,
-} from "../slack/converters/block-builder";
-import { extractCodeBlockActions } from "../slack/converters/blockkit";
-import { convertMarkdownToSlack } from "../slack/converters/markdown";
-import { setThreadStatus } from "../slack/utils/thread-status";
+} from "./converters/block-builder";
+import { extractCodeBlockActions } from "./converters/blockkit";
+import { convertMarkdownToSlack } from "./converters/markdown";
+import { setThreadStatus } from "./utils";
 
 const logger = createLogger("dispatcher");
+
+/**
+ * Type for Slack chat stream (undocumented API)
+ */
+interface ChatStream {
+  append(data: { markdown_text: string }): Promise<void>;
+  stop(): Promise<void>;
+}
+
+/**
+ * Type for queue job structure
+ */
+interface QueueJob<T = unknown> {
+  id: string;
+  data: T;
+  [key: string]: unknown;
+}
 
 /**
  * Represents a single Slack chatStream session
  */
 class StreamSession {
-  private stream: any;
+  private stream: ChatStream | null = null;
   private started: boolean = false;
   private slackClient: WebClient;
   private channelId: string;
@@ -89,6 +103,7 @@ class StreamSession {
   async stop(): Promise<void> {
     if (this.started && this.stream) {
       await this.stream.stop();
+      this.stream = null;
       logger.info(
         `Stopped Slack stream for channel ${this.channelId}, thread ${this.threadTs}`
       );
@@ -150,39 +165,13 @@ class StreamSessionManager {
   }
 }
 
-interface ThreadResponsePayload {
-  messageId: string;
-  channelId: string;
-  threadId: string;
-  userId: string;
-  teamId?: string; // Platform team/workspace ID
-  content?: string;
-  delta?: string; // Stream delta content
-  isStreamDelta?: boolean; // Whether this is a stream delta
-  isFullReplacement?: boolean; // Whether the delta is a full content replacement (restart stream)
-  finalContent?: string; // Final content when streaming completes
-  usedStreaming?: boolean; // Whether streaming was used
-  processedMessageIds?: string[];
-  reaction?: string;
-  error?: string;
-  timestamp: number;
-  originalMessageId?: string; // User's original message ID for reactions
-  moduleData?: Record<string, unknown>; // Generic module data from all modules
-  botResponseId?: string; // Bot's response message ID for updates
-  claudeSessionId?: string; // Claude session ID for tracking bot messages per session
-  statusUpdate?: {
-    status: string;
-    loadingMessages?: string[];
-  };
-}
-
 /**
  * Consumer that listens to thread_response queue and updates Slack messages
  * This handles all Slack communication that was previously done by the workerdon
  */
 export class ThreadResponseConsumer {
   private queue: IMessageQueue;
-  private redis: IRedisClient;
+  private redis: Redis;
   private slackClient: WebClient;
   private isRunning = false;
   private blockBuilder: SlackBlockBuilder;
@@ -191,7 +180,7 @@ export class ThreadResponseConsumer {
   private streamSessionManager: StreamSessionManager;
 
   constructor(
-    queue: ReturnType<typeof createMessageQueue>,
+    queue: IMessageQueue,
     slackToken: string,
     moduleRegistry: IModuleRegistry
   ) {
@@ -201,7 +190,7 @@ export class ThreadResponseConsumer {
     this.moduleRegistry = moduleRegistry;
     this.streamSessionManager = new StreamSessionManager(this.slackClient);
     // Get Redis client from queue connection pool (queue must be started)
-    this.redis = new RedisClient(this.queue.getRedisClient());
+    this.redis = this.queue.getRedisClient();
   }
 
   /**
@@ -264,8 +253,8 @@ export class ThreadResponseConsumer {
   /**
    * Parse thread response job data from queue format
    */
-  private parseThreadResponseJob(job: any): ThreadResponsePayload {
-    let data;
+  private parseThreadResponseJob(job: unknown): ThreadResponsePayload {
+    let data: ThreadResponsePayload;
 
     // Handle serialized format from queue (similar to worker queue consumer)
     if (typeof job === "object" && job !== null) {
@@ -403,7 +392,7 @@ export class ThreadResponseConsumer {
   /**
    * Handle thread response message jobs
    */
-  private async handleThreadResponse(job: any): Promise<void> {
+  private async handleThreadResponse(job: unknown): Promise<void> {
     let data: ThreadResponsePayload | undefined;
 
     try {
@@ -487,15 +476,20 @@ export class ThreadResponseConsumer {
           isFirstResponse
         );
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       // Check if it's a validation error that shouldn't be retried
+      const err = error as {
+        data?: { error?: string };
+        code?: string;
+        message?: string;
+      };
       if (
-        error?.data?.error === "invalid_blocks" ||
-        error?.data?.error === "msg_too_long" ||
-        error?.code === "slack_webapi_platform_error"
+        err?.data?.error === "invalid_blocks" ||
+        err?.data?.error === "msg_too_long" ||
+        err?.code === "slack_webapi_platform_error"
       ) {
         logger.error(
-          `Slack validation error in job ${job.id}: ${error?.data?.error || error.message}`
+          `Slack validation error: ${err?.data?.error || err.message}`
         );
 
         // Try to inform the user about the validation error
@@ -531,7 +525,7 @@ export class ThreadResponseConsumer {
   private async parseMessageContent(
     content: string,
     data: ThreadResponsePayload
-  ): Promise<{ text: string; blocks: any[] }> {
+  ): Promise<{ text: string; blocks: AnyBlock[] }> {
     // Check if content is JSON with blocks (from authentication prompt)
     try {
       const parsed = JSON.parse(content);
@@ -589,12 +583,12 @@ export class ThreadResponseConsumer {
     channelId: string,
     threadTs: string,
     text: string,
-    blocks: any[],
+    blocks: AnyBlock[],
     isFirstResponse: boolean,
     botMessageTs?: string
   ): Promise<string | undefined> {
     logger.debug(
-      `Final blocks to send - count: ${blocks.length}, types: ${blocks.map((b: any) => b.type).join(", ")}`
+      `Final blocks to send - count: ${blocks.length}, types: ${blocks.map((b) => b.type).join(", ")}`
     );
 
     if (isFirstResponse) {
@@ -708,17 +702,18 @@ export class ThreadResponseConsumer {
         isFirstResponse,
         botMessageTs
       );
-    } catch (error: any) {
+    } catch (error: unknown) {
       // Handle specific Slack errors
-      if (error.code === "message_not_found") {
+      const err = error as { code?: string; data?: { error?: string } };
+      if (err.code === "message_not_found") {
         logger.error("Slack message not found - it may have been deleted");
-      } else if (error.code === "channel_not_found") {
+      } else if (err.code === "channel_not_found") {
         logger.error("Slack channel not found - bot may not have access");
-      } else if (error.code === "not_in_channel") {
+      } else if (err.code === "not_in_channel") {
         logger.error("Bot is not in the channel");
       } else if (
-        error.data?.error === "invalid_blocks" ||
-        error.data?.error === "msg_too_long"
+        err.data?.error === "invalid_blocks" ||
+        err.data?.error === "msg_too_long"
       ) {
         // These are Slack validation errors - retrying won't help
         logger.error(`Slack validation error: ${JSON.stringify(error)}`);
@@ -807,9 +802,10 @@ export class ThreadResponseConsumer {
         });
         logger.info(`Error message update result: ${updateResult.ok}`);
       }
-    } catch (updateError: any) {
+    } catch (updateError: unknown) {
+      const err = updateError as { message?: string };
       logger.error(
-        `Failed to send error message to Slack: ${updateError.message}`
+        `Failed to send error message to Slack: ${err.message || updateError}`
       );
       throw updateError;
     }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { DispatcherError } from "../errors";
+import { DispatcherError } from "../errors/dispatcher-error";
 
 /**
  * Slack API errors

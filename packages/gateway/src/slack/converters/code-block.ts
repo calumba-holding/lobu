@@ -1,17 +1,30 @@
 #!/usr/bin/env bun
 
+import type { Button } from "@slack/types";
+
+/**
+ * Metadata structure parsed from code blocks
+ */
+export interface CodeBlockMetadata {
+  action?: string;
+  show?: boolean;
+  [key: string]: string | boolean | number | undefined;
+}
+
 /**
  * Parse metadata from code block strings like "action: create_pr, show: true"
  */
-export function parseCodeBlockMetadata(metadataStr: string): any {
-  const metadata: any = {};
+export function parseCodeBlockMetadata(metadataStr: string): CodeBlockMetadata {
+  const metadata: CodeBlockMetadata = {};
   metadataStr?.split(",").forEach((pair) => {
     const [key, value] = pair.split(":").map((s) => s.trim());
     if (key && value) {
       const cleanKey = key.replace(/"/g, "");
-      let cleanValue: any = value.replace(/"/g, "");
+      let cleanValue: string | boolean | number = value.replace(/"/g, "");
       if (cleanValue === "true") cleanValue = true;
-      if (cleanValue === "false") cleanValue = false;
+      else if (cleanValue === "false") cleanValue = false;
+      else if (!Number.isNaN(Number(cleanValue)))
+        cleanValue = Number(cleanValue);
       metadata[cleanKey] = cleanValue;
     }
   });
@@ -23,14 +36,14 @@ export function parseCodeBlockMetadata(metadataStr: string): any {
  */
 export function processCodeBlockWithAction(
   language: string,
-  metadata: any,
+  metadata: CodeBlockMetadata,
   codeContent: string,
   blockIndex: number,
   generateActionId: (content: string, prefix: string) => string
 ): {
   shouldHideBlock: boolean;
   shouldSkipButton: boolean;
-  button?: any;
+  button?: Button;
   debugMessage?: string;
 } {
   if (language === "blockkit") {
@@ -57,9 +70,9 @@ export function processCodeBlockWithAction(
       codeContent + metadata.action + blockIndex,
       "blockkit_form"
     );
-    const button = {
-      type: "button",
-      text: { type: "plain_text", text: metadata.action },
+    const button: Button = {
+      type: "button" as const,
+      text: { type: "plain_text" as const, text: metadata.action || "Submit" },
       action_id: actionId,
       value: buttonValue,
     };
@@ -98,9 +111,9 @@ export function processCodeBlockWithAction(
         codeContent + metadata.action + blockIndex,
         language
       );
-      const button = {
-        type: "button",
-        text: { type: "plain_text", text: metadata.action },
+      const button: Button = {
+        type: "button" as const,
+        text: { type: "plain_text" as const, text: metadata.action || "Run" },
         action_id: `${language}_${actionId}`,
         value: codeContent,
       };

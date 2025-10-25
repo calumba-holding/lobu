@@ -24,6 +24,67 @@ interface ToolUseBlock {
 }
 
 /**
+ * Tool display configuration - maps tool names to emoji and description formatting
+ */
+const TOOL_DISPLAY_CONFIG: Record<
+  string,
+  {
+    emoji: string;
+    action: string;
+    getParam: (params: Record<string, unknown>) => string;
+  }
+> = {
+  Write: {
+    emoji: "✏️",
+    action: "Writing",
+    getParam: (p) => `\`${p.file_path || ""}\``,
+  },
+  Edit: {
+    emoji: "✏️",
+    action: "Editing",
+    getParam: (p) => `\`${p.file_path || ""}\``,
+  },
+  Bash: {
+    emoji: "👾",
+    action: "Running",
+    getParam: (p) => {
+      const cmd = String(p.command || p.description || "command");
+      return `\`${cmd.length > 50 ? `${cmd.substring(0, 50)}...` : cmd}\``;
+    },
+  },
+  Read: {
+    emoji: "📖",
+    action: "Reading",
+    getParam: (p) => `\`${p.file_path || ""}\``,
+  },
+  Grep: {
+    emoji: "🔍",
+    action: "Searching",
+    getParam: (p) => `\`${p.pattern || ""}\``,
+  },
+  Glob: {
+    emoji: "🔍",
+    action: "Finding",
+    getParam: (p) => `\`${p.pattern || ""}\``,
+  },
+  TodoWrite: {
+    emoji: "📝",
+    action: "Updating task list",
+    getParam: () => "",
+  },
+  WebFetch: {
+    emoji: "🌐",
+    action: "Fetching",
+    getParam: (p) => `\`${p.url || ""}\``,
+  },
+  WebSearch: {
+    emoji: "🔎",
+    action: "Searching web",
+    getParam: (p) => `\`${p.query || ""}\``,
+  },
+};
+
+/**
  * Processes Claude SDK streaming updates and extracts user-friendly content
  * Implements chronological display with task progress and mixed text/tool output
  */
@@ -177,37 +238,14 @@ export class ProgressProcessor {
     const toolName = toolUse.name;
     const params = toolUse.input || {};
 
-    // Helper to safely get string param
-    const getParam = (key: string): string => {
-      const value = params[key];
-      return typeof value === "string" ? value : String(value || "");
-    };
-
-    switch (toolName) {
-      case "Write":
-        return `└ ✏️ **Writing** \`${getParam("file_path")}\``;
-      case "Edit":
-        return `└ ✏️ **Editing** \`${getParam("file_path")}\``;
-      case "Bash": {
-        const command =
-          getParam("command") || getParam("description") || "command";
-        return `└ 👾 **Running** \`${command.length > 50 ? `${command.substring(0, 50)}...` : command}\``;
-      }
-      case "Read":
-        return `└ 📖 **Reading** \`${getParam("file_path")}\``;
-      case "Grep":
-        return `└ 🔍 **Searching** \`${getParam("pattern")}\``;
-      case "Glob":
-        return `└ 🔍 **Finding** \`${getParam("pattern")}\``;
-      case "TodoWrite":
-        return "└ 📝 Updating task list";
-      case "WebFetch":
-        return `└ 🌐 **Fetching** \`${getParam("url")}\``;
-      case "WebSearch":
-        return `└ 🔎 **Searching web** \`${getParam("query")}\``;
-      default:
-        return `└ 🔧 **Using** ${toolName}`;
+    const config = TOOL_DISPLAY_CONFIG[toolName];
+    if (!config) {
+      return `└ 🔧 **Using** ${toolName}`;
     }
+
+    const param = config.getParam(params);
+    const description = param ? `**${config.action}** ${param}` : config.action;
+    return `└ ${config.emoji} ${description}`;
   }
 
   /**

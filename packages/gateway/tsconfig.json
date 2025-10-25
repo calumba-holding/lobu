@@ -2,6 +2,7 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "outDir": "dist",
+    "rootDir": "src",
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
@@ -15,8 +16,10 @@
     "target": "ES2017",
     "skipLibCheck": true,
     "noUnusedLocals": false,
-    "noUnusedParameters": false
+    "noUnusedParameters": false,
+    "composite": true
   },
-  "include": ["src/**/*", "../../modules/**/*"],
-  "exclude": ["dist", "node_modules", "**/*.test.ts", "**/__tests__/**"]
+  "include": ["src/**/*", "../core/src/deployment/base-deployment-manager.ts"],
+  "exclude": ["dist", "node_modules", "**/*.test.ts", "**/__tests__/**"],
+  "references": [{ "path": "../core" }]
 }

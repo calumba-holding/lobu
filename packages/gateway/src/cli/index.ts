@@ -4,10 +4,11 @@ import { createLogger, initSentry } from "@peerbot/core";
 import { Command } from "commander";
 import {
   buildGatewayConfig,
+  buildSlackConfig,
   ConfigError,
   displayConfig,
   loadEnvFile,
-} from "./config";
+} from "../config";
 import { startGateway } from "./gateway";
 
 const logger = createLogger("cli");
@@ -35,22 +36,23 @@ async function main() {
 
         // Build configuration from environment
         const config = buildGatewayConfig();
+        const slackConfig = buildSlackConfig();
 
         // Handle --validate flag
         if (options.validate) {
           console.log("✅ Configuration is valid");
-          displayConfig(config);
+          displayConfig(config, slackConfig);
           process.exit(0);
         }
 
         // Handle --show-config flag
         if (options.showConfig) {
-          displayConfig(config);
+          displayConfig(config, slackConfig);
           process.exit(0);
         }
 
         // Start the gateway
-        await startGateway(config);
+        await startGateway(config, slackConfig);
       } catch (error) {
         if (error instanceof ConfigError) {
           logger.error("❌ Configuration error:", error.message);

@@ -2,6 +2,12 @@
 
 /**
  * Main entry point for Peerbot Gateway
- * Delegates to CLI module for all command-line handling and configuration
+ * Exports types and utilities for other packages (like @peerbot/slack)
  */
-import "./cli";
+
+// Export types and classes for external packages
+export type { GatewayConfig } from "./config";
+export { SessionManager, RedisSessionStore } from "./services/session-manager";
+
+// Start CLI when run directly
+import("./cli");

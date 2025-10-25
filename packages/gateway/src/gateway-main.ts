@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 
 import { createLogger } from "@peerbot/core";
-import type { GatewayConfig } from "./cli/config";
-import type { PlatformAdapter } from "./platform/platform-adapter";
+import { platformRegistry, type PlatformAdapter } from "./platform";
+import type { GatewayConfig } from "./config";
 import { CoreServices } from "./services/core-services";
 
 const logger = createLogger("gateway");
@@ -42,6 +42,8 @@ export class Gateway {
     }
 
     this.platforms.set(platform.name, platform);
+    // Also register in global platform registry for deployment managers
+    platformRegistry.register(platform);
     logger.info(`Platform registered: ${platform.name}`);
     return this;
   }
@@ -50,24 +52,39 @@ export class Gateway {
    * Start the gateway
    * 1. Initialize core services
    * 2. Initialize all platforms
-   * 3. Start all platforms
+   * 3. Register instruction providers from platforms
+   * 4. Start all platforms
    */
   async start(): Promise<void> {
     logger.info("Starting gateway...");
 
     // 1. Initialize core services (Redis, MCP, Anthropic, etc.)
-    logger.info("Step 1/3: Initializing core services");
+    logger.info("Step 1/4: Initializing core services");
     await this.coreServices.initialize();
 
     // 2. Initialize each platform with core services
-    logger.info(`Step 2/3: Initializing ${this.platforms.size} platform(s)`);
+    logger.info(`Step 2/4: Initializing ${this.platforms.size} platform(s)`);
     for (const [name, platform] of this.platforms) {
       logger.info(`Initializing platform: ${name}`);
       await platform.initialize(this.coreServices);
     }
 
-    // 3. Start all platforms
-    logger.info(`Step 3/3: Starting ${this.platforms.size} platform(s)`);
+    // 3. Register instruction providers from platforms
+    logger.info("Step 3/4: Registering instruction providers");
+    const instructionService = this.coreServices.getInstructionService();
+    if (instructionService) {
+      for (const [name, platform] of this.platforms) {
+        if (platform.getInstructionProvider) {
+          const provider = platform.getInstructionProvider();
+          if (provider) {
+            instructionService.registerPlatformProvider(name, provider);
+          }
+        }
+      }
+    }
+
+    // 4. Start all platforms
+    logger.info(`Step 4/4: Starting ${this.platforms.size} platform(s)`);
     for (const [name, platform] of this.platforms) {
       logger.info(`Starting platform: ${name}`);
       await platform.start();
@@ -116,7 +133,6 @@ export class Gateway {
       isRunning: this.isRunning,
       platforms: Array.from(this.platforms.keys()),
       config: {
-        slack: this.config.slack,
         queues: this.config.queues,
       },
     };

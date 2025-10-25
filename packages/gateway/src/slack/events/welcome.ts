@@ -37,7 +37,7 @@ export function setupTeamJoinHandler(
       }
 
       // Send context-aware welcome message
-      await sendContextAwareWelcome(userId, im.channel.id, client);
+      await sendContextAwareWelcome(userId, im.channel.id, client as any);
 
       logger.info(`Context-aware welcome message sent to new user ${userId}`);
     } catch (error) {

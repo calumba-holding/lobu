@@ -10,11 +10,8 @@ import { moduleRegistry } from "@peerbot/core";
 const logger = createLogger("worker");
 
 import { GatewayClient } from "./gateway/client";
-import {
-  startProcessManager,
-  stopProcessManager,
-} from "./integrations/process-manager";
-import { setupWorkspaceEnv } from "./workspace";
+import { startProcessManager, stopProcessManager } from "./mcp/process-manager";
+import { setupWorkspaceEnv } from "./core/workspace";
 
 /**
  * Main entry point for gateway-based persistent worker
@@ -113,6 +110,6 @@ async function main() {
   }
 }
 
-export type { WorkerConfig } from "./types";
+export type { WorkerConfig } from "./core/types";
 
 main();
