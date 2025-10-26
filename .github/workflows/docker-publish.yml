@@ -81,7 +81,7 @@ jobs:
           cache-to: |
             type=gha,mode=max
             type=registry,ref=${{ env.DOCKER_NAMESPACE }}/peerbot-gateway:buildcache,mode=max
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
 
       - name: Extract metadata for Worker
         id: meta-worker
@@ -106,7 +106,7 @@ jobs:
           cache-to: |
             type=gha,mode=max
             type=registry,ref=${{ env.DOCKER_NAMESPACE }}/peerbot-worker:buildcache,mode=max
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
 
       - name: Extract metadata for Worker Base
         id: meta-worker-base
@@ -117,7 +117,7 @@ jobs:
             type=sha,prefix={{branch}}-
             type=raw,value=latest,enable={{is_default_branch}}
             type=raw,value=${{ steps.tag.outputs.tag }}
-            type=raw,value=${{ steps.tag.outputs.version }},enable=${{ steps.tag.outputs.version != '' && (github.event_name == 'release' || github.event_name == 'repository_dispatch') }}
+            type=raw,value=${{ steps.tag.outputs.version }},enable=${{ steps.tag.outputs.version != ''' }}
 
       - name: Build and push Worker Base (for CLI)
         uses: docker/build-push-action@v5
@@ -132,7 +132,7 @@ jobs:
           cache-to: |
             type=gha,mode=max
             type=registry,ref=${{ env.DOCKER_NAMESPACE }}/peerbot-worker-base:buildcache,mode=max
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
 
       - name: Trigger deployment
         if: success() && github.ref == 'refs/heads/main'

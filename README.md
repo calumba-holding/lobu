@@ -6,7 +6,7 @@
 
 ```bash
 # Create a new bot (interactive setup)
-npx peerbot init my-slack-bot
+npm create peerbot my-slack-bot
 
 # Start the bot
 cd my-slack-bot
@@ -105,7 +105,7 @@ make dev
 ## Published Packages
 
 **NPM:**
-- [`@peerbot/cli`](https://www.npmjs.com/package/@peerbot/cli) - Deployment CLI
+- [`create-peerbot`](https://www.npmjs.com/package/create-peerbot) - Deployment CLI
 - [`@peerbot/worker`](https://www.npmjs.com/package/@peerbot/worker) - Worker runtime
 
 **Docker Hub:**

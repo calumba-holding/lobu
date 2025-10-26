@@ -51,7 +51,7 @@ jobs:
           echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
           npm whoami
 
-      - name: Publish @peerbot/cli to NPM
+      - name: Publish create-peerbot to NPM
         if: ${{ steps.release.outputs.release_created }}
         working-directory: packages/cli
         run: npm publish --access public
