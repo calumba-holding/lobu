@@ -597,6 +597,7 @@ export class ThreadResponseConsumer {
         if (
           err.data?.error === "invalid_blocks" ||
           err.data?.error === "msg_too_long" ||
+          err.data?.error === "message_not_in_streaming_state" ||
           err.code === "slack_webapi_platform_error"
         ) {
           logger.error(
@@ -614,6 +615,7 @@ export class ThreadResponseConsumer {
           // 1. If streaming is active, chat.update would conflict with the stream
           // 2. The content has validation issues that would likely fail again
           // 3. The worker should handle showing errors in its own stream content
+          // 4. message_not_in_streaming_state means stream already ended/never started
 
           // Clean up session and clear status on validation error
           if (
@@ -622,8 +624,20 @@ export class ThreadResponseConsumer {
             data?.userId &&
             data?.messageId
           ) {
-            const sessionKey = `${data.userId}:${data.originalMessageId || data.messageId}`;
-            await this.completeStreamingSession(data, sessionKey, null, false);
+            try {
+              const sessionKey = `${data.userId}:${data.originalMessageId || data.messageId}`;
+              await this.completeStreamingSession(
+                data,
+                sessionKey,
+                null,
+                false
+              );
+            } catch (cleanupError) {
+              logger.warn(
+                `Failed to cleanup session after validation error: ${cleanupError}`
+              );
+              // Continue anyway - we don't want cleanup errors to cause retries
+            }
           }
           return;
         }
@@ -638,8 +652,13 @@ export class ThreadResponseConsumer {
         data?.userId &&
         data?.messageId
       ) {
-        const sessionKey = `${data.userId}:${data.originalMessageId || data.messageId}`;
-        await this.completeStreamingSession(data, sessionKey, null, false);
+        try {
+          const sessionKey = `${data.userId}:${data.originalMessageId || data.messageId}`;
+          await this.completeStreamingSession(data, sessionKey, null, false);
+        } catch (cleanupError) {
+          logger.warn(`Failed to cleanup session after error: ${cleanupError}`);
+          // Continue to throw original error - cleanup failures shouldn't mask it
+        }
       }
 
       throw error; // Let the queue handle retry logic for other errors
