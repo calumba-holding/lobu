@@ -403,7 +403,7 @@ export class ThreadResponseConsumer {
     data: ThreadResponsePayload,
     sessionKey: string
   ): Promise<string | null> {
-    if (!data.isStreamDelta || !data.delta) {
+    if (!data.delta) {
       return null;
     }
 
@@ -428,8 +428,8 @@ export class ThreadResponseConsumer {
   private async completeStreamingSession(
     data: ThreadResponsePayload,
     sessionKey: string,
-    existingBotMessageTs: string | null,
-    isFirstResponse: boolean
+    _existingBotMessageTs: string | null,
+    _isFirstResponse: boolean
   ): Promise<void> {
     const hasActiveStream = this.streamSessionManager.hasSession(sessionKey);
 
@@ -437,19 +437,6 @@ export class ThreadResponseConsumer {
       logger.info(`Completing active stream for session ${sessionKey}`);
       await this.streamSessionManager.completeSession(sessionKey);
     } else {
-      if (data.finalContent) {
-        // No streaming or stream wasn't active - post content directly
-        logger.info(
-          `Posting final content directly (${data.finalContent.length} chars) - usedStreaming: ${data.usedStreaming}, hasActiveStream: ${hasActiveStream}`
-        );
-        const botMessageTs = existingBotMessageTs || data.botResponseId;
-        await this.handleMessageUpdate(
-          { ...data, content: data.finalContent },
-          isFirstResponse,
-          botMessageTs
-        );
-      }
-
       // Clear status even if no session exists (handles "is scheduling..." status)
       try {
         await this.slackClient.apiCall("assistant.threads.setStatus", {
@@ -508,6 +495,12 @@ export class ThreadResponseConsumer {
       let existingBotMessageTs = data.botResponseId || redisBotMessageTs;
       let isFirstResponse = !existingBotMessageTs;
 
+      // Handle ephemeral messages (OAuth/auth flows) early
+      if (data.ephemeral && data.content) {
+        await this.handleEphemeralMessage(data);
+        return;
+      }
+
       // Handle streaming delta
       const streamTs = await this.processStreamDelta(data, sessionKey);
       if (streamTs) {
@@ -521,42 +514,12 @@ export class ThreadResponseConsumer {
       }
 
       // Early return after stream delta if no other content to process
-      if (data.isStreamDelta && !data.content && !data.error) {
+      if (data.delta && !data.error) {
         return;
       }
 
-      // Handle message content
-      // IMPORTANT: Don't process content with chat.update if streaming is active
-      // Streaming should be the exclusive mechanism for sending content when usedStreaming=true
-      const hasActiveStream = this.streamSessionManager.hasSession(sessionKey);
-
-      if (data.content && !hasActiveStream) {
-        const botMessageTs = existingBotMessageTs || data.botResponseId;
-
-        // Check if message should be ephemeral
-        if (data.ephemeral) {
-          await this.handleEphemeralMessage(data);
-        } else {
-          const newBotResponseTs = await this.handleMessageUpdate(
-            data,
-            isFirstResponse,
-            botMessageTs
-          );
-
-          // Store the bot response timestamp in Redis for future updates
-          if (isFirstResponse && newBotResponseTs) {
-            await this.storeBotMessageTimestamp(
-              sessionKey,
-              newBotResponseTs,
-              data
-            );
-          }
-        }
-      } else if (data.content && hasActiveStream) {
-        logger.debug(
-          `Skipping content update for session ${sessionKey} - streaming is active`
-        );
-      } else if (data.error) {
+      // Handle error signals
+      if (data.error) {
         const botMessageTs = existingBotMessageTs || data.botResponseId;
         await this.handleError(data, isFirstResponse, botMessageTs);
         // Clean up session and clear status indicator on error
@@ -758,199 +721,6 @@ export class ThreadResponseConsumer {
     });
 
     return { text: result.text, blocks: result.blocks };
-  }
-
-  /**
-   * Post or update Slack message
-   */
-  private async postOrUpdateSlackMessage(
-    channelId: string,
-    threadTs: string,
-    text: string,
-    blocks: AnyBlock[],
-    isFirstResponse: boolean,
-    botMessageTs?: string
-  ): Promise<string | undefined> {
-    logger.debug(
-      `Final blocks to send - count: ${blocks.length}, types: ${blocks.map((b) => b.type).join(", ")}`
-    );
-
-    if (isFirstResponse) {
-      // Create new message for first response
-      logger.info(
-        `Creating new bot message in channel ${channelId}, thread ${threadTs}`
-      );
-      const postResult = await this.slackClient.chat.postMessage({
-        channel: channelId,
-        thread_ts: threadTs,
-        text: text,
-        mrkdwn: true,
-        blocks: blocks,
-        unfurl_links: true,
-        unfurl_media: true,
-      });
-
-      logger.info(
-        `Bot message created: ${postResult.ok}, ts: ${postResult.ts}`
-      );
-
-      if (!postResult.ok) {
-        logger.error(`Failed to create bot message: ${postResult.error}`);
-        return;
-      }
-
-      // Validate that Slack created the message in the correct thread
-      const returnedTs = postResult.ts as string;
-      const returnedThreadTs =
-        (postResult.message as any)?.thread_ts || returnedTs;
-
-      // Check if the message was created in the intended thread
-      if (threadTs && returnedThreadTs !== threadTs) {
-        // Delete the wrongly placed message
-        try {
-          await this.slackClient.chat.delete({
-            channel: channelId,
-            ts: returnedTs,
-          });
-          logger.info(`Deleted misplaced message ${returnedTs}`);
-        } catch (deleteError) {
-          logger.error(`Failed to delete misplaced message:`, deleteError);
-        }
-
-        // Retry with explicit thread creation
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-
-        const retryResult = await this.slackClient.chat.postMessage({
-          channel: channelId,
-          thread_ts: threadTs,
-          text: text,
-          mrkdwn: true,
-          blocks: blocks,
-          unfurl_links: true,
-          unfurl_media: true,
-          reply_broadcast: false,
-        });
-
-        if (!retryResult.ok) {
-          throw new Error(
-            `Failed to create bot message after retry: ${retryResult.error}`
-          );
-        }
-
-        return retryResult.ts as string;
-      }
-
-      return returnedTs;
-    } else {
-      // Update existing message
-      if (!botMessageTs) {
-        logger.error(
-          `Cannot update message - no bot message timestamp provided for channel ${channelId}, thread ${threadTs}`
-        );
-        throw new Error("Cannot update message without bot message timestamp");
-      }
-
-      logger.info(
-        `Updating bot message in channel ${channelId}, ts ${botMessageTs}`
-      );
-
-      const updateResult = await this.slackClient.chat.update({
-        channel: channelId,
-        ts: botMessageTs,
-        text: text,
-        blocks: blocks,
-      });
-
-      logger.info(`Slack update result: ${updateResult.ok}`);
-
-      if (!updateResult.ok) {
-        logger.error(`Slack update failed with error: ${updateResult.error}`);
-      }
-
-      return undefined;
-    }
-  }
-
-  /**
-   * Handle message content updates
-   */
-  private async handleMessageUpdate(
-    data: ThreadResponsePayload,
-    isFirstResponse: boolean,
-    botMessageTs?: string
-  ): Promise<string | undefined> {
-    const { content, channelId, threadId } = data;
-
-    if (!content) return;
-
-    try {
-      const { text, blocks } = await this.parseMessageContent(content, data);
-
-      return await this.postOrUpdateSlackMessage(
-        channelId,
-        threadId,
-        text,
-        blocks,
-        isFirstResponse,
-        botMessageTs
-      );
-    } catch (error: unknown) {
-      // Handle specific Slack errors
-      if (typeof error === "object" && error !== null) {
-        const err = error as {
-          code?: string;
-          data?: { error?: string };
-          message?: string;
-        };
-        if (err.code === "message_not_found") {
-          logger.error("Slack message not found - it may have been deleted");
-        } else if (err.code === "channel_not_found") {
-          logger.error("Slack channel not found - bot may not have access");
-        } else if (err.code === "not_in_channel") {
-          logger.error("Bot is not in the channel");
-        } else if (
-          err.data?.error === "invalid_blocks" ||
-          err.data?.error === "msg_too_long"
-        ) {
-          // These are Slack validation errors - retrying won't help
-          logger.error(`Slack validation error: ${JSON.stringify(error)}`);
-
-          // Try to send a simple error message with raw content for recovery
-          try {
-            // Truncate content to fit in code block
-            const maxContentLength = 2500;
-            const truncatedContent =
-              content.length > maxContentLength
-                ? `${content.substring(0, maxContentLength)}\n...[truncated]`
-                : content;
-
-            const errorMessage = `❌ *Error occurred while updating message*\n\n*Error:* ${err.data?.error || ""}${err.message || ""}\n\nThe response may be too long or contain invalid formatting.\n\n*Raw Content:*\n\`\`\`\n${truncatedContent}\n\`\`\``;
-
-            await this.slackClient.chat.update({
-              channel: channelId,
-              ts: threadId,
-              text: errorMessage,
-            });
-            logger.info(
-              `Sent fallback error message with raw content for validation error: ${err.data?.error}`
-            );
-          } catch (fallbackError) {
-            logger.error(
-              "Failed to send fallback error message:",
-              fallbackError
-            );
-          }
-          // Don't throw - this prevents retry loops for validation errors
-        } else {
-          if (error instanceof Error) {
-            logger.error(`Failed to update Slack message: ${error.message}`);
-          } else {
-            logger.error(`Failed to update Slack message: ${error}`);
-          }
-          throw error;
-        }
-      }
-    }
   }
 
   /**

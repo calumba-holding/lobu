@@ -37,13 +37,12 @@ export interface WorkerExecutor {
 export interface GatewayIntegrationInterface {
   setJobId(jobId: string): void;
   setModuleData(moduleData: Record<string, unknown>): void;
-  sendContent(content: string): Promise<void>;
   sendStreamDelta(
     delta: string,
     isFullReplacement?: boolean,
     isFinal?: boolean
   ): Promise<void>;
-  signalDone(finalDelta?: string, fullContent?: string): Promise<void>;
+  signalDone(finalDelta?: string): Promise<void>;
   signalCompletion(): Promise<void>;
   signalError(error: Error): Promise<void>;
 }

@@ -122,9 +122,9 @@ export class WorkerGateway {
       logger.info(
         `[WORKER-GATEWAY] Received response with fields: ${Object.keys(responseData).join(", ")}`
       );
-      if (responseData.isStreamDelta) {
+      if (responseData.delta) {
         logger.info(
-          `[WORKER-GATEWAY] Stream delta: deltaLength=${responseData.delta?.length}`
+          `[WORKER-GATEWAY] Stream delta: deltaLength=${responseData.delta.length}`
         );
       }
 

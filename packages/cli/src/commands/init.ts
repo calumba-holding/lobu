@@ -515,7 +515,7 @@ export async function initCommand(
           "# Add your OAuth client secrets and API keys below:\n";
 
         for (const varName of requiredEnvVars) {
-          mcpEnvContent += `# ${varName}=your_${varName.toLowerCase()}_here\n`;
+          mcpEnvContent += `${varName}=your_${varName.toLowerCase()}_here\n`;
         }
 
         const envPath = join(projectDir, ".env");
@@ -552,7 +552,6 @@ export async function initCommand(
     // Generate docker-compose.yml
     const composeContent = generateDockerCompose({
       projectName,
-      cliVersion,
       gatewayPort: "8080",
       dockerfilePath: "./Dockerfile.worker",
       hasMcpServers: answers.selectedMcpServers.length > 0,
@@ -694,20 +693,13 @@ async function getCliVersion(): Promise<string> {
 
 function generateDockerCompose(options: {
   projectName: string;
-  cliVersion: string;
   gatewayPort: string;
   dockerfilePath: string;
   hasMcpServers: boolean;
 }): string {
-  const {
-    projectName,
-    cliVersion,
-    gatewayPort,
-    dockerfilePath,
-    hasMcpServers,
-  } = options;
+  const { projectName, gatewayPort, dockerfilePath, hasMcpServers } = options;
   const workerImage = `${projectName}-worker:latest`;
-  const gatewayImage = `buremba/peerbot-gateway:${cliVersion}`;
+  const gatewayImage = `buremba/peerbot-gateway:latest`;
 
   const mcpConfigMount = hasMcpServers
     ? `
@@ -770,9 +762,6 @@ services:
     build:
       context: .
       dockerfile: ${dockerfilePath}
-      args:
-        BASE_VERSION: ${cliVersion}
-        NODE_ENV: \${NODE_ENV:-development}
     image: ${workerImage}
     command: echo "Worker image built successfully"
     profiles:

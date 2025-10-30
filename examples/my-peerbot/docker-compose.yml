@@ -52,7 +52,6 @@ services:
       context: .
       dockerfile: ./Dockerfile.worker
       args:
-        BASE_VERSION: latest
         NODE_ENV: ${NODE_ENV:-development}
     image: my-peerbot-worker:latest
     command: echo "Worker image built successfully"

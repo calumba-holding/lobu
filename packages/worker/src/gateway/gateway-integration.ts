@@ -23,8 +23,6 @@ export class GatewayIntegration implements GatewayIntegrationInterface {
   private jobId?: string;
   private moduleData?: Record<string, unknown>;
   private teamId?: string;
-  private usedStreaming: boolean = false;
-  private finalContent?: string;
   private accumulatedStreamContent: string = "";
   private lastStreamDelta: string = "";
 
@@ -58,31 +56,12 @@ export class GatewayIntegration implements GatewayIntegrationInterface {
     this.moduleData = moduleData;
   }
 
-  async signalDone(finalDelta?: string, fullContent?: string): Promise<void> {
-    // Store full content for completion signal
-    if (fullContent) {
-      this.finalContent = fullContent;
-    }
-
+  async signalDone(finalDelta?: string): Promise<void> {
     // Send final delta if there is one
     if (finalDelta) {
-      await this.sendStreamDelta(finalDelta);
+      await this.sendStreamDelta(finalDelta, false, true);
     }
     await this.signalCompletion();
-  }
-
-  async sendContent(content: string): Promise<void> {
-    await this.sendResponse({
-      messageId: this.originalMessageTs,
-      channelId: this.channelId,
-      threadId: this.threadId,
-      userId: this.userId,
-      content,
-      timestamp: Date.now(),
-      originalMessageId: this.originalMessageTs,
-      botResponseId: this.botResponseTs,
-      moduleData: this.moduleData,
-    });
   }
 
   async sendStreamDelta(
@@ -90,9 +69,6 @@ export class GatewayIntegration implements GatewayIntegrationInterface {
     isFullReplacement: boolean = false,
     isFinal: boolean = false
   ): Promise<void> {
-    // Mark that streaming was used
-    this.usedStreaming = true;
-
     let actualDelta = delta;
 
     // Handle final result with deduplication
@@ -169,8 +145,7 @@ export class GatewayIntegration implements GatewayIntegrationInterface {
       originalMessageId: this.originalMessageTs,
       botResponseId: this.botResponseTs,
       moduleData: this.moduleData,
-      isStreamDelta: true, // Mark as streaming delta
-      isFullReplacement, // Indicate if stream should be restarted
+      isFullReplacement,
     });
   }
 
@@ -186,8 +161,6 @@ export class GatewayIntegration implements GatewayIntegrationInterface {
       processedMessageIds: this.processedMessageIds,
       botResponseId: this.botResponseTs,
       moduleData: this.moduleData,
-      finalContent: this.finalContent, // Include final content
-      usedStreaming: this.usedStreaming, // Include streaming flag
     });
   }
 
@@ -217,9 +190,9 @@ export class GatewayIntegration implements GatewayIntegrationInterface {
         logger.info(
           `[WORKER-HTTP] Sending to ${responseUrl}: ${JSON.stringify(payload).substring(0, 500)}`
         );
-        if (payload.isStreamDelta) {
+        if (payload.delta) {
           logger.info(
-            `[WORKER-HTTP] Stream delta payload: isStreamDelta=${payload.isStreamDelta}, deltaLength=${payload.delta?.length}`
+            `[WORKER-HTTP] Stream delta payload: deltaLength=${payload.delta?.length}`
           );
         }
 

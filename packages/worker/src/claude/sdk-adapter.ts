@@ -205,10 +205,57 @@ export async function runClaudeWithSDK(
 
       const messagePromise = messageIterator.next();
 
-      const result = await Promise.race([
-        messagePromise,
-        // timeoutPromise
-      ]);
+      // Setup heartbeat to keep Slack stream alive during long API calls
+      const HEARTBEAT_INTERVAL_MS = 20000; // Send heartbeat every 20 seconds
+      let heartbeatTimer: Timer | null = null;
+      let elapsedTime = 0;
+
+      const sendHeartbeat = async () => {
+        elapsedTime += HEARTBEAT_INTERVAL_MS;
+        const seconds = Math.floor(elapsedTime / 1000);
+        logger.info(
+          `⏳ Sending heartbeat after ${seconds}s of waiting for API response`
+        );
+
+        if (onProgress) {
+          await onProgress({
+            type: "output",
+            data: {
+              type: "assistant",
+              message: {
+                content: [
+                  {
+                    type: "text",
+                    text: `⏳ Still processing... (${seconds}s)`,
+                  },
+                ],
+              },
+            } as any,
+            timestamp: Date.now(),
+          });
+        }
+      };
+
+      // Start heartbeat timer
+      heartbeatTimer = setInterval(() => {
+        sendHeartbeat().catch((err) => {
+          logger.error("Failed to send heartbeat:", err);
+        });
+      }, HEARTBEAT_INTERVAL_MS);
+
+      let result;
+      try {
+        result = await Promise.race([
+          messagePromise,
+          // timeoutPromise
+        ]);
+      } finally {
+        // Always clear heartbeat timer when message arrives or error occurs
+        if (heartbeatTimer) {
+          clearInterval(heartbeatTimer);
+          heartbeatTimer = null;
+        }
+      }
 
       if (result.done) {
         iteratorDone = true;

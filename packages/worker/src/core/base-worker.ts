@@ -287,8 +287,10 @@ export abstract class BaseWorker implements WorkerExecutor {
           throw new Error("SESSION_TIMEOUT");
         } else {
           // For non-timeout errors, show the error to the user
-          await this.gatewayIntegration.sendContent(
-            `❌ Session failed: ${errorMsg}`
+          await this.gatewayIntegration.sendStreamDelta(
+            `❌ Session failed: ${errorMsg}`,
+            true,
+            true
           );
           await this.gatewayIntegration.signalError(new Error(errorMsg));
         }

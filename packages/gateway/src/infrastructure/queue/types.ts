@@ -91,19 +91,14 @@ export interface ThreadResponsePayload {
   threadId: string;
   userId: string;
   teamId?: string;
-  content?: string;
+  content?: string; // Used only for ephemeral messages (OAuth/auth flows)
   delta?: string;
-  isStreamDelta?: boolean;
   isFullReplacement?: boolean;
-  finalContent?: string;
-  usedStreaming?: boolean;
   processedMessageIds?: string[];
-  reaction?: string;
   error?: string;
   timestamp: number;
   originalMessageId?: string;
   moduleData?: Record<string, unknown>;
   botResponseId?: string;
-  seq?: number;
   ephemeral?: boolean;
 }

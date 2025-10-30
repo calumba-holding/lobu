@@ -38,7 +38,7 @@ export async function handleExecutionError(
 
   try {
     const errorMsg = formatErrorMessage(error);
-    await gateway.sendContent(errorMsg);
+    await gateway.sendStreamDelta(errorMsg, true, true);
     await gateway.signalError(
       error instanceof Error ? error : new Error(String(error))
     );
