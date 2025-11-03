@@ -18,7 +18,8 @@ function setupHealthEndpoints(
   workerGateway: any,
   mcpProxy: any,
   fileHandler?: any,
-  sessionManager?: any
+  sessionManager?: any,
+  interactionService?: any
 ) {
   if (healthServer) return;
 
@@ -70,6 +71,38 @@ function setupHealthEndpoints(
     const fileRoutes = createFileRoutes(fileHandler, sessionManager);
     proxyApp.use("/internal/files", fileRoutes);
     logger.info("✅ File routes enabled at :8080/internal/files/*");
+  }
+
+  // Setup interaction routes
+  if (interactionService) {
+    const { Router } = require("express");
+    const interactionRouter = Router();
+    const { registerInteractionRoutes } = require("../routes/interactions");
+    const { verifyWorkerToken } = require("@peerbot/core");
+    const authenticateWorker = (req: any, res: any, next: any) => {
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        return res
+          .status(401)
+          .json({ error: "Missing or invalid authorization" });
+      }
+      const workerToken = authHeader.substring(7);
+      const tokenData = verifyWorkerToken(workerToken);
+      if (!tokenData) {
+        return res.status(401).json({ error: "Invalid worker token" });
+      }
+      req.worker = tokenData;
+      next();
+    };
+    registerInteractionRoutes(
+      interactionRouter,
+      interactionService,
+      authenticateWorker
+    );
+    proxyApp.use(interactionRouter);
+    logger.info(
+      "✅ Interaction routes enabled at :8080/internal/interactions/* and /internal/suggestions/*"
+    );
   }
 
   // Create HTTP server with Express app
@@ -150,7 +183,8 @@ export async function startGateway(
     coreServices.getWorkerGateway(),
     coreServices.getMcpProxy(),
     fileHandler,
-    sessionManager
+    sessionManager,
+    coreServices.getInteractionService()
   );
 
   logger.info("✅ Peerbot Gateway is running!");

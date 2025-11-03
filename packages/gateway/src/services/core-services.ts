@@ -21,6 +21,7 @@ import {
   RedisQueue,
   type RedisQueueConfig,
 } from "../infrastructure/queue";
+import { InteractionService } from "../interactions";
 import { InstructionService } from "./instruction-service";
 import { RedisSessionStore, SessionManager } from "./session-manager";
 
@@ -52,6 +53,7 @@ export class CoreServices {
   // ============================================================================
   private sessionManager?: SessionManager;
   private instructionService?: InstructionService;
+  private interactionService?: InteractionService;
 
   // ============================================================================
   // Claude Services
@@ -145,9 +147,14 @@ export class CoreServices {
       throw new Error("Queue must be initialized before session services");
     }
 
+    const redisClient = this.queue.getRedisClient();
+
     const sessionStore = new RedisSessionStore(this.queue);
     this.sessionManager = new SessionManager(sessionStore);
     logger.info("✅ Session manager initialized");
+
+    this.interactionService = new InteractionService(redisClient);
+    logger.info("✅ Interaction service initialized");
   }
 
   // ============================================================================
@@ -263,7 +270,8 @@ export class CoreServices {
       this.config.mcp.publicGatewayUrl,
       this.sessionManager,
       this.mcpConfigService,
-      this.instructionService
+      this.instructionService,
+      this.interactionService
     );
     logger.info("✅ Worker gateway initialized");
 
@@ -364,5 +372,11 @@ export class CoreServices {
 
   getInstructionService(): InstructionService | undefined {
     return this.instructionService;
+  }
+
+  getInteractionService(): InteractionService {
+    if (!this.interactionService)
+      throw new Error("Interaction service not initialized");
+    return this.interactionService;
   }
 }

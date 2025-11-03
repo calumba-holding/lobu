@@ -1,12 +1,17 @@
 #!/usr/bin/env bun
 
-import type { InstructionProvider } from "@peerbot/core";
+import type {
+  InstructionProvider,
+  UserInteraction,
+  UserSuggestion,
+} from "@peerbot/core";
 import type { ClaudeCredentialStore } from "../auth/claude/credential-store";
 import type { ClaudeModelPreferenceStore } from "../auth/claude/model-preference-store";
 import type { McpProxy } from "../auth/mcp/proxy";
 import type { WorkerGateway } from "../gateway";
 import type { AnthropicProxy } from "../infrastructure/model-provider";
 import type { IMessageQueue, QueueProducer } from "../infrastructure/queue";
+import type { InteractionService } from "../interactions";
 import type { InstructionService } from "../services/instruction-service";
 import type { ISessionManager } from "../session";
 
@@ -28,6 +33,7 @@ export interface CoreServices {
   getClaudeModelPreferenceStore(): ClaudeModelPreferenceStore | undefined;
   getSessionManager(): ISessionManager;
   getInstructionService(): InstructionService | undefined;
+  getInteractionService(): InteractionService;
 }
 
 // ============================================================================
@@ -94,6 +100,37 @@ export interface PlatformAdapter {
     channelId: string,
     platformMetadata: Record<string, any>
   ): Record<string, string>;
+
+  /**
+   * Render a blocking user interaction (e.g., approval request, question)
+   * Platform should display this as an ephemeral message and set thread status to "waiting"
+   *
+   * @param interaction - The interaction to render
+   */
+  renderInteraction?(interaction: UserInteraction): Promise<void>;
+
+  /**
+   * Render non-blocking suggestions
+   * Platform should display this as suggested prompts/quick replies
+   *
+   * @param suggestion - The suggestions to render
+   */
+  renderSuggestion?(suggestion: UserSuggestion): Promise<void>;
+
+  /**
+   * Set thread status indicator
+   * Used to show "is running...", "Waiting for approval...", etc.
+   * Pass null/undefined to clear the status
+   *
+   * @param channelId - Channel identifier
+   * @param threadId - Thread identifier
+   * @param status - Status message to display, or null to clear
+   */
+  setThreadStatus?(
+    channelId: string,
+    threadId: string,
+    status: string | null
+  ): Promise<void>;
 }
 
 // ============================================================================

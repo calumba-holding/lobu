@@ -5,6 +5,7 @@ import * as path from "node:path";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { InstructionProvider } from "@peerbot/core";
 import { createLogger } from "@peerbot/core";
+import type { InteractionClient } from "../common/interaction-client";
 import { BaseWorker } from "../core/base-worker";
 import type {
   ProgressUpdate,
@@ -27,10 +28,12 @@ const logger = createLogger("claude-worker");
  */
 export class ClaudeWorker extends BaseWorker {
   private progressProcessor: ProgressProcessor;
+  private interactionClient?: InteractionClient;
 
-  constructor(config: WorkerConfig) {
+  constructor(config: WorkerConfig, interactionClient?: InteractionClient) {
     super(config);
     this.progressProcessor = new ProgressProcessor();
+    this.interactionClient = interactionClient;
   }
 
   protected getAgentName(): string {
@@ -79,7 +82,8 @@ export class ClaudeWorker extends BaseWorker {
         {
           channelId: this.config.channelId,
           threadId: this.config.threadId || "",
-        }
+        },
+        this.interactionClient
       );
 
       return {

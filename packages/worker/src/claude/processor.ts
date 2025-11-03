@@ -271,7 +271,9 @@ export class ProgressProcessor {
     const config = TOOL_DISPLAY_CONFIG[toolName];
     if (!config) {
       const formattedName = this.formatMcpToolName(toolName);
-      return `└ 🔧 **Using** ${formattedName}`;
+      // For Task tool, include description if available
+      const description = params.description ? `: ${params.description}` : "";
+      return `└ 🔧 **Using** ${formattedName}${description}`;
     }
 
     const param = config.getParam(params);

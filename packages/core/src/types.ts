@@ -105,3 +105,102 @@ export interface ThreadResponsePayload {
   botResponseId?: string;
   ephemeral?: boolean; // If true, message should be sent as ephemeral (only visible to user)
 }
+
+// ============================================================================
+// User Interaction Types
+// ============================================================================
+
+/**
+ * Form field schema for modal inputs
+ */
+export interface FieldSchema {
+  type: "text" | "select" | "textarea" | "number" | "checkbox" | "multiselect";
+  label?: string; // Defaults to capitalized field name
+  placeholder?: string;
+  options?: string[]; // For select/multiselect
+  required?: boolean;
+  default?: any;
+}
+
+/**
+ * Multi-form option (button that opens a modal)
+ */
+export interface FormOption {
+  label: string;
+  fields: Record<string, FieldSchema>;
+}
+
+/**
+ * Interaction options - determines UX pattern:
+ * - string[] → Simple buttons (immediate response)
+ * - Record<string, FieldSchema> → Single modal form
+ * - FormOption[] → Multi-modal workflow (staged submission)
+ */
+export type InteractionOptions =
+  | string[]
+  | Record<string, FieldSchema>
+  | FormOption[];
+
+/**
+ * User response to an interaction
+ * Format depends on interaction type:
+ * - Simple buttons: { answer: string }
+ * - Single form: { formData: Record<string, any> }
+ * - Multi-form: { formData: Record<string, Record<string, any>> }
+ */
+export interface UserInteractionResponse {
+  answer?: string; // For simple button responses
+  formData?: Record<string, any>; // For single form or multi-form (nested)
+  timestamp: number;
+}
+
+/**
+ * Blocking user interaction - agent waits for response
+ */
+export interface UserInteraction {
+  id: string;
+  userId: string;
+  threadId: string;
+  channelId: string;
+  teamId?: string;
+
+  blocking: true; // Always true - distinguishes from suggestions
+
+  question: string; // The question or prompt to display
+  options: InteractionOptions; // Determines UX pattern (buttons/form/multi-form)
+
+  metadata?: any; // Optional metadata for tracking/context
+
+  status: "pending" | "responded" | "expired";
+  response?: UserInteractionResponse;
+  createdAt: number;
+  expiresAt: number;
+  respondedAt?: number;
+
+  // Partial form data (for multi-form workflows)
+  partialData?: Record<string, Record<string, any>>;
+}
+
+/**
+ * Suggested prompt for user
+ */
+export interface SuggestedPrompt {
+  title: string; // Short label shown as chip
+  message: string; // Full message sent when clicked
+}
+
+/**
+ * Non-blocking suggestions - agent continues immediately
+ * Used for optional next steps
+ */
+export interface UserSuggestion {
+  id: string;
+  userId: string;
+  threadId: string;
+  channelId: string;
+  teamId?: string;
+
+  blocking: false; // Always false - distinguishes from interactions
+
+  prompts: SuggestedPrompt[];
+}

@@ -3,12 +3,34 @@
 import type { Options as SDKOptions } from "@anthropic-ai/claude-agent-sdk";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { createLogger } from "@peerbot/core";
+
+// Legacy approval intents (for plan/tool approvals - not fully functional with new interaction model)
+const APPROVE_PLAN_BYPASS = "approve_plan_bypass";
+const APPROVE_PLAN_APPROVE_EACH = "approve_plan_approve_each";
+const APPROVE_TOOL_ONCE = "approve_tool_once";
+const APPROVE_TOOL_REMEMBER = "approve_tool_remember";
+
+import type { InteractionClient } from "../common/interaction-client";
 import type { ProgressCallback } from "../core/types";
 import { ensureBaseUrl } from "../core/url-utils";
 import { createCustomToolsServer } from "./custom-tools";
 import { getSessionContext } from "./session-manager";
 
 const logger = createLogger("claude-sdk");
+
+/**
+ * Type guard to check if object has setPermissionMode method
+ */
+function hasSetPermissionMode(
+  obj: unknown
+): obj is { setPermissionMode: (mode: string) => Promise<void> } {
+  return (
+    typeof obj === "object" &&
+    obj !== null &&
+    "setPermissionMode" in obj &&
+    typeof (obj as any).setPermissionMode === "function"
+  );
+}
 
 // ============================================================================
 // TYPES
@@ -47,7 +69,8 @@ export async function runClaudeWithSDK(
   options: ClaudeExecutionOptions,
   onProgress?: ProgressCallback,
   workingDirectory?: string,
-  customToolsConfig?: { channelId: string; threadId: string }
+  customToolsConfig?: { channelId: string; threadId: string },
+  interactionClient?: InteractionClient
 ): Promise<ClaudeExecutionResult> {
   logger.info("Starting Claude SDK execution");
 
@@ -92,10 +115,17 @@ export async function runClaudeWithSDK(
     // Track errors from stderr
     let stderrError: Error | null = null;
 
+    // Store query reference for dynamic permission mode changes
+    // Type as unknown and use type guards for safety
+    let queryReference: unknown = null;
+
+    // Track when we're waiting for user interaction to suppress heartbeat
+    let isWaitingForInteraction = false;
+
     const sdkOptions: SDKOptions = {
       model: options.model,
       cwd: workingDirectory || process.cwd(),
-      permissionMode: "plan",
+      permissionMode: "plan", // Start in plan mode - Claude plans without executing
       strictMcpConfig: false, // Allow MCP failures without stopping execution
       env: {
         ...process.env,
@@ -152,10 +182,16 @@ export async function runClaudeWithSDK(
         dispatcherUrl,
         workerToken,
         customToolsConfig.channelId,
-        customToolsConfig.threadId
+        customToolsConfig.threadId,
+        interactionClient
       );
       allMcpServers.peerbot = customTools;
-      logger.info("Added custom tools server: peerbot");
+      logger.info(
+        "Added custom tools server: peerbot (with AskUserQuestion support)"
+      );
+
+      // Note: We don't add interaction tools MCP server anymore
+      // Interactions are handled via canUseTool callback below
     }
 
     if (Object.keys(allMcpServers).length > 0) {
@@ -163,6 +199,156 @@ export async function runClaudeWithSDK(
       logger.info(
         `MCP servers configured: ${Object.keys(allMcpServers).join(", ")}`
       );
+    }
+
+    // Implement canUseTool callback to integrate with SDK permission system
+    if (
+      customToolsConfig &&
+      dispatcherUrl &&
+      workerToken &&
+      interactionClient
+    ) {
+      const client = interactionClient;
+
+      sdkOptions.canUseTool = async (toolName: string, input: any) => {
+        logger.info(`Permission check for tool: ${toolName}`);
+
+        // Handle ExitPlanMode specially - this means Claude wants to exit plan mode and start executing
+        if (toolName === "ExitPlanMode") {
+          logger.info(
+            "Claude wants to exit plan mode - asking user for approval"
+          );
+
+          try {
+            isWaitingForInteraction = true;
+            const planResponse = await client.askUser({
+              question: `Claude has finished planning and wants to start executing. Would you like to proceed?\n\n${input?.plan || "Claude is ready to execute the plan."}`,
+              options: [
+                "Yes, bypass permissions",
+                "Yes, approve each tool",
+                "No, keep planning",
+              ] as any,
+              metadata: {
+                interactionType: "plan_approval",
+                plan: input?.plan,
+              },
+            });
+
+            if (planResponse.answer === APPROVE_PLAN_BYPASS) {
+              logger.info("User approved plan with bypass permissions");
+              // Change permission mode to bypass
+              if (hasSetPermissionMode(queryReference)) {
+                await queryReference.setPermissionMode("bypassPermissions");
+                logger.info("Permission mode changed to bypassPermissions");
+              } else {
+                logger.warn(
+                  "Query reference does not support setPermissionMode"
+                );
+              }
+              return {
+                behavior: "allow" as const,
+                updatedInput: input,
+              };
+            } else if (planResponse.answer === APPROVE_PLAN_APPROVE_EACH) {
+              logger.info("User approved plan with manual approvals");
+              // Change permission mode to default (will use canUseTool for each tool)
+              if (hasSetPermissionMode(queryReference)) {
+                await queryReference.setPermissionMode("default");
+                logger.info("Permission mode changed to default");
+              } else {
+                logger.warn(
+                  "Query reference does not support setPermissionMode"
+                );
+              }
+              return {
+                behavior: "allow" as const,
+                updatedInput: input,
+              };
+            } else {
+              logger.info("User rejected plan - staying in plan mode");
+              return {
+                behavior: "deny" as const,
+                message: "User chose to stay in plan mode",
+                interrupt: false, // Don't interrupt, just stay in plan mode
+              };
+            }
+          } catch (error) {
+            logger.error(`Error getting plan approval: ${error}`);
+            return {
+              behavior: "deny" as const,
+              message: `Failed to get plan approval: ${error instanceof Error ? error.message : String(error)}`,
+              interrupt: true,
+            };
+          } finally {
+            isWaitingForInteraction = false;
+          }
+        }
+
+        // Auto-allow non-destructive tools and Task (for autonomous subagent delegation)
+        // Also auto-allow AskUserQuestion since it's specifically for asking the user questions
+        const autoAllowTools = [
+          "Read",
+          "Grep",
+          "Glob",
+          "WebSearch",
+          "WebFetch",
+          "BashOutput",
+          "Task",
+          "mcp__peerbot__AskUserQuestion",
+        ];
+        if (autoAllowTools.includes(toolName)) {
+          logger.info(`Auto-allowing non-destructive tool: ${toolName}`);
+          return {
+            behavior: "allow" as const,
+            updatedInput: input,
+          };
+        }
+
+        // For destructive tools, ask the user via our interaction system
+        logger.info(`Tool ${toolName} requires user approval`);
+
+        try {
+          isWaitingForInteraction = true;
+          const toolResponse = await client.askUser({
+            question: `Claude wants to execute the \`${toolName}\` tool. Do you want to allow this?`,
+            options: ["Allow once", "Always allow this tool", "Deny"] as any,
+            metadata: {
+              interactionType: "tool_approval",
+              toolName,
+              toolInput: input,
+            },
+          });
+
+          const approved =
+            toolResponse.answer === APPROVE_TOOL_ONCE ||
+            toolResponse.answer === APPROVE_TOOL_REMEMBER;
+
+          if (approved) {
+            logger.info(`User approved ${toolName}`);
+            return {
+              behavior: "allow" as const,
+              updatedInput: input,
+            };
+          } else {
+            logger.info(`User denied ${toolName}`);
+            return {
+              behavior: "deny" as const,
+              message: "User denied permission to execute this tool",
+              interrupt: true,
+            };
+          }
+        } catch (error) {
+          logger.error(`Error getting user permission: ${error}`);
+          return {
+            behavior: "deny" as const,
+            message: `Failed to get user permission: ${error instanceof Error ? error.message : String(error)}`,
+            interrupt: true,
+          };
+        } finally {
+          isWaitingForInteraction = false;
+        }
+      };
+      logger.info("canUseTool callback configured");
     }
 
     // Add tool restrictions
@@ -187,10 +373,14 @@ export async function runClaudeWithSDK(
     logger.info(`SDK options: ${JSON.stringify(sdkOptions, null, 2)}`);
 
     // Execute query
-    const response = query({
+    const queryResult = query({
       prompt: userPrompt,
       options: sdkOptions,
     });
+
+    // Store query reference for dynamic permission mode changes
+    queryReference = queryResult;
+    const response = queryResult;
 
     let output = "";
     let capturedSessionId: string | undefined;
@@ -214,6 +404,12 @@ export async function runClaudeWithSDK(
       let elapsedTime = 0;
 
       const sendHeartbeat = async () => {
+        // Don't send heartbeat if we're waiting for user interaction
+        if (isWaitingForInteraction) {
+          logger.debug("Suppressing heartbeat - waiting for user interaction");
+          return;
+        }
+
         elapsedTime += HEARTBEAT_INTERVAL_MS;
         const seconds = Math.floor(elapsedTime / 1000);
         logger.info(
@@ -309,6 +505,7 @@ export async function runClaudeWithSDK(
             logger.info(
               `Assistant message (${assistantMsg.content.length} blocks)`
             );
+
             for (const block of assistantMsg.content) {
               if (block.type === "text" && block.text) {
                 logger.info(`  Text block: ${block.text.substring(0, 100)}`);

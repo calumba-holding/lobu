@@ -109,12 +109,31 @@ export class WorkerConnectionManager {
   /**
    * Send SSE event to a worker
    */
-  sendSSE(res: Response, event: string, data: unknown): void {
+  sendSSE(res: Response, event: string, data: unknown): boolean {
     try {
-      res.write(`event: ${event}\n`);
-      res.write(`data: ${JSON.stringify(data)}\n\n`);
+      // Combine into single write to avoid buffering issues
+      // Format: event: <event>\ndata: <json>\n\n
+      const message = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+      const success = res.write(message);
+
+      if (!success) {
+        logger.warn(
+          `[SSE] Response stream buffer full for event ${event}, data: ${JSON.stringify(data).substring(0, 100)}`
+        );
+        return false;
+      }
+
+      logger.info(
+        `[SSE] Successfully sent ${event} event, data: ${JSON.stringify(data).substring(0, 200)}`
+      );
+      return true;
     } catch (error) {
-      logger.warn(`Failed to send SSE event ${event}:`, error);
+      logger.error(
+        `[SSE] Failed to send SSE event ${event}:`,
+        error,
+        `data: ${JSON.stringify(data).substring(0, 100)}`
+      );
+      return false;
     }
   }
 

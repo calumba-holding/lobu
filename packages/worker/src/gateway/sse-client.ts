@@ -3,6 +3,7 @@
  */
 
 import { createLogger } from "@peerbot/core";
+import { InteractionClient } from "../common/interaction-client";
 import type { WorkerConfig, WorkerExecutor } from "../core/types";
 import { GatewayIntegration } from "./gateway-integration";
 import { MessageBatcher } from "./message-batcher";
@@ -26,6 +27,7 @@ export class GatewayClient {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 10;
   private messageBatcher: MessageBatcher;
+  private interactionClient: InteractionClient;
 
   constructor(
     dispatcherUrl: string,
@@ -37,6 +39,8 @@ export class GatewayClient {
     this.workerToken = workerToken;
     this.userId = userId;
     this.deploymentName = deploymentName;
+
+    this.interactionClient = new InteractionClient(dispatcherUrl, workerToken);
 
     this.messageBatcher = new MessageBatcher({
       onBatchReady: async (messages) => {
@@ -100,18 +104,28 @@ export class GatewayClient {
 
     let buffer = "";
 
+    logger.info("[SSE-CLIENT] 🔄 Starting SSE stream reading loop");
+
     while (this.isRunning) {
       const { done, value } = await reader.read();
 
       if (done) {
-        logger.info("SSE stream ended");
+        logger.info("[SSE-CLIENT] SSE stream ended");
         break;
       }
 
-      buffer += decoder.decode(value, { stream: true });
+      const chunk = decoder.decode(value, { stream: true });
+      logger.debug(
+        `[SSE-CLIENT] 📨 Received chunk: ${chunk.substring(0, 200)}`
+      );
+      buffer += chunk;
 
       const events = buffer.split("\n\n");
       buffer = events.pop() || "";
+
+      logger.debug(
+        `[SSE-CLIENT] 📊 Parsed ${events.length} events from buffer`
+      );
 
       for (const event of events) {
         if (!event.trim()) continue;
@@ -129,7 +143,14 @@ export class GatewayClient {
         }
 
         if (eventData) {
-          await this.handleEvent(eventType, eventData);
+          logger.info(`[SSE-CLIENT] 🎯 Processing event type: ${eventType}`);
+          // Don't await - fire async to avoid blocking SSE reading loop
+          this.handleEvent(eventType, eventData).catch((error) => {
+            logger.error(
+              `[SSE-CLIENT] Error handling ${eventType} event:`,
+              error
+            );
+          });
         }
       }
     }
@@ -190,9 +211,46 @@ export class GatewayClient {
       }
 
       if (eventType === "job") {
-        const jobData = JSON.parse(data);
-        await this.handleThreadMessage(jobData);
+        try {
+          const jobData = JSON.parse(data);
+          await this.handleThreadMessage(jobData);
+        } catch (parseError) {
+          logger.error(`Failed to parse job event data:`, parseError);
+          logger.debug(`Raw job data: ${data}`);
+        }
+        return;
       }
+
+      if (eventType === "interaction") {
+        try {
+          logger.info(`[SSE-CLIENT] 📨 Raw interaction event data: ${data}`);
+          const { interactionId, response } = JSON.parse(data);
+          logger.info(
+            `[SSE-CLIENT] ✅ Received interaction response for ${interactionId}, response: ${JSON.stringify(response)}`
+          );
+          logger.info(
+            `[SSE-CLIENT] 🔄 Forwarding to InteractionClient.handleInteractionResponse`
+          );
+          this.interactionClient.handleInteractionResponse(
+            interactionId,
+            response
+          );
+          logger.info(
+            `[SSE-CLIENT] ✅ Successfully forwarded interaction ${interactionId} to InteractionClient`
+          );
+        } catch (parseError) {
+          logger.error(
+            `[SSE-CLIENT] ❌ Failed to parse interaction event data:`,
+            parseError
+          );
+          logger.error(`[SSE-CLIENT] Raw interaction data: ${data}`);
+        }
+        return;
+      }
+
+      logger.warn(
+        `[DEBUG] Unknown SSE event type: ${eventType}, data: ${data}`
+      );
     } catch (error) {
       logger.error(`Error handling event ${eventType}:`, error);
     }
@@ -277,7 +335,10 @@ export class GatewayClient {
       const workerConfig = this.payloadToWorkerConfig(message.payload);
 
       // Worker will decide whether to continue session based on workspace state
-      this.currentWorker = new ClaudeWorker(workerConfig);
+      this.currentWorker = new ClaudeWorker(
+        workerConfig,
+        this.interactionClient
+      );
 
       const gatewayIntegration = this.currentWorker.getGatewayIntegration();
 

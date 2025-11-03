@@ -16,6 +16,7 @@ import {
 } from "./converters/block-builder";
 import { extractCodeBlockActions } from "./converters/blockkit";
 import { convertMarkdownToSlack } from "./converters/markdown";
+
 const logger = createLogger("dispatcher");
 
 /**
@@ -116,7 +117,7 @@ class StreamSession {
       const response = (await this.slackClient.apiCall("chat.startStream", {
         channel: this.channelId,
         thread_ts: this.threadTs,
-        markdown_text: delta,
+        markdown_text: convertMarkdownToSlack(delta),
         recipient_user_id: this.userId,
         ...(this.teamId ? { recipient_team_id: this.teamId } : {}),
       })) as {
@@ -165,7 +166,7 @@ class StreamSession {
             channel: this.channelId,
             stream_ts: this.streamTs,
             ts: this.messageTs,
-            markdown_text: delta,
+            markdown_text: convertMarkdownToSlack(delta),
           };
           logger.info(
             `chat.appendStream params: channel=${this.channelId}, stream_ts=${this.streamTs}, ts=${this.messageTs}, delta_length=${delta.length}`
@@ -349,6 +350,24 @@ export class ThreadResponseConsumer {
   }
 
   /**
+   * Stop stream for a specific thread
+   * Called when an interaction is created to prevent messages appearing after the interaction
+   */
+  async stopStreamForThread(userId: string, threadId: string): Promise<void> {
+    // Session key format: userId:messageId (where messageId == threadId for main thread)
+    const sessionKey = `${userId}:${threadId}`;
+
+    if (this.streamSessionManager.hasSession(sessionKey)) {
+      logger.info(
+        `Stopping stream for thread ${threadId} (session ${sessionKey}) due to interaction creation`
+      );
+      await this.streamSessionManager.completeSession(sessionKey);
+    } else {
+      logger.debug(`No active stream found for session ${sessionKey}`);
+    }
+  }
+
+  /**
    * Get bot message timestamp from Redis
    */
   private async getBotMessageTs(sessionKey: string): Promise<string | null> {
@@ -431,6 +450,17 @@ export class ThreadResponseConsumer {
     sessionKey: string
   ): Promise<string | null> {
     if (!data.delta) {
+      return null;
+    }
+
+    // Suppress deltas when thread has an active interaction
+    const activeInteractionKey = `interaction:active:${data.threadId}`;
+    const activeInteractionId = await this.redis.get(activeInteractionKey);
+
+    if (activeInteractionId) {
+      logger.info(
+        `Suppressing delta for thread ${data.threadId} - active interaction ${activeInteractionId}`
+      );
       return null;
     }
 

@@ -114,13 +114,6 @@ export abstract class BaseDeploymentManager {
     return `http://${this.getDispatcherHost()}:8080`;
   }
 
-  /**
-   * Get the proxy URL for Anthropic API (port 8080)
-   */
-  protected getProxyUrl(): string {
-    return `http://${this.getDispatcherHost()}:8080/api/anthropic`;
-  }
-
   // Abstract methods that must be implemented by concrete classes
   abstract listDeployments(): Promise<DeploymentInfo[]>;
   abstract createDeployment(
@@ -217,22 +210,41 @@ export abstract class BaseDeploymentManager {
     includeSecrets: boolean = true,
     userEnvVars: Record<string, string> = {}
   ): Promise<{ [key: string]: string }> {
-    const threadId = messageData?.threadId || "";
+    // Validate required fields
+    if (!messageData) {
+      throw new OrchestratorError(
+        ErrorCode.DEPLOYMENT_CREATE_FAILED,
+        "Message data is required for worker deployment",
+        { deploymentName },
+        true
+      );
+    }
+
+    const { threadId, channelId, platformMetadata } = messageData;
+
+    if (!threadId || !channelId) {
+      throw new OrchestratorError(
+        ErrorCode.DEPLOYMENT_CREATE_FAILED,
+        "threadId and channelId are required in message data",
+        { deploymentName, hasThreadId: !!threadId, hasChannelId: !!channelId },
+        true
+      );
+    }
 
     // Generate worker authentication token with platform info
     const workerToken = generateWorkerToken(userId, threadId, deploymentName, {
-      platform: messageData?.platform,
+      channelId,
+      teamId: platformMetadata?.teamId,
+      platform: messageData.platform,
     });
 
     let envVars: { [key: string]: string } = {
       USER_ID: userId,
       USERNAME: username,
       DEPLOYMENT_NAME: deploymentName,
-      CHANNEL_ID: messageData?.channelId || "",
+      CHANNEL_ID: channelId,
       ORIGINAL_MESSAGE_TS:
-        messageData?.platformMetadata?.originalMessageTs ||
-        messageData?.messageId ||
-        "",
+        platformMetadata?.originalMessageTs || messageData.messageId || "",
       LOG_LEVEL: "info",
       WORKSPACE_DIR: "/workspace",
       THREAD_ID: threadId,
@@ -255,35 +267,12 @@ export abstract class BaseDeploymentManager {
         logger.warn("Failed to build module environment variables:", error);
       }
     }
-
-    if (process.env.CLAUDE_ALLOWED_TOOLS) {
-      envVars.CLAUDE_ALLOWED_TOOLS = process.env.CLAUDE_ALLOWED_TOOLS;
-    }
-
-    if (process.env.CLAUDE_DISALLOWED_TOOLS) {
-      envVars.CLAUDE_DISALLOWED_TOOLS = process.env.CLAUDE_DISALLOWED_TOOLS;
-    }
-
-    if (process.env.CLAUDE_TIMEOUT_MINUTES) {
-      envVars.CLAUDE_TIMEOUT_MINUTES = process.env.CLAUDE_TIMEOUT_MINUTES;
-    }
-
     // Add worker environment variables from configuration
     if (this.config.worker.env) {
       Object.entries(this.config.worker.env).forEach(([key, value]) => {
         envVars[key] = String(value);
       });
     }
-
-    // Set the base URL to use dispatcher's proxy
-    envVars.ANTHROPIC_BASE_URL = this.getProxyUrl();
-
-    // ANTHROPIC_API_KEY will be set by the container command override
-    // which uses the database username and password
-
-    logger.info(
-      `🔧 Configured worker to use Anthropic proxy at ${envVars.ANTHROPIC_BASE_URL}`
-    );
 
     // Merge user environment variables (they take precedence over defaults)
     Object.entries(userEnvVars).forEach(([key, value]) => {

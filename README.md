@@ -99,7 +99,7 @@ bun run build
 make dev
 
 # Run tests
-./slack-qa-bot.js "test prompt"
+./scripts/slack-qa-bot.js "test prompt"
 ```
 
 ## Published Packages

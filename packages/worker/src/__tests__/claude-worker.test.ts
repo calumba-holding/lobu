@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { ClaudeWorker } from "../claude/worker";
 import type { WorkerConfig } from "../core/types";
-import { TestHelpers, mockWorkerConfig } from "./setup";
+import { mockWorkerConfig, TestHelpers } from "./setup";
 
 // Mock SDK adapter so we can control streaming behaviour
 mock.module("../claude/sdk-adapter", () => ({

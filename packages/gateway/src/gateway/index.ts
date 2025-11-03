@@ -5,8 +5,10 @@ import { createLogger, verifyWorkerToken } from "@peerbot/core";
 import type { Request, Response } from "express";
 import type { McpConfigService } from "../auth/mcp/config-service";
 import type { IMessageQueue } from "../infrastructure/queue";
-import type { ISessionManager } from "../session";
+import type { InteractionService } from "../interactions";
+import { generateDeploymentName } from "../orchestration/base-deployment-manager";
 import type { InstructionService } from "../services/instruction-service";
+import type { ISessionManager } from "../session";
 import { WorkerConnectionManager } from "./connection-manager";
 import { WorkerJobRouter } from "./job-router";
 
@@ -23,6 +25,7 @@ export class WorkerGateway {
   private queue: IMessageQueue;
   private mcpConfigService?: McpConfigService;
   private instructionService?: InstructionService;
+  private interactionService?: InteractionService;
   private publicGatewayUrl: string;
 
   constructor(
@@ -30,7 +33,8 @@ export class WorkerGateway {
     publicGatewayUrl: string,
     sessionManager: ISessionManager,
     mcpConfigService?: McpConfigService,
-    instructionService?: InstructionService
+    instructionService?: InstructionService,
+    interactionService?: InteractionService
   ) {
     this.queue = queue;
     this.publicGatewayUrl = publicGatewayUrl;
@@ -42,6 +46,14 @@ export class WorkerGateway {
     );
     this.mcpConfigService = mcpConfigService;
     this.instructionService = instructionService;
+    this.interactionService = interactionService;
+
+    // Listen for interaction responses and forward to workers via SSE
+    if (this.interactionService) {
+      this.interactionService.on("interaction:responded", (interaction) => {
+        this.handleInteractionResponse(interaction);
+      });
+    }
   }
 
   /**
@@ -81,7 +93,14 @@ export class WorkerGateway {
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no"); // Disable nginx/proxy buffering
     res.flushHeaders();
+
+    // Disable socket buffering for immediate delivery
+    const socket = (res as any).socket || (res as any).connection;
+    if (socket) {
+      socket.setNoDelay(true); // Disable Nagle's algorithm
+    }
 
     // Register connection with connection manager
     this.connectionManager.addConnection(deploymentName, userId, threadId, res);
@@ -236,6 +255,46 @@ export class WorkerGateway {
    */
   getActiveConnections(): string[] {
     return this.connectionManager.getActiveConnections();
+  }
+
+  /**
+   * Handle interaction response and send to worker via SSE
+   */
+  private handleInteractionResponse(interaction: any): void {
+    // Find the worker connection for this thread
+    // Use the same deployment name generation as orchestrator
+    const deploymentName = generateDeploymentName(
+      interaction.userId,
+      interaction.threadId
+    );
+    const connection = this.connectionManager.getConnection(deploymentName);
+
+    if (!connection) {
+      logger.warn(
+        `No worker connection found for interaction ${interaction.id} (deployment: ${deploymentName})`
+      );
+      return;
+    }
+
+    // Send interaction response via SSE
+    const success = this.connectionManager.sendSSE(
+      connection.res,
+      "interaction",
+      {
+        interactionId: interaction.id,
+        response: interaction.response,
+      }
+    );
+
+    if (success) {
+      logger.info(
+        `✅ Sent interaction response ${interaction.id} to worker ${deploymentName}`
+      );
+    } else {
+      logger.error(
+        `❌ Failed to send interaction response ${interaction.id} to worker ${deploymentName} - SSE buffer full or connection closed`
+      );
+    }
   }
 
   /**

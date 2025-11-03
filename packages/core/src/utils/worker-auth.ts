@@ -11,6 +11,8 @@ const logger = createLogger("worker-auth");
 export interface WorkerTokenData {
   userId: string;
   threadId: string;
+  channelId: string;
+  teamId?: string; // Optional - not all platforms have teams
   deploymentName: string;
   timestamp: number;
   platform?: string;
@@ -24,20 +26,32 @@ export function generateWorkerToken(
   userId: string,
   threadId: string,
   deploymentName: string,
-  options: { platform?: string; sessionKey?: string } = {}
+  options: {
+    channelId: string;
+    teamId?: string;
+    platform?: string;
+    sessionKey?: string;
+  }
 ): string {
+  // Validate required fields
+  if (!options.channelId) {
+    throw new Error("channelId is required for worker token generation");
+  }
+
   const timestamp = Date.now();
-  const payload = JSON.stringify({
+  const payload: WorkerTokenData = {
     userId,
     threadId,
+    channelId: options.channelId,
+    teamId: options.teamId, // Can be undefined - that's ok
     deploymentName,
     timestamp,
     platform: options.platform,
     sessionKey: options.sessionKey,
-  });
+  };
 
   // Encrypt the payload
-  const encrypted = encrypt(payload);
+  const encrypted = encrypt(JSON.stringify(payload));
   return encrypted;
 }
 

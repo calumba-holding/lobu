@@ -17,7 +17,7 @@ if (jsonMode) {
     // Suppressed for JSON mode
   };
 }
-require("dotenv").config({ path: path.join(__dirname, ".env") });
+require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 if (jsonMode) {
   console.log = originalLog;
 }
@@ -202,12 +202,149 @@ async function uploadFile(filePath, channels, threadTs = null) {
   });
 }
 
+async function simulateInteraction(
+  channel,
+  messageTs,
+  optionIndex = 0,
+  jsonOutput = false,
+  gatewayUrl = process.env.PUBLIC_GATEWAY_URL || "http://localhost:8080"
+) {
+  if (!jsonOutput) {
+    console.log(
+      `\n🎯 Triggering interaction selection (option ${optionIndex})...`
+    );
+  }
+
+  // Get the message with interactions
+  const replies = await makeSlackRequest("conversations.replies", {
+    channel: channel,
+    ts: messageTs,
+    limit: 10,
+  });
+
+  if (!replies.messages) {
+    throw new Error("No messages found in thread");
+  }
+
+  // Find the latest bot message with actions
+  const messagesWithActions = replies.messages
+    .filter((msg) => msg.bot_id && msg.blocks)
+    .reverse();
+
+  let actionMessage = null;
+  let actionId = null;
+  let selectedOption = null;
+  let interactionId = null;
+
+  for (const msg of messagesWithActions) {
+    for (const block of msg.blocks) {
+      if (block.type === "actions" && block.elements) {
+        for (const element of block.elements) {
+          // Handle radio buttons
+          if (element.type === "radio_buttons" && element.options) {
+            if (optionIndex < element.options.length) {
+              actionMessage = msg;
+              actionId = element.action_id;
+              selectedOption = element.options[optionIndex];
+
+              // Extract interaction ID from action_id
+              // Format: simple_radio_ui_<uuid>
+              const match = actionId.match(/simple_radio_(ui_[\w-]+)/);
+              if (match) {
+                interactionId = match[1];
+              }
+
+              if (!jsonOutput) {
+                console.log(
+                  `   Found radio buttons: ${element.action_id} with ${element.options.length} options`
+                );
+                console.log(
+                  `   Selecting option ${optionIndex}: ${selectedOption.text.text}`
+                );
+                console.log(`   Interaction ID: ${interactionId}`);
+              }
+              break;
+            }
+          }
+          // Handle regular buttons
+          else if (element.type === "button") {
+            actionMessage = msg;
+            actionId = element.action_id;
+
+            // Extract interaction ID from action_id
+            const match = actionId.match(/(ui_[\w-]+)/);
+            if (match) {
+              interactionId = match[1];
+            }
+
+            if (!jsonOutput) {
+              console.log(`   Found button: ${element.action_id}`);
+              console.log(`   Interaction ID: ${interactionId}`);
+            }
+            break;
+          }
+        }
+        if (actionMessage) break;
+      }
+    }
+    if (actionMessage) break;
+  }
+
+  if (!actionMessage || !actionId) {
+    throw new Error("No interactive elements found in thread");
+  }
+
+  if (!interactionId) {
+    throw new Error("Could not extract interaction ID from action_id");
+  }
+
+  // Trigger the interaction via gateway API
+  if (!jsonOutput) {
+    console.log(`\n⚡ Triggering interaction via gateway API...`);
+    console.log(`   Gateway: ${gatewayUrl}`);
+  }
+
+  const responsePayload = {
+    interactionId: interactionId,
+    answer: selectedOption ? selectedOption.text.text : "clicked",
+  };
+
+  const response = await fetch(`${gatewayUrl}/api/interactions/respond`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(responsePayload),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(`Gateway API error (${response.status}): ${errorBody}`);
+  }
+
+  const result = await response.json();
+
+  if (!jsonOutput) {
+    console.log(`   ✅ Interaction triggered successfully!`);
+    console.log(`   Response: ${JSON.stringify(result)}`);
+  }
+
+  return {
+    actionId,
+    interactionId,
+    selectedValue: selectedOption ? selectedOption.text.text : "clicked",
+    messageTs: actionMessage.ts,
+    apiResponse: result,
+  };
+}
+
 async function runTest(testMessage, timeout = 45000, options = {}) {
   const {
     jsonOutput = false,
     threadTs = null,
     noWait = false,
     filePath = null,
+    interact = null,
   } = options;
   const quiet = jsonOutput;
 
@@ -308,10 +445,96 @@ async function runTest(testMessage, timeout = 45000, options = {}) {
     if (!jsonOutput) {
       console.log("✅ Bot responded!");
       console.log(`   Response: "${response.text?.substring(0, 200)}..."`);
-      console.log("\n🎉 Test PASSED!");
     }
 
-    if (jsonOutput) {
+    // Handle interaction if --interact flag is provided
+    if (interact !== null) {
+      // Wait a bit for interaction message to be posted (they're often async)
+      if (!jsonOutput) {
+        console.log("\n⏳ Waiting for interaction elements to load...");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+
+      try {
+        const interactionInfo = await simulateInteraction(
+          targetChannel,
+          messageTs,
+          parseInt(interact, 10),
+          jsonOutput
+        );
+
+        if (!jsonOutput) {
+          console.log("\n✅ Interaction triggered!");
+          console.log(`   Interaction ID: ${interactionInfo.interactionId}`);
+          console.log(`   Action ID: ${interactionInfo.actionId}`);
+          console.log(`   Selected value: ${interactionInfo.selectedValue}`);
+          console.log("\n⏳ Waiting for bot to process response...");
+        }
+
+        // Wait for the bot to process the interaction and respond
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+
+        // Check for final bot response after interaction
+        const finalResponse = await waitForBotResponse(
+          targetChannel,
+          messageTs,
+          timeout,
+          jsonOutput
+        );
+
+        if (!jsonOutput) {
+          if (finalResponse?.text) {
+            console.log("\n✅ Bot completed after interaction!");
+            console.log(
+              `   Final response: "${finalResponse.text.substring(0, 200)}..."`
+            );
+          }
+          console.log("\n🎉 Full E2E interaction test PASSED!");
+        }
+
+        if (jsonOutput) {
+          console.log(
+            JSON.stringify(
+              {
+                success: true,
+                channel: targetChannel,
+                thread_ts: messageTs,
+                response: {
+                  text: response.text,
+                  timestamp: response.ts,
+                  bot_id: response.bot_id,
+                },
+                interaction: {
+                  interactionId: interactionInfo.interactionId,
+                  actionId: interactionInfo.actionId,
+                  selectedValue: interactionInfo.selectedValue,
+                  triggered: true,
+                },
+                finalResponse: finalResponse
+                  ? {
+                      text: finalResponse.text,
+                      timestamp: finalResponse.ts,
+                    }
+                  : null,
+                url: `https://peerbotcommunity.slack.com/archives/${targetChannel}`,
+              },
+              null,
+              2
+            )
+          );
+        }
+      } catch (interactionError) {
+        if (!jsonOutput) {
+          console.log(`\n⚠️  Interaction error: ${interactionError.message}`);
+        }
+      }
+    } else {
+      if (!jsonOutput) {
+        console.log("\n🎉 Test PASSED!");
+      }
+    }
+
+    if (jsonOutput && interact === null) {
       console.log(
         JSON.stringify(
           {
@@ -329,7 +552,9 @@ async function runTest(testMessage, timeout = 45000, options = {}) {
           2
         )
       );
-    } else {
+    }
+
+    if (!jsonOutput && interact === null) {
       console.log(
         `\n🔗 Channel: https://peerbotcommunity.slack.com/archives/${targetChannel}`
       );
@@ -356,6 +581,7 @@ let jsonOutput = false;
 let threadTs = null;
 let noWait = false;
 let filePath = null;
+let interact = null;
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--timeout") {
@@ -383,8 +609,17 @@ for (let i = 0; i < args.length; i++) {
     }
     threadTs = args[i + 1];
     i++; // Skip next arg
+  } else if (args[i] === "--interact") {
+    if (!args[i + 1]) {
+      console.error(
+        `❌ Error: --interact requires an option index (0, 1, 2, etc.)`
+      );
+      process.exit(1);
+    }
+    interact = args[i + 1];
+    i++; // Skip next arg
   } else if (args[i] === "--help" || args[i] === "-h") {
-    console.log("Usage: slack-qa-bot.js [options] [message]");
+    console.log("Usage: ./scripts/slack-qa-bot.js [options] [message]");
     console.log("");
     console.log("Options:");
     console.log(
@@ -393,11 +628,21 @@ for (let i = 0; i < args.length; i++) {
     console.log("  --json                 Output JSON format");
     console.log("  --thread-ts <ts>       Post to existing thread");
     console.log("  --no-wait              Send message and exit immediately");
+    console.log(
+      "  --interact <index>     Detect and report interaction info (0=first option, 1=second, etc.)"
+    );
+    console.log("  --file <path>          Upload a file with the message");
     console.log("  --help, -h             Show this help message");
     console.log("");
     console.log("Examples:");
-    console.log('  ./slack-qa-bot.js "Hello bot"');
-    console.log('  ./slack-qa-bot.js --json "Create a function"');
+    console.log('  ./scripts/slack-qa-bot.js "Hello bot"');
+    console.log('  ./scripts/slack-qa-bot.js --json "Create a function"');
+    console.log(
+      '  ./scripts/slack-qa-bot.js --interact 0 "ask me some questions"'
+    );
+    console.log(
+      '  ./scripts/slack-qa-bot.js --interact 2 --timeout 30 "pick something"'
+    );
     process.exit(0);
   } else if (args[i].startsWith("--") || args[i].startsWith("-")) {
     // Unrecognized option
@@ -417,7 +662,13 @@ for (let i = 0; i < args.length; i++) {
 }
 
 if (message) {
-  runTest(message, timeout, { jsonOutput, threadTs, noWait, filePath });
+  runTest(message, timeout, {
+    jsonOutput,
+    threadTs,
+    noWait,
+    filePath,
+    interact,
+  });
 } else {
   runTest("Hello bot - simple test", timeout, { jsonOutput });
 }

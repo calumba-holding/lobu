@@ -21,6 +21,10 @@ export const TIME = {
   FIVE_SECONDS_MS: 5000,
   /** Thirty seconds */
   THIRTY_SECONDS: 30,
+  /** Three hours in milliseconds (for interaction timeout) */
+  THREE_HOURS_MS: 3 * 60 * 60 * 1000,
+  /** Three hours in seconds (for Redis TTL) */
+  THREE_HOURS_SECONDS: 3 * 60 * 60,
 } as const;
 
 // Redis key prefixes

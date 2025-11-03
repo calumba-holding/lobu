@@ -20,15 +20,20 @@
 - When fixing unused parameter errors, remove the parameter entirely if possible rather than prefixing with underscore
 - Worker prompt delivery: Claude CLI reads prompts from stdin via direct pipe from prompt file (no named pipes used)
 
+## TypeScript Build System
+
+TypeScript packages must be compiled from `src/` → `dist/`. If you modify any package source code, run `make build-packages` or use `make watch-packages` for auto-rebuild during development. `make dev` automatically builds packages before starting.
+
 ## Instructions
 - You MUST only do what has been asked; nothing more, nothing less.
+- When the user types a Slack message link (slack.com/archives/x/x/?thread_ts=) you MUST call ./scripts/slack-thread-viewer.js "link" to gather context
 - When you are in planning mode and you're not fully sure, you need to ask 'codex exec "YOUR_QUESTION" --config model_reasoning_effort="high"'
 - For comprehensive QA and E2E testing, see `.claude/commands/qa.md` for detailed testing procedures and examples.
 - When you make changes to worker code (`packages/worker/*`), run `make clean-workers` to ensure new workers use the updated code.
 - Anytime you make changes in the code, you MUST:
 
 1. Have the bot running via `make dev` running in the background for development. This uses Docker Compose with hot reload enabled when NODE_ENV=development.
-2. Run ./slack-qa-bot.js "Relevant prompt" --timeout [based on complexity change by default 10] and make sure it works properly. If the script fails (including getting stuck at "Starting environment setup"), you MUST fix it.
+2. You MUST run ./scripts/slack-qa-bot.js "Relevant prompt" --timeout [based on complexity change by default 10] and make sure it works properly. If the script fails (including getting stuck at "Starting environment setup"), you MUST fix it.
 3. Check logs using `docker compose logs` or `make logs` to verify the bot works properly.
 
 - If you create ephemeral files, you MUST delete them when you're done with them.
@@ -49,6 +54,13 @@
   - **Worker**: Worker image is rebuilt automatically in Docker mode (no rebuild needed for code changes)
   - If hot reload isn't working, verify you're using `make dev` not `docker compose up`
 
+### Automatic Build on `make dev`
+-  `make dev` now automatically runs `make build-packages` before starting services, so you don't have to remember. 
+- However, if you're testing changes without restarting:
+-  1. **Option A(Recommended)**: Use `make watch-packages` in a separate terminal for auto-rebuild
+-  2. **Option B**: Manually run `make build-packages` after each change
+-  3. **Option C**: Restart with `make dev` to rebuild everything
+
 ## Deployment Instructions
 
 When making changes to the Slack bot:
@@ -59,17 +71,6 @@ When making changes to the Slack bot:
 
 - Rate limiting is disabled in local development
 - Worker image is built automatically when running `make dev`
-
-## Socket Mode Health Monitoring
-
-Gateway automatically detects zombie Socket Mode connections and triggers restart:
-- Monitors Socket Mode WebSocket event activity (not message activity)
-- Default: triggers restart if no events for 15 minutes (Socket Mode normally sends heartbeats every 30-60s)
-- Protects active workers by default - waits for them to finish before restarting
-- Gateway exits with code 0 → Docker/K8s automatically restarts the container
-- Workers automatically reconnect when gateway comes back online
-- Configure via env vars: `SOCKET_HEALTH_CHECK_INTERVAL_MS`, `SOCKET_STALE_THRESHOLD_MS`, `SOCKET_PROTECT_ACTIVE_WORKERS`
-
 ## Persistent Storage
 
 Worker deployments use persistent volumes for session continuity across scale-to-zero:
@@ -160,18 +161,6 @@ export GOOGLE_CLIENT_SECRET=your_google_client_secret
 - Contains: accessToken, tokenType, expiresAt, refreshToken, metadata
 - OAuth state stored temporarily (5 min TTL) for CSRF protection
 
-### Edge Cases
-
-**Active conversations when user logs out:**
-- Worker receives 401 from MCP proxy
-- Shows message: "Authentication required. Visit Home tab to reconnect."
-- Worker continues running - user can still use non-MCP features
-
-**Token expiration during conversation:**
-- MCP proxy checks expiry before proxying
-- Attempts automatic refresh if refreshToken exists
-- If refresh fails, shows reauthentication message
-
 ## Testing with slack-qa-bot.js
 
 **See `.claude/commands/qa.md` for comprehensive testing documentation with examples.**
@@ -180,14 +169,14 @@ Basic usage:
 
 ```bash
 # Simple test
-./slack-qa-bot.js "Hello bot"
+./scripts/slack-qa-bot.js "Hello bot"
 
 # JSON output for automation
-./slack-qa-bot.js --json "Create a function" | jq -r .thread_ts
+./scripts/slack-qa-bot.js --json "Create a function" | jq -r .thread_ts
 
 # Test thread continuity
-./slack-qa-bot.js "2+3" --timeout 20 --json | jq -r '.thread_ts' | xargs -I {} ./slack-qa-bot.js "add 1 to that number, only answer the number" --thread-ts {} --timeout 25
+./scripts/slack-qa-bot.js "2+3" --timeout 20 --json | jq -r '.thread_ts' | xargs -I {} ./slack-qa-bot.js "add 1 to that number, only answer the number" --thread-ts {} --timeout 25
 
 # Comprehensive E2E testing
-./slack-qa-bot.js
+./scripts/slack-qa-bot.js
 ```

@@ -1,11 +1,14 @@
 # Development Makefile for Peerbot
 
-.PHONY: help setup build compile dev prod test clean logs restart deploy down
+.PHONY: help setup build compile dev prod test clean logs restart deploy down build-packages check-build watch-packages
 
 # Default target
 help:
 	@echo "Available commands:"
 	@echo "  peerbot setup                              - Interactive setup for Slack bot development"
+	@echo "  peerbot build-packages                     - Build all TypeScript packages (core, gateway, worker)"
+	@echo "  peerbot check-build                        - Check if packages need rebuilding"
+	@echo "  peerbot watch-packages                     - Watch packages and rebuild on changes (for development)"
 	@echo "  peerbot dev                                - Start development with Docker Compose (hot reload)"
 	@echo "  peerbot prod                               - Start production with Docker Compose"
 	@echo "  peerbot down                               - Stop all services including dynamic workers"
@@ -15,6 +18,27 @@ help:
 	@echo "  peerbot deploy --target=path/to/values.yaml - Deploy to K8s using custom values file"
 	@echo "  peerbot test                               - Run test bot"
 	@echo "  peerbot clean                              - Stop all services and clean up all resources"
+
+# Build all TypeScript packages in dependency order
+build-packages:
+	@echo "📦 Building all TypeScript packages..."
+	@echo "   1️⃣  Building packages/core..."
+	@cd packages/core && bun run build
+	@echo "   2️⃣  Building packages/github..."
+	@cd packages/github && bun run build
+	@echo "   3️⃣  Building packages/gateway..."
+	@cd packages/gateway && bun run build
+	@echo "   4️⃣  Building packages/worker..."
+	@cd packages/worker && bun run build
+	@echo "✅ All packages built successfully!"
+
+# Check if packages need rebuilding
+check-build:
+	@./scripts/check-build-status.sh
+
+# Watch packages and rebuild on changes (for active development)
+watch-packages:
+	@./scripts/watch-packages.sh
 
 # Start local development with Docker Compose in foreground
 dev:
@@ -27,7 +51,11 @@ dev:
 		exit 1; \
 	fi
 	@echo "ℹ️  Loading environment overrides from .env"
-	@echo "🚀 Starting local development mode with Docker Compose..."
+	@echo ""
+	@echo "📦 Step 1/2: Building TypeScript packages..."
+	@$(MAKE) build-packages
+	@echo ""
+	@echo "🚀 Step 2/2: Starting local development mode with Docker Compose..."
 	@echo "   This will:"
 	@echo "   - Build all services including worker image"
 	@echo "   - Start services with hot reload"
@@ -55,7 +83,7 @@ dev-d dev-detached:
 # Run test bot
 test:
 	@echo "🧪 Running test bot..."
-	@source .env && node slack-qa-bot.js --qa
+	@source .env && node ./scripts/slack-qa-bot.js --qa
 # Deploy to Kubernetes
 # Usage: make deploy [--target=environment]
 deploy:

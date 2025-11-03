@@ -4,6 +4,8 @@ import {
   createLogger,
   type InstructionProvider,
   moduleRegistry,
+  type UserInteraction,
+  type UserSuggestion,
 } from "@peerbot/core";
 import { App, type AppOptions, ExpressReceiver, LogLevel } from "@slack/bolt";
 import type { NextFunction, Request, Response } from "express";
@@ -13,6 +15,7 @@ import type { AgentOptions, SlackPlatformConfig } from "./config";
 import { SlackEventHandlers } from "./event-router";
 import { SocketHealthMonitor } from "./health/socket-health-monitor";
 import { SlackInstructionProvider } from "./instructions/provider";
+import { SlackInteractionRenderer } from "./interactions";
 import { ThreadResponseConsumer } from "./thread-processor";
 
 const logger = createLogger("slack-platform");
@@ -31,6 +34,7 @@ export class SlackPlatform implements PlatformAdapter {
   private socketHealthMonitor?: SocketHealthMonitor;
   private services!: CoreServices;
   private fileHandler?: FileHandler;
+  private interactionRenderer?: SlackInteractionRenderer;
 
   constructor(
     private readonly config: SlackPlatformConfig,
@@ -128,6 +132,39 @@ export class SlackPlatform implements PlatformAdapter {
       this.config.slack.token,
       moduleRegistry
     );
+
+    // Create interaction renderer
+    const interactionService = services.getInteractionService();
+    this.interactionRenderer = new SlackInteractionRenderer(
+      this.app.client,
+      interactionService
+    );
+    logger.info("✅ Slack interaction renderer initialized");
+
+    // Listen for interaction:created events to stop streams
+    interactionService.on(
+      "interaction:created",
+      (interaction: UserInteraction) => {
+        logger.info(
+          `Stopping stream for thread ${interaction.threadId} due to interaction creation`
+        );
+        this.threadResponseConsumer
+          ?.stopStreamForThread(interaction.userId, interaction.threadId)
+          .catch((error) => {
+            logger.error("Failed to stop stream for interaction:", error);
+          });
+      }
+    );
+    logger.info("✅ Stream stop handler registered for interactions");
+
+    // Register interaction button handlers
+    const { registerInteractionHandlers } = await import("./interactions");
+    registerInteractionHandlers(
+      this.app,
+      interactionService,
+      this.interactionRenderer
+    );
+    logger.info("✅ Interaction button handlers registered");
 
     // Initialize event handlers
     new SlackEventHandlers(
@@ -232,6 +269,41 @@ export class SlackPlatform implements PlatformAdapter {
     }
 
     return metadata;
+  }
+
+  /**
+   * Render blocking interaction (ephemeral message)
+   */
+  async renderInteraction(interaction: UserInteraction): Promise<void> {
+    if (this.interactionRenderer) {
+      await this.interactionRenderer.renderInteraction(interaction);
+    }
+  }
+
+  /**
+   * Render non-blocking suggestions
+   */
+  async renderSuggestion(suggestion: UserSuggestion): Promise<void> {
+    if (this.interactionRenderer) {
+      await this.interactionRenderer.renderSuggestion(suggestion);
+    }
+  }
+
+  /**
+   * Set thread status (or clear if null)
+   */
+  async setThreadStatus(
+    channelId: string,
+    threadId: string,
+    status: string | null
+  ): Promise<void> {
+    if (this.interactionRenderer) {
+      await this.interactionRenderer.setThreadStatus(
+        channelId,
+        threadId,
+        status
+      );
+    }
   }
 
   /**
