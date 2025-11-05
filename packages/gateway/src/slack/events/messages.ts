@@ -219,6 +219,7 @@ export class MessageHandler {
           userId: context.userId,
           botId: this.getBotId(),
           threadId: threadTs,
+          teamId: context.teamId,
           platform: "slack",
           messageId: context.messageTs,
           messageText: userRequest,
@@ -259,6 +260,7 @@ export class MessageHandler {
           botId: this.getBotId(),
           userId: context.userId,
           threadId: threadTs,
+          teamId: context.teamId,
           platform: "slack",
           channelId: context.channelId,
           messageId: context.messageTs,
@@ -323,9 +325,8 @@ export class MessageHandler {
     event: SlackMessageEvent,
     bodyTeamId?: string
   ): SlackContext {
-    // TODO: this is hacky, the slackmessageevent must has the teamid
-    const eventWithTeamId = event as SlackMessageEvent & { team_id?: string };
-    const teamId = event.team || eventWithTeamId.team_id || bodyTeamId || "";
+    // Use team_id from event (now guaranteed in SlackMessageEvent type)
+    const teamId = event.team_id || event.team || bodyTeamId || "";
 
     return {
       channelId: event.channel,

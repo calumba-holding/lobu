@@ -90,7 +90,7 @@ export interface ThreadResponsePayload {
   channelId: string;
   threadId: string;
   userId: string;
-  teamId?: string;
+  teamId: string;
   content?: string; // Used only for ephemeral messages (OAuth/auth flows)
   delta?: string;
   isFullReplacement?: boolean;

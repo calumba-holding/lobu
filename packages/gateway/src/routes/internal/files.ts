@@ -3,8 +3,8 @@ import { createLogger, verifyWorkerToken } from "@peerbot/core";
 import type { Request, Response } from "express";
 import { Router } from "express";
 import multer from "multer";
-import type { FileHandler } from "../services/file-handler";
-import type { ISessionManager } from "../session";
+import type { FileHandler } from "../../services/file-handler";
+import type { ISessionManager } from "../../session";
 
 const logger = createLogger("file-routes");
 

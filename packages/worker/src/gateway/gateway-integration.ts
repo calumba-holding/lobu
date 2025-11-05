@@ -27,7 +27,7 @@ export class HttpWorkerTransport implements WorkerTransport {
   public processedMessageIds: string[] = [];
   private jobId?: string;
   private moduleData?: Record<string, unknown>;
-  private teamId?: string;
+  private teamId: string;
   private accumulatedStreamContent: string[] = [];
   private lastStreamDelta: string = "";
 
@@ -165,6 +165,7 @@ export class HttpWorkerTransport implements WorkerTransport {
       channelId: this.channelId,
       threadId: this.threadId,
       userId: this.userId,
+      teamId: this.teamId,
       error: error.message,
       timestamp: Date.now(),
       originalMessageId: this.originalMessageTs,

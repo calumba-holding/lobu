@@ -5,15 +5,15 @@ import type {
   UserInteraction,
   UserSuggestion,
 } from "@peerbot/core";
-import type { ClaudeCredentialStore } from "../auth/claude/credential-store";
-import type { ClaudeModelPreferenceStore } from "../auth/claude/model-preference-store";
-import type { McpProxy } from "../auth/mcp/proxy";
-import type { WorkerGateway } from "../gateway";
-import type { AnthropicProxy } from "../infrastructure/model-provider";
-import type { IMessageQueue, QueueProducer } from "../infrastructure/queue";
-import type { InteractionService } from "../interactions";
-import type { InstructionService } from "../services/instruction-service";
-import type { ISessionManager } from "../session";
+import type { ClaudeCredentialStore } from "./auth/claude/credential-store";
+import type { ClaudeModelPreferenceStore } from "./auth/claude/model-preference-store";
+import type { McpProxy } from "./auth/mcp/proxy";
+import type { WorkerGateway } from "./gateway";
+import type { AnthropicProxy } from "./infrastructure/model-provider";
+import type { IMessageQueue, QueueProducer } from "./infrastructure/queue";
+import type { InteractionService } from "./interactions";
+import type { InstructionService } from "./services/instruction-service";
+import type { ISessionManager } from "./session";
 
 // ============================================================================
 // Core Services Interface
@@ -169,6 +169,26 @@ export interface PlatformAdapter {
     threadUrl?: string;
     queued?: boolean;
   }>;
+
+  /**
+   * Render authentication status for OAuth providers (MCP servers, Claude, etc.)
+   * Displays connection status in platform-specific UI (e.g., Slack home tab)
+   *
+   * @param userId - User ID to render status for
+   * @param providers - Array of OAuth providers with their connection status
+   * @returns Promise that resolves when rendering is complete
+   */
+  renderAuthStatus?(
+    userId: string,
+    providers: Array<{
+      id: string;
+      name: string;
+      isAuthenticated: boolean;
+      loginUrl?: string;
+      logoutUrl?: string;
+      metadata?: Record<string, any>;
+    }>
+  ): Promise<void>;
 }
 
 // ============================================================================

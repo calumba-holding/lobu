@@ -113,44 +113,56 @@ export class McpOAuthModule extends BaseModule {
   }
 
   /**
-   * Render home tab with MCP connection status
+   * Get platform-agnostic authentication status for all MCP servers
+   * Returns abstract provider data that can be rendered by any platform adapter
    */
-  async renderHomeTab(userId: string): Promise<any[]> {
-    const blocks: any[] = [];
-
+  async getAuthStatus(userId: string): Promise<
+    Array<{
+      id: string;
+      name: string;
+      isAuthenticated: boolean;
+      loginUrl?: string;
+      logoutUrl?: string;
+      metadata?: Record<string, any>;
+    }>
+  > {
     try {
       const mcpStatuses = await this.getMcpStatuses(userId);
 
-      if (mcpStatuses.length === 0) {
-        return [];
-      }
+      return mcpStatuses.map((mcp) => {
+        const provider: {
+          id: string;
+          name: string;
+          isAuthenticated: boolean;
+          loginUrl?: string;
+          logoutUrl?: string;
+          metadata?: Record<string, any>;
+        } = {
+          id: mcp.id,
+          name: mcp.name,
+          isAuthenticated: mcp.isAuthenticated,
+          metadata: {
+            authType: mcp.authType,
+            upstreamUrl: mcp.upstreamUrl,
+            ...mcp.metadata,
+          },
+        };
 
-      // Header
-      blocks.push({
-        type: "section",
-        text: {
-          type: "mrkdwn",
-          text: "* MCP Connections*",
-        },
+        // Add login URL for OAuth-based MCPs
+        if (
+          !mcp.isAuthenticated &&
+          (mcp.authType === "oauth" || mcp.authType === "discovered-oauth")
+        ) {
+          const token = this.generateSecureToken(userId, mcp.id);
+          provider.loginUrl = `${this.publicGatewayUrl}/mcp/oauth/init/${mcp.id}?token=${encodeURIComponent(token)}`;
+        }
+
+        return provider;
       });
-
-      // Show each MCP status
-      for (const mcp of mcpStatuses) {
-        const mcpBlocks = this.renderMcpStatus(mcp, userId);
-        blocks.push(...mcpBlocks);
-      }
     } catch (error) {
-      logger.error("Failed to render MCP home tab", { error, userId });
-      blocks.push({
-        type: "section",
-        text: {
-          type: "mrkdwn",
-          text: "⚠️ _Failed to load MCP status_",
-        },
-      });
+      logger.error("Failed to get MCP auth status", { error, userId });
+      return [];
     }
-
-    return blocks;
   }
 
   /**
@@ -372,119 +384,6 @@ export class McpOAuthModule extends BaseModule {
     }
 
     return statuses;
-  }
-
-  /**
-   * TODO: can we use Platform Abstraction to render the status in Slack? All Slack relevant logic needs to be implemented in the Platform Adapter's Slack implemetnation.
-   */
-  private renderMcpStatus(mcp: McpStatus, userId: string): any[] {
-    const blocks: any[] = [];
-
-    // Determine status emoji and text
-    let statusIcon: string;
-    let statusText: string;
-
-    if (mcp.isAuthenticated) {
-      statusIcon = "🟢"; // Green for connected/configured
-      statusText =
-        mcp.authType === "oauth" || mcp.authType === "discovered-oauth"
-          ? "Connected"
-          : "Configured";
-    } else {
-      // Red for OAuth not connected, white for not configured
-      statusIcon =
-        mcp.authType === "oauth" || mcp.authType === "discovered-oauth"
-          ? "🔴" // Red for OAuth not connected
-          : "⚪"; // White for not configured
-      statusText =
-        mcp.authType === "oauth" || mcp.authType === "discovered-oauth"
-          ? "Not Connected"
-          : "Not Configured";
-    }
-
-    // Determine button based on auth type
-    let actionButton;
-    if (mcp.isAuthenticated) {
-      // Show clear/logout button
-      actionButton = {
-        type: "button",
-        text: {
-          type: "plain_text",
-          text:
-            mcp.authType === "oauth" || mcp.authType === "discovered-oauth"
-              ? "Logout"
-              : "Clear",
-        },
-        style: "danger",
-        action_id: `mcp_logout_${mcp.id}`,
-        value: mcp.id,
-      };
-    } else {
-      // Show login/configure button
-      if (mcp.authType === "oauth" || mcp.authType === "discovered-oauth") {
-        const token = this.generateSecureToken(userId, mcp.id);
-        const loginUrl = `${this.publicGatewayUrl}/mcp/oauth/init/${mcp.id}?token=${encodeURIComponent(token)}`;
-
-        actionButton = {
-          type: "button",
-          text: {
-            type: "plain_text",
-            text: "Login",
-          },
-          style: "primary",
-          url: loginUrl,
-        };
-      } else {
-        // Input-based: Use action_id to open modal
-        actionButton = {
-          type: "button",
-          text: {
-            type: "plain_text",
-            text: "Configure",
-          },
-          style: "primary",
-          action_id: `mcp_configure_${mcp.id}`,
-          value: mcp.id,
-        };
-      }
-    }
-
-    const sectionBlock: any = {
-      type: "section",
-      text: {
-        type: "mrkdwn",
-        text: `${statusIcon} *${mcp.name}*\n_${statusText}_`,
-      },
-    };
-
-    // Add button if defined
-    if (actionButton) {
-      sectionBlock.accessory = actionButton;
-    }
-
-    blocks.push(sectionBlock);
-
-    // Show metadata if authenticated (OAuth only)
-    if (
-      mcp.isAuthenticated &&
-      (mcp.authType === "oauth" || mcp.authType === "discovered-oauth") &&
-      mcp.metadata
-    ) {
-      const username = mcp.metadata.username || mcp.metadata.login;
-      if (username) {
-        blocks.push({
-          type: "context",
-          elements: [
-            {
-              type: "mrkdwn",
-              text: `Authenticated as: *${username}*`,
-            },
-          ],
-        });
-      }
-    }
-
-    return blocks;
   }
 
   /**

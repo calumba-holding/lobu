@@ -5,6 +5,7 @@ const logger = createLogger("dispatcher");
 import type { IModuleRegistry } from "@peerbot/core";
 import type { AnyBlock } from "@slack/types";
 import type { WebClient } from "@slack/web-api";
+import type { PlatformAdapter } from "../../platform";
 import type { SlackActionBody, SlackContext } from "../types";
 import type { MessageHandler } from "./messages";
 
@@ -209,7 +210,8 @@ async function handleBlockkitForm(
 export class ActionHandler {
   constructor(
     private messageHandler: MessageHandler,
-    private moduleRegistry: IModuleRegistry
+    private moduleRegistry: IModuleRegistry,
+    private platform?: PlatformAdapter
   ) {}
 
   /**
@@ -324,21 +326,92 @@ export class ActionHandler {
         },
       ];
 
-      // Add module-rendered home tab sections
-      const homeTabModules = this.moduleRegistry.getHomeTabModules();
+      // Use platform abstraction to render auth status if available
+      if (this.platform?.renderAuthStatus) {
+        // Collect auth providers from all OAuth modules
+        const homeTabModules = this.moduleRegistry.getHomeTabModules();
+        const allProviders: any[] = [];
 
-      for (const module of homeTabModules) {
-        try {
-          const moduleBlocks = await module.renderHomeTab!(userId);
-          blocks.push(...moduleBlocks);
-          if (moduleBlocks.length > 0) {
-            blocks.push({ type: "divider" });
+        for (const module of homeTabModules) {
+          try {
+            // Check if module has getAuthStatus method (OAuth modules)
+            if (
+              "getAuthStatus" in module &&
+              typeof module.getAuthStatus === "function"
+            ) {
+              const providers = await (module as any).getAuthStatus(userId);
+              allProviders.push(...providers);
+            } else if ("renderHomeTab" in module) {
+              // Fallback for non-OAuth modules
+              const moduleBlocks = await module.renderHomeTab!(userId);
+              blocks.push(...moduleBlocks);
+              if (moduleBlocks.length > 0) {
+                blocks.push({ type: "divider" });
+              }
+            }
+          } catch (error) {
+            logger.error(
+              `Failed to get auth status for module ${module.name}:`,
+              error
+            );
           }
-        } catch (error) {
-          logger.error(
-            `Failed to render home tab for module ${module.name}:`,
-            error
-          );
+        }
+
+        // Render all OAuth providers via platform abstraction
+        if (allProviders.length > 0) {
+          // We need to manually build blocks since platform.renderAuthStatus publishes directly
+          // Instead, collect the blocks inline
+          blocks.push({
+            type: "section",
+            text: { type: "mrkdwn", text: "*Authentication Status*" },
+          });
+
+          for (const provider of allProviders) {
+            const statusIcon = provider.isAuthenticated ? "🟢" : "🔴";
+            const statusText = provider.isAuthenticated
+              ? "Connected"
+              : "Not Connected";
+
+            const sectionBlock: any = {
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                text: `${statusIcon} *${provider.name}* - ${statusText}`,
+              },
+            };
+
+            // Add action button if login/logout URL is available
+            if (provider.loginUrl && !provider.isAuthenticated) {
+              sectionBlock.accessory = {
+                type: "button",
+                text: { type: "plain_text", text: "Login" },
+                url: provider.loginUrl,
+                style: "primary",
+              };
+            }
+
+            blocks.push(sectionBlock);
+          }
+
+          blocks.push({ type: "divider" });
+        }
+      } else {
+        // Fallback: use old module-based rendering
+        const homeTabModules = this.moduleRegistry.getHomeTabModules();
+
+        for (const module of homeTabModules) {
+          try {
+            const moduleBlocks = await module.renderHomeTab!(userId);
+            blocks.push(...moduleBlocks);
+            if (moduleBlocks.length > 0) {
+              blocks.push({ type: "divider" });
+            }
+          } catch (error) {
+            logger.error(
+              `Failed to render home tab for module ${module.name}:`,
+              error
+            );
+          }
         }
       }
 

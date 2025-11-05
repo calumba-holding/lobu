@@ -1,7 +1,9 @@
+import { createHash, randomBytes } from "node:crypto";
 import { createLogger, type Logger } from "@peerbot/core";
 
 /**
  * Base OAuth2 client with shared token exchange and refresh logic
+ * Supports standard OAuth 2.0 flows including PKCE (RFC 7636)
  * Subclasses customize authorization URL building and request formatting
  */
 export abstract class BaseOAuth2Client {
@@ -10,6 +12,73 @@ export abstract class BaseOAuth2Client {
   constructor(loggerName: string) {
     this.logger = createLogger(loggerName);
   }
+
+  // ============================================================================
+  // PKCE Support (RFC 7636) - For public clients
+  // ============================================================================
+
+  /**
+   * Generate PKCE code verifier (43-128 characters, base64url encoded)
+   * Used for public OAuth clients (mobile apps, CLIs, SPAs)
+   */
+  generateCodeVerifier(): string {
+    return randomBytes(32).toString("base64url");
+  }
+
+  /**
+   * Generate PKCE code challenge from verifier using SHA256
+   * The challenge is sent in authorization request, verifier in token exchange
+   */
+  generateCodeChallenge(codeVerifier: string): string {
+    return createHash("sha256").update(codeVerifier).digest("base64url");
+  }
+
+  // ============================================================================
+  // Generic OAuth Token Operations
+  // ============================================================================
+
+  /**
+   * Generic refresh token method using provider configuration
+   * Supports both public clients (PKCE) and confidential clients (with secret)
+   *
+   * @param tokenUrl - Token endpoint URL
+   * @param clientId - OAuth client ID
+   * @param refreshToken - Refresh token from initial authorization
+   * @param options - Optional parameters (client secret, custom headers, content type)
+   */
+  async refreshTokenWithConfig<T>(
+    tokenUrl: string,
+    clientId: string,
+    refreshToken: string,
+    options?: {
+      clientSecret?: string;
+      customHeaders?: Record<string, string>;
+      contentType?: "json" | "form";
+      tokenEndpointAuthMethod?: string;
+    }
+  ): Promise<T> {
+    const body: Record<string, string> = {
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+      client_id: clientId,
+    };
+
+    // Add client_secret if not using PKCE (tokenEndpointAuthMethod !== "none")
+    if (options?.clientSecret && options?.tokenEndpointAuthMethod !== "none") {
+      body.client_secret = options.clientSecret;
+    }
+
+    return this.refreshAccessToken<T>(
+      tokenUrl,
+      body,
+      options?.contentType || "json",
+      options?.customHeaders
+    );
+  }
+
+  // ============================================================================
+  // Low-level HTTP Operations (protected for subclasses)
+  // ============================================================================
 
   /**
    * Common token exchange implementation

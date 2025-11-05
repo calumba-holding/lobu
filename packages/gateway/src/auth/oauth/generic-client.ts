@@ -105,38 +105,30 @@ export class GenericOAuth2Client extends BaseOAuth2Client {
 
   /**
    * Refresh access token using refresh token
+   * Uses generic refresh method from base client with MCP config
    */
   async refreshToken(
     refreshToken: string,
     oauth: OAuth2Config
   ): Promise<McpCredentialRecord> {
-    // Check if PKCE flow (no client secret required)
-    const isPKCE = oauth.tokenEndpointAuthMethod === "none";
+    // Resolve client secret if needed (supports ${env:VAR} substitution)
+    const clientSecret = oauth.clientSecret
+      ? this.resolveClientSecret(oauth.clientSecret)
+      : undefined;
 
-    let clientSecret = "";
-    if (!isPKCE) {
-      clientSecret = this.resolveClientSecret(oauth.clientSecret);
-      if (!clientSecret) {
-        throw new Error(
-          `Client secret could not be resolved from: ${oauth.clientSecret}`
-        );
-      }
+    if (!clientSecret && oauth.tokenEndpointAuthMethod !== "none") {
+      throw new Error(
+        `Client secret could not be resolved from: ${oauth.clientSecret}`
+      );
     }
 
-    const body = new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: refreshToken,
-      client_id: oauth.clientId,
-    });
-
-    // Only add client_secret if not using PKCE
-    if (!isPKCE && clientSecret) {
-      body.set("client_secret", clientSecret);
-    }
-
-    const tokenData = await this.refreshAccessToken<
+    const tokenData = await this.refreshTokenWithConfig<
       OAuthTokens | OAuthErrorResponse
-    >(oauth.tokenUrl, body, "form");
+    >(oauth.tokenUrl, oauth.clientId, refreshToken, {
+      clientSecret,
+      contentType: "form",
+      tokenEndpointAuthMethod: oauth.tokenEndpointAuthMethod,
+    });
 
     // Check for error response
     if ("error" in tokenData) {

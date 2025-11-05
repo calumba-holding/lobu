@@ -15,6 +15,7 @@ export interface MessagePayload {
   threadId: string; // Thread/conversation ID (must be root thread ID)
   messageId: string; // Individual message ID
   channelId: string; // Platform channel ID
+  teamId: string; // Team/workspace ID (required for all platforms)
 
   // Bot & platform info (passed through to worker)
   botId: string; // Bot identifier

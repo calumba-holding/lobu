@@ -8,7 +8,7 @@ import { ClaudeOAuthStateStore } from "../auth/claude/oauth-state-store";
 import { McpConfigService } from "../auth/mcp/config-service";
 import { McpCredentialStore } from "../auth/mcp/credential-store";
 import { McpInputStore } from "../auth/mcp/input-store";
-import { McpOAuthDiscoveryService } from "../auth/mcp/oauth-discovery";
+import { OAuthDiscoveryService } from "../auth/oauth/discovery";
 import { McpOAuthModule } from "../auth/mcp/oauth-module";
 import { McpOAuthStateStore } from "../auth/mcp/oauth-state-store";
 import { McpProxy } from "../auth/mcp/proxy";
@@ -216,7 +216,7 @@ export class CoreServices {
     const mcpInputStore = new McpInputStore(this.queue);
 
     // Initialize MCP OAuth discovery service
-    const mcpDiscoveryService = new McpOAuthDiscoveryService({
+    const mcpDiscoveryService = new OAuthDiscoveryService({
       cacheStore: {
         get: async (key: string) => {
           try {
@@ -263,6 +263,11 @@ export class CoreServices {
     if (!this.sessionManager) {
       throw new Error(
         "Session manager must be initialized before worker gateway"
+      );
+    }
+    if (!this.interactionService) {
+      throw new Error(
+        "Interaction service must be initialized before worker gateway"
       );
     }
     this.workerGateway = new WorkerGateway(

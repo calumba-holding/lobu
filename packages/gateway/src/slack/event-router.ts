@@ -12,6 +12,7 @@ import type {
 } from "@slack/types";
 import type { QueueProducer } from "../infrastructure/queue";
 import type { InteractionService } from "../interactions";
+import type { PlatformAdapter } from "../platform";
 import type { ISessionManager } from "../session";
 
 const logger = createLogger("slack-events");
@@ -43,7 +44,8 @@ export class SlackEventHandlers {
     config: MessageHandlerConfig,
     private moduleRegistry: IModuleRegistry,
     sessionManager: ISessionManager,
-    interactionService: InteractionService
+    interactionService: InteractionService,
+    platform?: PlatformAdapter
   ) {
     this.config = config;
     this.sessionManager = sessionManager;
@@ -58,7 +60,8 @@ export class SlackEventHandlers {
     );
     this.actionHandler = new ActionHandler(
       this.messageHandler,
-      this.moduleRegistry
+      this.moduleRegistry,
+      platform
     );
     this.shortcutCommandHandler = new ShortcutCommandHandler(app);
 

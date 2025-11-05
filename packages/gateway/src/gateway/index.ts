@@ -23,19 +23,18 @@ export class WorkerGateway {
   private connectionManager: WorkerConnectionManager;
   private jobRouter: WorkerJobRouter;
   private queue: IMessageQueue;
-  // TODO: why are they all optional? If possible we should use required fields everywhere. Remember that in AGENTS.md as well.
-  private mcpConfigService?: McpConfigService;
-  private instructionService?: InstructionService;
-  private interactionService?: InteractionService;
+  private mcpConfigService: McpConfigService;
+  private instructionService: InstructionService;
+  private interactionService: InteractionService;
   private publicGatewayUrl: string;
 
   constructor(
     queue: IMessageQueue,
     publicGatewayUrl: string,
     sessionManager: ISessionManager,
-    mcpConfigService?: McpConfigService,
-    instructionService?: InstructionService,
-    interactionService?: InteractionService
+    mcpConfigService: McpConfigService,
+    instructionService: InstructionService,
+    interactionService: InteractionService
   ) {
     this.queue = queue;
     this.publicGatewayUrl = publicGatewayUrl;
@@ -50,13 +49,11 @@ export class WorkerGateway {
     this.interactionService = interactionService;
 
     // Listen for interaction responses and forward to workers via SSE
-    if (this.interactionService) {
-      this.interactionService.on("interaction:responded", (interaction) => {
-        this.handleInteractionResponse(interaction).catch((error) => {
-          logger.error("Error handling interaction response:", error);
-        });
+    this.interactionService.on("interaction:responded", (interaction) => {
+      this.handleInteractionResponse(interaction).catch((error) => {
+        logger.error("Error handling interaction response:", error);
       });
-    }
+    });
   }
 
   /**
@@ -130,7 +127,7 @@ export class WorkerGateway {
       return;
     }
 
-    const { deploymentName, teamId } = auth.tokenData;
+    const { deploymentName } = auth.tokenData;
 
     // Update connection activity
     this.connectionManager.touchConnection(deploymentName);
@@ -153,12 +150,8 @@ export class WorkerGateway {
         );
       }
 
-      //TODO: find a better reliable approach to have teamId here. It should be in the payload
-      // Add teamId from worker token to response data (required for streaming to private channels)
-      const enrichedResponseData = { ...responseData, teamId };
-
-      // Send response to thread_response queue
-      await this.queue.send("thread_response", enrichedResponseData);
+      // Send response to thread_response queue (teamId is now in payload from worker)
+      await this.queue.send("thread_response", responseData);
 
       res.json({ success: true });
     } catch (error) {
@@ -206,8 +199,7 @@ export class WorkerGateway {
             platform || "unknown",
             instructionContext
           ),
-          this.interactionService?.getPendingUnansweredInteractions(threadId) ||
-            Promise.resolve([]),
+          this.interactionService.getPendingUnansweredInteractions(threadId),
         ]);
 
       logger.info(

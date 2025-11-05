@@ -93,8 +93,8 @@ export interface WorkerTransportConfig {
   /** Bot's response message timestamp/ID (if exists) */
   botResponseTs?: string;
 
-  /** Team/workspace ID (platform-specific) */
-  teamId?: string;
+  /** Team/workspace ID (required for all platforms) */
+  teamId: string;
 
   /** IDs of messages already processed (for deduplication) */
   processedMessageIds?: string[];

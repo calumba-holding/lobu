@@ -3,7 +3,7 @@
 import { createLogger } from "@peerbot/core";
 import type { Request, Response, Router } from "express";
 import multer from "multer";
-import type { PlatformRegistry } from "../platform";
+import type { PlatformRegistry } from "../../platform";
 
 const logger = createLogger("messaging-routes");
 

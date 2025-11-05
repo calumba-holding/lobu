@@ -68,7 +68,7 @@ function setupHealthEndpoints(
 
   // Setup file routes if file handler is provided
   if (fileHandler && sessionManager) {
-    const { createFileRoutes } = require("../api/file-routes");
+    const { createFileRoutes } = require("../routes/internal/files");
     const fileRoutes = createFileRoutes(fileHandler, sessionManager);
     proxyApp.use("/internal/files", fileRoutes);
     logger.info("✅ File routes enabled at :8080/internal/files/*");
@@ -78,7 +78,12 @@ function setupHealthEndpoints(
   if (interactionService) {
     const { Router } = require("express");
     const interactionRouter = Router();
-    const { registerInteractionRoutes } = require("../routes/interactions");
+    const {
+      registerInternalInteractionRoutes,
+    } = require("../routes/internal/interactions");
+    const {
+      registerPublicInteractionRoutes,
+    } = require("../routes/public/interactions");
     const { verifyWorkerToken } = require("@peerbot/core");
     const authenticateWorker = (req: any, res: any, next: any) => {
       const authHeader = req.headers.authorization;
@@ -95,14 +100,15 @@ function setupHealthEndpoints(
       req.worker = tokenData;
       next();
     };
-    registerInteractionRoutes(
+    registerInternalInteractionRoutes(
       interactionRouter,
       interactionService,
       authenticateWorker
     );
+    registerPublicInteractionRoutes(interactionRouter, interactionService);
     proxyApp.use(interactionRouter);
     logger.info(
-      "✅ Interaction routes enabled at :8080/internal/interactions/* and /internal/suggestions/*"
+      "✅ Interaction routes enabled at :8080/internal/interactions/* and /internal/suggestions/* and /api/interactions/*"
     );
   }
 
@@ -110,7 +116,7 @@ function setupHealthEndpoints(
   if (platformRegistry) {
     const { Router } = require("express");
     const messagingRouter = Router();
-    const { registerMessagingRoutes } = require("../routes/messaging");
+    const { registerMessagingRoutes } = require("../routes/public/messaging");
     registerMessagingRoutes(messagingRouter, platformRegistry);
     proxyApp.use(messagingRouter);
     logger.info("✅ Messaging routes enabled at :8080/api/messaging/send");

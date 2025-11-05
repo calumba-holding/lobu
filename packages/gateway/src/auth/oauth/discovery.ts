@@ -1,6 +1,6 @@
 import { createLogger } from "@peerbot/core";
 
-const logger = createLogger("mcp-oauth-discovery");
+const logger = createLogger("oauth-discovery");
 
 /**
  * OAuth 2.0 Authorization Server Metadata (RFC 8414)
@@ -58,7 +58,7 @@ export interface DiscoveredOAuthMetadata {
   expiresAt: number;
 }
 
-interface McpOAuthDiscoveryServiceOptions {
+interface OAuthDiscoveryServiceOptions {
   /**
    * Redis or cache store for discovered metadata
    */
@@ -85,32 +85,17 @@ interface McpOAuthDiscoveryServiceOptions {
 }
 
 /**
- * Service for discovering OAuth capabilities of MCP servers
+ * Service for discovering OAuth capabilities of any OAuth-enabled server
  * Implements RFC 8414 (OAuth 2.0 Authorization Server Metadata)
  * and RFC 7591 (Dynamic Client Registration)
  */
-export class McpOAuthDiscoveryService {
+export class OAuthDiscoveryService {
   private readonly protocolVersion: string;
   private readonly cacheTtl: number;
-  private readonly cacheStore?: McpOAuthDiscoveryServiceOptions["cacheStore"];
+  private readonly cacheStore?: OAuthDiscoveryServiceOptions["cacheStore"];
   private readonly callbackUrl: string;
 
-  // TODO: why do we have this harcoded, doesn't Github support discoverying of Oauth endpoints when used?
-  private readonly knownProviders: Map<string, OAuthServerMetadata> = new Map([
-    [
-      "https://github.com/login/oauth",
-      {
-        issuer: "https://github.com/login/oauth",
-        authorization_endpoint: "https://github.com/login/oauth/authorize",
-        token_endpoint: "https://github.com/login/oauth/access_token",
-        grant_types_supported: ["authorization_code", "refresh_token"],
-        response_types_supported: ["code"],
-        code_challenge_methods_supported: ["S256"],
-      },
-    ],
-  ]);
-
-  constructor(options: McpOAuthDiscoveryServiceOptions) {
+  constructor(options: OAuthDiscoveryServiceOptions) {
     this.protocolVersion = options.protocolVersion || "2025-03-26";
     this.cacheTtl = options.cacheTtl || 86400; // 24 hours
     this.cacheStore = options.cacheStore;
@@ -279,25 +264,28 @@ export class McpOAuthDiscoveryService {
 
       logger.debug(`RFC 9728: Authorization server: ${authServerUrl}`);
 
-      // Check if we have hardcoded metadata for this provider
-      const providerMetadata = this.knownProviders.get(authServerUrl);
+      // Try RFC 8414 discovery on the authorization server
+      const discoveredAuth = await this.discoverViaRFC8414(
+        mcpId,
+        authServerUrl
+      );
 
-      if (!providerMetadata) {
+      if (!discoveredAuth) {
         logger.debug(
-          `RFC 9728: Authorization server not in known providers, discovery not implemented`
+          `RFC 9728: Failed to discover OAuth endpoints for auth server ${authServerUrl}`
         );
         return null;
       }
 
       logger.info(
-        `✅ RFC 9728: Using hardcoded OAuth endpoints for ${authServerUrl}`
+        `✅ RFC 9728: Discovered OAuth endpoints for ${authServerUrl} via RFC 8414`
       );
 
       // Add scopes from protected resource metadata if available
-      let metadata = providerMetadata;
+      let metadata = discoveredAuth.metadata;
       if (prm.scopes_supported && prm.scopes_supported.length > 0) {
         metadata = {
-          ...providerMetadata,
+          ...discoveredAuth.metadata,
           scopes_supported: prm.scopes_supported,
         };
       }

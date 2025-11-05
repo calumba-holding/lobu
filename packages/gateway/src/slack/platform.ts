@@ -178,7 +178,8 @@ export class SlackPlatform implements PlatformAdapter {
       },
       moduleRegistry,
       services.getSessionManager(),
-      interactionService
+      interactionService,
+      this // Pass platform instance for auth status rendering
     );
 
     logger.info("✅ Slack platform initialized");
@@ -644,6 +645,7 @@ export class SlackPlatform implements PlatformAdapter {
       userId: testUserId,
       botId: this.config.slack.botId || "",
       threadId,
+      teamId: teamId || "",
       messageId,
       messageText: message,
       channelId,
@@ -900,6 +902,71 @@ export class SlackPlatform implements PlatformAdapter {
       logger.error("Uncaught Exception:", error);
       process.exit(1);
     });
+  }
+
+  /**
+   * Render authentication status for OAuth providers
+   * Implements platform-specific UI rendering for auth status
+   */
+  async renderAuthStatus(
+    userId: string,
+    providers: Array<{
+      id: string;
+      name: string;
+      isAuthenticated: boolean;
+      loginUrl?: string;
+      logoutUrl?: string;
+      metadata?: Record<string, any>;
+    }>
+  ): Promise<void> {
+    logger.info(
+      `Rendering auth status for user ${userId} with ${providers.length} providers`
+    );
+
+    const blocks: any[] = [
+      {
+        type: "section",
+        text: { type: "mrkdwn", text: "*Authentication Status*" },
+      },
+    ];
+
+    for (const provider of providers) {
+      const statusIcon = provider.isAuthenticated ? "🟢" : "🔴";
+      const statusText = provider.isAuthenticated
+        ? "Connected"
+        : "Not Connected";
+
+      const sectionBlock: any = {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `${statusIcon} *${provider.name}* - ${statusText}`,
+        },
+      };
+
+      // Add action button if login/logout URL is available
+      if (provider.loginUrl && !provider.isAuthenticated) {
+        sectionBlock.accessory = {
+          type: "button",
+          text: { type: "plain_text", text: "Login" },
+          url: provider.loginUrl,
+          style: "primary",
+        };
+      }
+
+      blocks.push(sectionBlock);
+    }
+
+    // Publish to user's app home
+    await this.app.client.views.publish({
+      user_id: userId,
+      view: {
+        type: "home",
+        blocks,
+      },
+    });
+
+    logger.info(`Successfully rendered auth status for user ${userId}`);
   }
 
   /**

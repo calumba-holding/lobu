@@ -7,8 +7,8 @@ import type { McpCredentialStore } from "./credential-store";
 import type { McpInputStore } from "./input-store";
 import type {
   DiscoveredOAuthMetadata,
-  McpOAuthDiscoveryService,
-} from "./oauth-discovery";
+  OAuthDiscoveryService,
+} from "../oauth/discovery";
 
 const logger = createLogger("mcp-config-service");
 
@@ -68,7 +68,7 @@ type ConfigSource = { type: "file"; path: string } | { type: "http"; url: URL };
 
 interface McpConfigServiceOptions {
   configUrl?: string; // Accepts both URLs (http://, https://) and file paths
-  discoveryService?: McpOAuthDiscoveryService;
+  discoveryService?: OAuthDiscoveryService;
   credentialStore?: McpCredentialStore;
   inputStore?: McpInputStore;
 }
@@ -76,7 +76,7 @@ interface McpConfigServiceOptions {
 export class McpConfigService {
   private source?: ConfigSource;
   private cache?: LoadedConfig;
-  private discoveryService?: McpOAuthDiscoveryService;
+  private discoveryService?: OAuthDiscoveryService;
   private credentialStore?: McpCredentialStore;
   private inputStore?: McpInputStore;
   private discoveryEnriched = false;
@@ -258,7 +258,7 @@ export class McpConfigService {
   /**
    * Get the OAuth discovery service
    */
-  getDiscoveryService(): McpOAuthDiscoveryService | undefined {
+  getDiscoveryService(): OAuthDiscoveryService | undefined {
     return this.discoveryService;
   }
 

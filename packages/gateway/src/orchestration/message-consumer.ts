@@ -131,6 +131,7 @@ export class MessageConsumer {
 
           // Send ephemeral authentication prompt via thread_response queue
           await this.queue.createQueue("thread_response");
+          // TODO: use Platform Abstraction to render the authentication prompt
           await this.queue.send("thread_response", {
             messageId: data.messageId,
             userId: data.userId,

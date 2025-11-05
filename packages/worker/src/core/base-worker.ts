@@ -48,6 +48,9 @@ export abstract class BaseWorker implements WorkerExecutor {
       );
     }
 
+    if (!config.teamId) {
+      throw new Error("teamId is required for worker initialization");
+    }
     this.workerTransport = new HttpWorkerTransport({
       gatewayUrl,
       workerToken,

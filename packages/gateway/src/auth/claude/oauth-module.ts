@@ -126,12 +126,19 @@ export class ClaudeOAuthModule extends BaseModule {
   }
 
   /**
-   * Render home tab with Claude authentication status and model selection
-   * TODO: We need to have Slack logic implemented by the Slack mode in a modular way. Think of a better way to do it via Platform Abstraction.
+   * Get platform-agnostic authentication status for Claude
+   * Returns abstract provider data that can be rendered by any platform adapter
    */
-  async renderHomeTab(userId: string): Promise<any[]> {
-    const blocks: any[] = [];
-
+  async getAuthStatus(userId: string): Promise<
+    Array<{
+      id: string;
+      name: string;
+      isAuthenticated: boolean;
+      loginUrl?: string;
+      logoutUrl?: string;
+      metadata?: Record<string, any>;
+    }>
+  > {
     try {
       const hasCredentials = await this.credentialStore.hasCredentials(userId);
       const availableModels =
@@ -139,97 +146,22 @@ export class ClaudeOAuthModule extends BaseModule {
       const currentModel =
         await this.modelPreferenceStore.getModelPreference(userId);
 
-      // Single section with model dropdown and login/logout button side by side
-      blocks.push({
-        type: "section",
-        text: {
-          type: "mrkdwn",
-          text: "*Model Selection*",
+      return [
+        {
+          id: "claude",
+          name: "Claude AI",
+          isAuthenticated: hasCredentials || this.systemTokenAvailable,
+          metadata: {
+            availableModels,
+            currentModel,
+            systemTokenAvailable: this.systemTokenAvailable,
+          },
         },
-      });
-
-      if (availableModels.length === 0) {
-        // No models available - show error
-        blocks.push({
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: "⚠️ _Unable to fetch available models._",
-          },
-        });
-      } else {
-        // Show model dropdown and login/logout button side by side using actions block
-        const selectedModelInfo = availableModels.find(
-          (m: any) => m.id === currentModel
-        );
-
-        const elements: any[] = [
-          {
-            type: "static_select",
-            placeholder: {
-              type: "plain_text",
-              text: "Select a model",
-            },
-            action_id: "claude_select_model",
-            options: availableModels.map((model: any) => ({
-              text: {
-                type: "plain_text",
-                text: model.display_name,
-              },
-              value: model.id,
-            })),
-            initial_option:
-              currentModel && selectedModelInfo
-                ? {
-                    text: {
-                      type: "plain_text",
-                      text: selectedModelInfo.display_name,
-                    },
-                    value: currentModel,
-                  }
-                : undefined,
-          },
-        ];
-
-        // Add login/logout button only if no system token
-        if (!this.systemTokenAvailable) {
-          if (hasCredentials) {
-            // Add logout button
-            elements.push({
-              type: "button",
-              text: {
-                type: "plain_text",
-                text: "Logout from Claude",
-              },
-              style: "danger",
-              action_id: "claude_logout",
-              value: "logout",
-            });
-          } else {
-            // Add login button
-            elements.push({
-              type: "button",
-              text: {
-                type: "plain_text",
-                text: "Login with Claude",
-              },
-              style: "primary",
-              action_id: "claude_auth_start",
-              value: "start_auth",
-            });
-          }
-        }
-
-        blocks.push({
-          type: "actions",
-          elements: elements,
-        });
-      }
+      ];
     } catch (error) {
-      logger.error("Failed to render Claude OAuth home tab", { error, userId });
+      logger.error("Failed to get Claude auth status", { error, userId });
+      return [];
     }
-
-    return blocks;
   }
 
   /**
