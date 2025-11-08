@@ -1,6 +1,19 @@
 version: "3.8"
 
 services:
+  # Redis for queue and state management
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    networks:
+      - peerbot-internal
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
   # Build worker image that orchestrator will use
   worker:
     build:
@@ -31,6 +44,13 @@ services:
       QUEUE_URL: redis://redis:6379
       PEERBOT_MCP_SERVERS_URL: ${PEERBOT_MCP_SERVERS_URL:-examples/mcp/oauth.json}
       PUBLIC_GATEWAY_URL: ${PUBLIC_GATEWAY_URL}
+      # Network isolation settings
+      # Empty/unset: Complete isolation (deny all)
+      # WORKER_ALLOWED_DOMAINS=*: Unrestricted access
+      # WORKER_ALLOWED_DOMAINS=domains: Allowlist mode
+      # WORKER_DISALLOWED_DOMAINS=domains: Blocklist mode (with WORKER_ALLOWED_DOMAINS=*)
+      WORKER_ALLOWED_DOMAINS: ${WORKER_ALLOWED_DOMAINS:-}
+      WORKER_DISALLOWED_DOMAINS: ${WORKER_DISALLOWED_DOMAINS:-}
     volumes:
       # Mount Docker socket
       - /var/run/docker.sock:/var/run/docker.sock
@@ -40,10 +60,22 @@ services:
       # Port 3000 only needed when SLACK_HTTP_MODE=true (Socket Mode is default)
       # Add "3000:3000" here if using HTTP mode
       - "8080:8080"
+      - "8118:8118" # HTTP proxy for workers
     networks:
-      - peerbot-network
+      - peerbot-public   # Internet access
+      - peerbot-internal # Internal services (redis, workers)
     restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
 
 networks:
-  peerbot-network:
+  # Public network with internet access (gateway only)
+  peerbot-public:
+    driver: bridge
+
+  # Internal network - no direct internet access
+  # Workers use this network and can only reach internet via gateway's proxy
+  peerbot-internal:
+    internal: true
     driver: bridge

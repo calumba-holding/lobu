@@ -20,7 +20,87 @@ interface McpStatus {
 
 interface SessionContextData {
   platformInstructions: string;
+  networkInstructions: string;
   mcpStatus: McpStatus[];
+}
+
+/**
+ * Provides information about network access rules and allowed domains
+ */
+class NetworkInstructionProvider implements InstructionProvider {
+  name = "network";
+  priority = 20;
+
+  getInstructions(_context: InstructionContext): string {
+    const allowedDomains = process.env.WORKER_ALLOWED_DOMAINS?.trim() || "";
+    const disallowedDomains =
+      process.env.WORKER_DISALLOWED_DOMAINS?.trim() || "";
+
+    // Unrestricted mode
+    if (allowedDomains === "*") {
+      if (disallowedDomains) {
+        const blockedList = disallowedDomains
+          .split(",")
+          .map((d) => `  - ${d.trim()}`)
+          .filter((d) => d.length > 4)
+          .join("\n");
+        return `## Network Access
+
+**Internet Access:** Unrestricted (all domains allowed)
+
+**Blocked domains:**
+${blockedList}
+
+You can access any external service except the blocked domains listed above.`;
+      }
+      return `## Network Access
+
+**Internet Access:** Unrestricted (all domains allowed)
+
+You can access any external service without restrictions.`;
+    }
+
+    // Complete isolation
+    if (!allowedDomains) {
+      return `## Network Access
+
+**Internet Access:** Complete isolation (no external access)
+
+You do NOT have access to the internet. All external requests (curl, wget, npm, pip, etc.) will fail. Only local operations and MCP tools are available.`;
+    }
+
+    // Allowlist mode
+    const allowedList = allowedDomains
+      .split(",")
+      .map((d) => `  - ${d.trim()}`)
+      .filter((d) => d.length > 4)
+      .join("\n");
+
+    let instructions = `## Network Access
+
+**Internet Access:** Filtered (allowlist mode)
+
+**Allowed domains:**
+${allowedList}`;
+
+    if (disallowedDomains) {
+      const blockedList = disallowedDomains
+        .split(",")
+        .map((d) => `  - ${d.trim()}`)
+        .filter((d) => d.length > 4)
+        .join("\n");
+      instructions += `
+
+**Blocked domains:**
+${blockedList}`;
+    }
+
+    instructions += `
+
+You can only access the allowed domains listed above. All other external requests will be blocked by the proxy. Plan your work accordingly and use available MCP tools when possible.`;
+
+    return instructions;
+  }
 }
 
 /**
@@ -75,6 +155,18 @@ export class InstructionService {
       }
     }
 
+    // Get network access instructions
+    let networkInstructions = "";
+    const networkProvider = new NetworkInstructionProvider();
+    try {
+      networkInstructions = await networkProvider.getInstructions(context);
+      logger.info(
+        `Got network instructions (${networkInstructions.length} chars)`
+      );
+    } catch (error) {
+      logger.error("Failed to get network instructions:", error);
+    }
+
     // Get MCP status data
     let mcpStatus: McpStatus[] = [];
     if (this.mcpConfigService) {
@@ -89,6 +181,7 @@ export class InstructionService {
 
     return {
       platformInstructions,
+      networkInstructions,
       mcpStatus,
     };
   }

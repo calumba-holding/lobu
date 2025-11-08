@@ -105,16 +105,22 @@ export class WorkerGateway {
     // Register connection with connection manager
     this.connectionManager.addConnection(deploymentName, userId, threadId, res);
 
-    // Register job router for this worker (idempotent - safe to call multiple times)
+    // Register BullMQ worker for this deployment (idempotent - safe to call multiple times)
     await this.jobRouter.registerWorker(deploymentName);
+
+    // Resume the BullMQ worker now that SSE connection is established
+    await this.jobRouter.resumeWorker(deploymentName);
 
     // Send any pending interaction responses (for reconnection recovery)
     await this.sendPendingInteractionResponses(threadId, deploymentName);
 
     // Handle client disconnect
     req.on("close", () => {
+      // Pause the BullMQ worker when SSE connection is lost
+      this.jobRouter.pauseWorker(deploymentName).catch((err) => {
+        logger.error(`Failed to pause worker ${deploymentName}:`, err);
+      });
       this.connectionManager.removeConnection(deploymentName);
-      // BullMQ worker remains registered - will resume when worker reconnects
     });
   }
 
@@ -203,12 +209,13 @@ export class WorkerGateway {
         ]);
 
       logger.info(
-        `Session context for ${userId}: ${Object.keys(mcpConfig.mcpServers || {}).length} MCPs, ${contextData.platformInstructions.length} chars platform instructions, ${contextData.mcpStatus.length} MCP status entries, ${unansweredInteractions.length} unanswered interactions`
+        `Session context for ${userId}: ${Object.keys(mcpConfig.mcpServers || {}).length} MCPs, ${contextData.platformInstructions.length} chars platform instructions, ${contextData.networkInstructions.length} chars network instructions, ${contextData.mcpStatus.length} MCP status entries, ${unansweredInteractions.length} unanswered interactions`
       );
 
       res.json({
         mcpConfig,
         platformInstructions: contextData.platformInstructions,
+        networkInstructions: contextData.networkInstructions,
         mcpStatus: contextData.mcpStatus,
         unansweredInteractions,
       });

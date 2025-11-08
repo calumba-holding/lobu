@@ -325,8 +325,8 @@ export class MessageHandler {
     event: SlackMessageEvent,
     bodyTeamId?: string
   ): SlackContext {
-    // Use team_id from event (now guaranteed in SlackMessageEvent type)
-    const teamId = event.team_id || event.team || bodyTeamId || "";
+    // Extract teamId from event.team (optional) or body.team_id (always present)
+    const teamId = event.team || bodyTeamId || "";
 
     return {
       channelId: event.channel,

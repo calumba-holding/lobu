@@ -143,6 +143,10 @@ export async function startGateway(
 ): Promise<void> {
   logger.info("🚀 Starting Peerbot Gateway");
 
+  // Start filtering proxy for worker network isolation (if enabled)
+  const { startFilteringProxy } = await import("../proxy/proxy-manager");
+  await startFilteringProxy();
+
   // Import dependencies (after config is loaded)
   const { Orchestrator } = await import("../orchestration");
   const { Gateway } = await import("../gateway-main");

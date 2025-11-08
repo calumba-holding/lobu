@@ -933,6 +933,12 @@ export function registerInteractionHandlers(
       );
     } else if (type === "multi-section") {
       // Extract current section data
+      logger.info(
+        `[DEBUG] Raw state.values keys: ${JSON.stringify(Object.keys(body.state?.values || {}))}`
+      );
+      logger.info(
+        `[DEBUG] Raw state.values: ${JSON.stringify(body.state?.values || {}, null, 2)}`
+      );
       const currentData = extractFormData(body.state?.values || {});
       logger.info(`Current section data: ${JSON.stringify(currentData)}`);
 

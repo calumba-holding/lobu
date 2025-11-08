@@ -38,6 +38,7 @@ interface McpStatus {
 interface SessionContextResponse {
   mcpConfig?: MCPConfigResponse;
   platformInstructions: string;
+  networkInstructions: string;
   mcpStatus: McpStatus[];
   unansweredInteractions: PendingInteraction[];
 }
@@ -177,13 +178,17 @@ export async function getSessionContext(): Promise<{
     // Build MCP instructions from status data
     const mcpInstructions = buildMcpInstructions(data.mcpStatus);
 
-    // Merge platform + MCP instructions
-    const gatewayInstructions = [data.platformInstructions, mcpInstructions]
+    // Merge platform + network + MCP instructions
+    const gatewayInstructions = [
+      data.platformInstructions,
+      data.networkInstructions,
+      mcpInstructions,
+    ]
       .filter(Boolean)
       .join("\n\n");
 
     logger.info(
-      `Built gateway instructions: platform (${data.platformInstructions.length} chars) + MCP (${mcpInstructions.length} chars)`
+      `Built gateway instructions: platform (${data.platformInstructions.length} chars) + network (${data.networkInstructions.length} chars) + MCP (${mcpInstructions.length} chars)`
     );
 
     return {

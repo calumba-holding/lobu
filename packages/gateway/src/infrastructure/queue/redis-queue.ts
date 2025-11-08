@@ -214,6 +214,45 @@ export class RedisQueue implements IMessageQueue {
     }
   }
 
+  async pauseWorker(queueName: string): Promise<void> {
+    const worker = this.workers.get(queueName);
+    if (!worker) {
+      logger.warn(
+        `Cannot pause worker for queue ${queueName} - worker not found`
+      );
+      return;
+    }
+
+    if (worker.isPaused()) {
+      logger.debug(`Worker for queue ${queueName} is already paused`);
+      return;
+    }
+
+    await worker.pause();
+    logger.info(`⏸️  Paused worker for queue ${queueName}`);
+  }
+
+  async resumeWorker(queueName: string): Promise<void> {
+    const worker = this.workers.get(queueName);
+    if (!worker) {
+      logger.warn(
+        `Cannot resume worker for queue ${queueName} - worker not found`
+      );
+      return;
+    }
+
+    if (!worker.isPaused()) {
+      logger.debug(`Worker for queue ${queueName} is already running`);
+      return;
+    }
+
+    worker.resume();
+    logger.info(`▶️  Resumed worker for queue ${queueName}`);
+  }
+
+  /**
+   * Get detailed queue statistics
+   */
   async getQueueStats(queueName: string): Promise<QueueStats> {
     const queue = this.queues.get(queueName);
     if (!queue) {

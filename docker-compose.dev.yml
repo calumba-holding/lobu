@@ -42,6 +42,8 @@ services:
       WORKER_VOLUME_MOUNTS: "${PWD}/examples/startup-builder:/workspace/startup-builder:ro"
       # Security: Disable read-only rootfs for development (enabled by default in production)
       WORKER_READONLY_ROOTFS: "false"
+      # Additional allowed domains for worker internet access (comma-separated)
+      WORKER_ALLOWED_DOMAINS: ${WORKER_ALLOWED_DOMAINS:-}
     volumes:
       # Mount Docker socket for Docker mode
       - /var/run/docker.sock:/var/run/docker.sock
@@ -59,8 +61,10 @@ services:
     ports:
       - "3000:3000"
       - "8080:8080"  # OAuth and health endpoints
+      - "8118:8118"  # HTTP proxy for workers
     networks:
-      - peerbot-network
+      - peerbot-public   # Can reach internet
+      - peerbot-internal # Can reach workers and redis
     depends_on:
       - redis
 
@@ -72,10 +76,16 @@ services:
     ports:
       - "6379:6379"
     networks:
-      - peerbot-network
+      - peerbot-internal  # Only accessible from internal network
 
 networks:
-  peerbot-network:
+  # Public network - gateway can reach internet
+  peerbot-public:
+    driver: bridge
+
+  # Internal network - workers cannot reach internet directly
+  peerbot-internal:
+    internal: true
     driver: bridge
 
 volumes:

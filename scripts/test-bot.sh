@@ -11,7 +11,12 @@ if [ -f .env ]; then
     export $(grep -v '^#' .env | grep -E 'SLACK_BOT_TOKEN|TEST_CHANNEL|TEST_USER_ID' | sed 's/#.*//' | xargs)
 fi
 
-CHANNEL="${TEST_CHANNEL:-test-channel}"
+# If not exists, fail with error
+if [ -z "$QA_SLACK_CHANNEL" ]; then
+    echo "❌ QA_SLACK_CHANNEL environment variable is required"
+    exit 1
+fi
+
 TIMEOUT="${TEST_TIMEOUT:-30}"
 
 if [ -z "$SLACK_BOT_TOKEN" ]; then
@@ -27,7 +32,7 @@ else
 fi
 
 echo "🧪 Testing bot with ${#MESSAGES[@]} message(s)"
-echo "📍 Channel: $CHANNEL"
+echo "📍 Channel: $QA_SLACK_CHANNEL"
 echo "⏱️  Timeout: ${TIMEOUT}s"
 echo ""
 
@@ -42,9 +47,9 @@ for i in "${!MESSAGES[@]}"; do
     
     # Build request body
     if [ -n "$LAST_THREAD_ID" ]; then
-        BODY="{\"platform\":\"slack\",\"channel\":\"$CHANNEL\",\"message\":\"$MESSAGE\",\"threadId\":\"$LAST_THREAD_ID\"}"
+        BODY="{\"platform\":\"slack\",\"channel\":\"$QA_SLACK_CHANNEL\",\"message\":\"$MESSAGE\",\"threadId\":\"$LAST_THREAD_ID\"}"
     else
-        BODY="{\"platform\":\"slack\",\"channel\":\"$CHANNEL\",\"message\":\"$MESSAGE\"}"
+        BODY="{\"platform\":\"slack\",\"channel\":\"$QA_SLACK_CHANNEL\",\"message\":\"$MESSAGE\"}"
     fi
     
     # Send message

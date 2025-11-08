@@ -30,8 +30,7 @@ export interface SlackMessageEvent
   thread_ts?: string;
   bot_id?: string;
   channel_type: string;
-  team_id: string; // Required team ID from Slack event
-  team?: string; // Deprecated, use team_id instead
+  team?: string; // Team ID from Slack event (optional - use bodyTeamId as fallback)
 }
 
 // Helper type for action body (from middleware args)

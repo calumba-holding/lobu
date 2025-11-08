@@ -68,7 +68,7 @@ export function setupAssistantHandlers(
         ts: string;
         text: string;
         user: string;
-        team_id?: string;
+        team?: string; // Team ID from Slack event (optional)
         files?: any[];
       };
 
@@ -100,7 +100,7 @@ export function setupAssistantHandlers(
         const context: SlackContext = {
           channelId: assistantMessage.channel,
           userId: assistantMessage.user,
-          teamId: assistantMessage.team_id || "",
+          teamId: assistantMessage.team || "", // Team ID always present on assistant messages
           threadTs: assistantMessage.thread_ts,
           messageTs: assistantMessage.ts,
           text: assistantMessage.text || "",

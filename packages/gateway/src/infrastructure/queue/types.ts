@@ -61,6 +61,16 @@ export interface IMessageQueue {
   work<T>(queueName: string, handler: JobHandler<T>): Promise<void>;
 
   /**
+   * Pause a queue worker (stops processing jobs)
+   */
+  pauseWorker(queueName: string): Promise<void>;
+
+  /**
+   * Resume a queue worker (starts processing jobs)
+   */
+  resumeWorker(queueName: string): Promise<void>;
+
+  /**
    * Get detailed queue statistics
    */
   getQueueStats(queueName: string): Promise<QueueStats>;

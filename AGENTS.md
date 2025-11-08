@@ -20,6 +20,38 @@
 - When fixing unused parameter errors, remove the parameter entirely if possible rather than prefixing with underscore
 - Worker prompt delivery: Claude CLI reads prompts from stdin via direct pipe from prompt file (no named pipes used)
 
+### Architecture
+
+#### Platform
+We currently only support Slack as messaging app.
+There is also a public endpoint in gateway to trigger running the agent.
+
+#### Orchestration
+- We support DockerDeploymentManager and KubernetesDeploymentManager.
+- All workers are sandboxed with your settings.
+
+#### MCP
+- The users pass the PEERBOT_MCP_SERVERS_URL env (.peerbot/mcp.config.json) to enable MCP proxy in the gateway. 
+- The workers get the MCP settings from gateway's internal config endpoint and their JWT token from environment variables to perform MCP calls through proxy.
+- Peerbot includes following MCPs in the workers by default: // TODO explain them and make it concise
+- AskUser
+-- put one example
+- UploadFile
+- [processmanager]
+- ? (add anything else)
+
+#### Network
+
+- Workers run on isolated internal network (`peerbot-internal`) with no direct internet access. Gateway sits on both `peerbot-public` and `peerbot-internal` networks, acting as single egress point.
+- **Proxy filtering**: Gateway runs custom Node.js HTTP proxy on port 8118. Workers configured with `HTTP_PROXY=http://gateway:8118` for all outbound requests (curl/wget/npm/git).
+- **Network access control** (via `WORKER_ALLOWED_DOMAINS` environment variable):
+  - **Complete isolation** (default): Leave empty or unset → workers have NO internet access
+  - **Allowlist mode**: `WORKER_ALLOWED_DOMAINS="github.com"` → deny by default, allow only these domains
+  - **Unrestricted access**: `WORKER_ALLOWED_DOMAINS="*"` → allow all domains (not recommended for production)
+  - **Blocklist mode**: `WORKER_ALLOWED_DOMAINS="*"` + `WORKER_DISALLOWED_DOMAINS="malicious.com,spam.org"` → allow all except blocked
+- **Domain format**: Exact domain (`api.example.com`) or wildcard (`.example.com` matches `*.example.com`)
+- **Enforcement**: Docker's `internal: true` network flag prevents routing to external networks at infrastructure layer. Even if worker code is compromised, no network route exists. HTTP proxy provides selective access to approved domains only.
+
 ## TypeScript Build System
 
 TypeScript packages must be compiled from `src/` → `dist/`. If you modify any package source code, run `make build-packages` or use `make watch-packages` for auto-rebuild during development. `make dev` automatically builds packages before starting.
@@ -33,14 +65,14 @@ TypeScript packages must be compiled from `src/` → `dist/`. If you modify any 
 - Anytime you make changes in the code, you MUST:
 
 1. Have the bot running via `make dev` running in the background for development. This uses Docker Compose with hot reload enabled when NODE_ENV=development.
-2. Test the bot using curl with the messaging API endpoint:
+2. Test the bot using the test script:
 ```bash
-source .env && curl -X POST http://localhost:8080/api/messaging/send \
-  -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"platform":"slack","channel":"$TEST_CHANNEL","message":"@me test prompt"}'
+./scripts/test-bot.sh "@me test prompt"
 ```
-Wait 10-30 seconds and check logs to verify the bot processes the message.
+The script automatically handles sending the message, waiting for response, and checking logs. You can send multiple messages in sequence:
+```bash
+./scripts/test-bot.sh "@me first message" "follow up question" "another question"
+```
 3. Check logs using `docker compose logs` or `make logs` to verify the bot works properly.
 
 - If you create ephemeral files, you MUST delete them when you're done with them.
@@ -174,39 +206,31 @@ export GOOGLE_CLIENT_SECRET=your_google_client_secret
 
 ## Testing Bot Deployments
 
-Use the messaging API endpoint to test your bot with simple curl commands. No special QA environment variables needed.
+Use the `test-bot.sh` script for easy bot testing. No manual curl commands needed.
 
 ### Basic Test
 ```bash
-curl -X POST http://localhost:8080/api/messaging/send \
-  -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"platform":"slack","channel":"test-channel","message":"@me hello"}'
+./scripts/test-bot.sh "@me hello"
 ```
 
-### Complete E2E Testing Example
-
+### Multi-Message Conversation Test
 ```bash
-# 1. Send initial message and capture thread ID
-RESPONSE=$(curl -s -X POST http://localhost:8080/api/messaging/send \
-  -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"platform":"slack","channel":"test-channel","message":"@me what is 5+5?"}')
+# Send multiple messages in sequence (automatically uses same thread)
+./scripts/test-bot.sh "@me what is 5+5?" "now multiply that by 3" "thanks!"
+```
 
-echo "Response: $RESPONSE"
-THREAD_ID=$(echo $RESPONSE | jq -r '.threadId')
-echo "Thread ID: $THREAD_ID"
+### Custom Channel and Timeout
+```bash
+# Set environment variables
+export TEST_CHANNEL="my-channel"
+export TEST_TIMEOUT=60  # seconds to wait for response
 
-# 2. Wait for bot to respond (check logs or Slack UI)
-sleep 10
+./scripts/test-bot.sh "@me test with custom settings"
+```
 
-# 3. Send follow-up in same thread
-curl -X POST http://localhost:8080/api/messaging/send \
-  -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{\"platform\":\"slack\",\"channel\":\"test-channel\",\"message\":\"now multiply that by 3\",\"threadId\":\"$THREAD_ID\"}"
-
-# 4. Test with file upload
+### File Upload Test
+For file uploads, use the messaging API directly:
+```bash
 curl -X POST http://localhost:8080/api/messaging/send \
   -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
   -F "platform=slack" \
@@ -214,40 +238,9 @@ curl -X POST http://localhost:8080/api/messaging/send \
   -F "message=@me analyze these files" \
   -F "files=@data.csv" \
   -F "files=@document.pdf"
+```
 
-# 5. Check logs to verify processing
+### Check Logs
+```bash
 docker compose -f docker-compose.dev.yml logs gateway --tail 50
 ```
-
-See generated `TESTING.md` for comprehensive API documentation including interaction testing.
-
-## Messaging API for AI Agents
-
-Developers can test their bots using the messaging API endpoint. For generated projects, see `AGENTS.md` and `TESTING.md` in the project directory for comprehensive documentation.
-
-### Endpoint
-```
-POST http://localhost:8080/api/messaging/send
-```
-
-### Quick Example
-```bash
-curl -X POST http://localhost:8080/api/messaging/send \
-  -H "Authorization: Bearer xoxb-your-bot-token" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "platform": "slack",
-    "channel": "general",
-    "message": "@me hello"
-  }'
-```
-
-**Key Features:**
-- **Bearer Token Auth**: Token in `Authorization` header (not body)
-- **@me Placeholder**: Use `@me` to mention the bot (platform-agnostic)
-- **File uploads**: Support multipart/form-data for attachments
-- **Thread continuity**: Use `threadId` parameter for conversation context
-- **Channel resolution**: Accept channel names or IDs
-- **Platform-agnostic**: Same API works for Slack, Discord, Telegram (future)
-
-This endpoint allows AI agents to test bot connectivity during docker-compose development and automate E2E conversation testing.

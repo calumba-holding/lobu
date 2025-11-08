@@ -380,11 +380,25 @@ export class InteractionService extends EventEmitter {
       return;
     }
 
+    // Flatten nested partialData structure for multi-section forms
+    // partialData is: { "Section1": { "field1": "val1" }, "Section2": { "field2": "val2" } }
+    // We need: { "field1": "val1", "field2": "val2" }
+    const flattenedData: Record<string, any> = {};
+    for (const sectionData of Object.values(interaction.partialData)) {
+      if (typeof sectionData === "object" && sectionData !== null) {
+        Object.assign(flattenedData, sectionData);
+      }
+    }
+
+    logger.info(
+      `Submitting flattened multi-section form data: ${JSON.stringify(flattenedData)}`
+    );
+
     // Submit as final response with all form data
     await this.respond(
       interactionId,
       {
-        formData: interaction.partialData,
+        formData: flattenedData,
       },
       respondedByUserId
     );

@@ -434,6 +434,121 @@ export async function initCommand(
     );
   }
 
+  // Worker network access configuration
+  const { networkAccessMode } = await inquirer.prompt([
+    {
+      type: "list",
+      name: "networkAccessMode",
+      message: "Configure worker internet access:",
+      choices: [
+        {
+          name: "🔒 Filtered access (recommended) - Allow only specific domains",
+          value: "filtered",
+        },
+        {
+          name: "🚫 Complete isolation - No internet access",
+          value: "isolated",
+        },
+        {
+          name: "🌐 Unrestricted access - Full internet (not recommended)",
+          value: "unrestricted",
+        },
+      ],
+      default: "filtered",
+    },
+  ]);
+
+  let allowedDomains = "";
+  let disallowedDomains = "";
+
+  const defaultDomains = [
+    "registry.npmjs.org",
+    ".npmjs.org",
+    "github.com",
+    ".github.com",
+    ".githubusercontent.com",
+    "cdn.jsdelivr.net",
+    "unpkg.com",
+    "pypi.org",
+    "files.pythonhosted.org",
+  ].join(",");
+
+  if (networkAccessMode === "filtered") {
+    const { customizeDomains } = await inquirer.prompt([
+      {
+        type: "confirm",
+        name: "customizeDomains",
+        message:
+          "Use default allowed domains? (Claude API, npm, GitHub, PyPI, CDNs)",
+        default: true,
+      },
+    ]);
+
+    if (!customizeDomains) {
+      const { allowedDomainsInput } = await inquirer.prompt([
+        {
+          type: "input",
+          name: "allowedDomainsInput",
+          message: "Enter comma-separated allowed domains:",
+          default: defaultDomains,
+          validate: (input: string) => {
+            if (!input || input.trim().length === 0) {
+              return "At least one domain is required for filtered mode";
+            }
+            return true;
+          },
+        },
+      ]);
+      allowedDomains = allowedDomainsInput;
+    } else {
+      allowedDomains = defaultDomains;
+    }
+
+    const { addDisallowedDomains } = await inquirer.prompt([
+      {
+        type: "confirm",
+        name: "addDisallowedDomains",
+        message:
+          "Add disallowed domains? (Optional - blocks specific domains within allowed patterns)",
+        default: false,
+      },
+    ]);
+
+    if (addDisallowedDomains) {
+      const { disallowedDomainsInput } = await inquirer.prompt([
+        {
+          type: "input",
+          name: "disallowedDomainsInput",
+          message: "Enter comma-separated disallowed domains:",
+        },
+      ]);
+      disallowedDomains = disallowedDomainsInput;
+    }
+  } else if (networkAccessMode === "unrestricted") {
+    allowedDomains = "*";
+
+    const { addDisallowedDomains } = await inquirer.prompt([
+      {
+        type: "confirm",
+        name: "addDisallowedDomains",
+        message: "Block any specific domains? (Optional)",
+        default: false,
+      },
+    ]);
+
+    if (addDisallowedDomains) {
+      const { disallowedDomainsInput } = await inquirer.prompt([
+        {
+          type: "input",
+          name: "disallowedDomainsInput",
+          message: "Enter comma-separated domains to block:",
+        },
+      ]);
+      disallowedDomains = disallowedDomainsInput;
+    }
+  }
+  // else isolated mode: leave both empty
+
   // Generate encryption key for credentials
   const encryptionKey = randomBytes(32).toString("hex");
 
@@ -445,6 +560,8 @@ export async function initCommand(
     publicUrl,
     encryptionKey,
     selectedMcpServers,
+    allowedDomains,
+    disallowedDomains,
   };
 
   // docker-compose.yml will be created in new directory, no need to check
@@ -501,6 +618,8 @@ export async function initCommand(
       ANTHROPIC_API_KEY: answers.anthropicApiKey || "",
       PUBLIC_GATEWAY_URL: answers.publicUrl || "http://localhost:8080",
       GATEWAY_PORT: "8080",
+      WORKER_ALLOWED_DOMAINS: answers.allowedDomains,
+      WORKER_DISALLOWED_DOMAINS: answers.disallowedDomains,
     };
 
     // Create .env file
@@ -563,7 +682,7 @@ export async function initCommand(
       );
     }
 
-    // Generate docker-compose.yml
+    // Generate docker-compose.yml (always includes network isolation infrastructure)
     const composeContent = generateDockerCompose({
       projectName,
       gatewayPort: "8080",
@@ -734,23 +853,21 @@ name: ${projectName}
 services:
   redis:
     image: redis:7-alpine
-    command: redis-server --appendonly yes
-    ports:
-      - "6379:6379"
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
+      interval: 10s
       timeout: 3s
-      retries: 5
-    volumes:
-      - redis_data:/data
+      retries: 3
     networks:
-      - peerbot-network
+      - peerbot-internal
+    restart: unless-stopped
 
   gateway:
     image: ${gatewayImage}
     ports:
       - "${gatewayPort}:8080"
+      - "8118:8118" # HTTP proxy for workers
     environment:
       DEPLOYMENT_MODE: docker
       WORKER_IMAGE: ${workerImage}
@@ -762,11 +879,18 @@ services:
       NODE_ENV: production
       ANTHROPIC_API_KEY: \${ANTHROPIC_API_KEY:-}
       COMPOSE_PROJECT_NAME: ${projectName}${mcpEnvVars}
+      # Worker network access control
+      # Empty/unset: Complete isolation (deny all)
+      # WORKER_ALLOWED_DOMAINS=*: Unrestricted access
+      # WORKER_ALLOWED_DOMAINS=domains: Allowlist mode
+      WORKER_ALLOWED_DOMAINS: \${WORKER_ALLOWED_DOMAINS:-}
+      WORKER_DISALLOWED_DOMAINS: \${WORKER_DISALLOWED_DOMAINS:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock${mcpConfigMount}
       - env_storage:/app/.peerbot/env
     networks:
-      - peerbot-network
+      - peerbot-public   # Internet access
+      - peerbot-internal # Internal services (redis, workers)
     depends_on:
       redis:
         condition: service_healthy
@@ -782,7 +906,14 @@ services:
       - build-only
 
 networks:
-  peerbot-network:
+  # Public network with internet access (gateway only)
+  peerbot-public:
+    driver: bridge
+
+  # Internal network - no direct internet access
+  # Workers use this network and can only reach internet via gateway's proxy
+  peerbot-internal:
+    internal: true
     driver: bridge
 
 volumes:

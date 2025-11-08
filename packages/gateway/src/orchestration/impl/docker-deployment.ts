@@ -174,12 +174,19 @@ export class DockerDeploymentManager extends BaseDeploymentManager {
         }
       }
 
+      // Configure HTTP proxy for network-isolated workers
+      // Network isolation is always enabled - workers always use proxy
       const envVars = [
         `ANTHROPIC_API_KEY=${username}:`,
         // Pass NODE_ENV to worker container
         `NODE_ENV=${process.env.NODE_ENV || "production"}`,
         // Enable SDK debugging for crash investigation
         "DEBUG=1",
+        // HTTP proxy configuration (always enabled for network isolation)
+        "HTTP_PROXY=http://gateway:8118",
+        "HTTPS_PROXY=http://gateway:8118",
+        // Don't proxy internal services
+        "NO_PROXY=gateway,redis,localhost,127.0.0.1",
         // Convert common environment variables to Docker format
         ...Object.entries(commonEnvVars).map(
           ([key, value]) => `${key}=${value}`
@@ -246,8 +253,8 @@ export class DockerDeploymentManager extends BaseDeploymentManager {
           NanoCpus: ResourceParser.parseCpu(
             this.config.worker.resources.limits.cpu
           ),
-          // Connect to the Docker Compose network
-          NetworkMode: `${composeProjectName}_peerbot-network`,
+          // Always connect to internal network (network isolation always enabled)
+          NetworkMode: `${composeProjectName}_peerbot-internal`,
           // Security: Drop all capabilities and only add what's needed
           CapDrop: ["ALL"],
           CapAdd: process.env.WORKER_CAPABILITIES

@@ -49,6 +49,30 @@ export class WorkerJobRouter {
   }
 
   /**
+   * Pause the BullMQ worker when SSE connection is lost
+   * This prevents jobs from being processed when worker can't receive them
+   */
+  async pauseWorker(deploymentName: string): Promise<void> {
+    const queueName = `thread_message_${deploymentName}`;
+    await this.queue.pauseWorker(queueName);
+    logger.info(
+      `Paused job processing for ${deploymentName} - worker disconnected`
+    );
+  }
+
+  /**
+   * Resume the BullMQ worker when SSE connection is established
+   * Jobs will now be processed and sent to the worker
+   */
+  async resumeWorker(deploymentName: string): Promise<void> {
+    const queueName = `thread_message_${deploymentName}`;
+    await this.queue.resumeWorker(queueName);
+    logger.info(
+      `Resumed job processing for ${deploymentName} - worker connected`
+    );
+  }
+
+  /**
    * Handle a job from the queue and route it to the worker
    *
    * Jobs are sent immediately without blocking the queue, allowing multiple messages
