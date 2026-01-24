@@ -6,10 +6,11 @@
  * Does not require external platform integration (no Slack, Discord, etc.)
  */
 
-import { createLogger, type InstructionProvider } from "@peerbot/core";
+import { createLogger, type InstructionProvider, type UserInteraction } from "@peerbot/core";
 import type { CoreServices, PlatformAdapter } from "../platform";
 import { ApiResponseRenderer } from "./response-renderer";
 import type { ResponseRenderer } from "../platform/response-renderer";
+import { broadcastToSession } from "../routes/public/sessions";
 
 const logger = createLogger("api-platform");
 
@@ -48,6 +49,17 @@ export class ApiPlatform implements PlatformAdapter {
 
     // Create response renderer for routing worker responses to SSE clients
     this.responseRenderer = new ApiResponseRenderer();
+
+    // Subscribe to interaction events to handle tool approvals
+    const interactionService = services.getInteractionService();
+    interactionService.on("interaction:created", (interaction) => {
+      // Only handle API platform interactions
+      if (interaction.teamId === "api" || interaction.spaceId?.startsWith("api-")) {
+        this.handleToolApproval(interaction).catch((error) => {
+          logger.error("Failed to handle tool approval:", error);
+        });
+      }
+    });
 
     logger.info("✅ API platform initialized");
   }
@@ -104,6 +116,31 @@ export class ApiPlatform implements PlatformAdapter {
    */
   getResponseRenderer(): ResponseRenderer | undefined {
     return this.responseRenderer;
+  }
+
+  /**
+   * Handle tool approval requests by sending them via SSE
+   */
+  private async handleToolApproval(interaction: UserInteraction): Promise<void> {
+    const sessionId = interaction.threadId;
+    if (!sessionId) {
+      logger.warn("No session ID found for tool approval interaction");
+      return;
+    }
+
+    // Send tool approval request to SSE clients
+    broadcastToSession(sessionId, "tool_approval", {
+      type: "tool_approval",
+      interactionId: interaction.id,
+      title: interaction.title,
+      message: interaction.message,
+      fields: interaction.fields,
+      buttons: interaction.buttons,
+      expiresAt: interaction.expiresAt,
+      timestamp: Date.now(),
+    });
+
+    logger.info(`Sent tool approval to session ${sessionId}: ${interaction.id}`);
   }
 
   /**

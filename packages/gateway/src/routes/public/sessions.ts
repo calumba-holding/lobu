@@ -59,10 +59,30 @@ interface ApprovalRequest {
 }
 
 // Active SSE connections by session ID
+// NOTE: In-memory storage limits horizontal scaling. For multi-instance deployments,
+// consider Redis pub/sub or similar distributed mechanism.
 const sseConnections = new Map<string, Set<Response>>();
+
+// Connection limits to prevent resource exhaustion
+const MAX_CONNECTIONS_PER_SESSION = 5;
+const MAX_TOTAL_CONNECTIONS = 1000;
 
 // Session token expiration (24 hours)
 const TOKEN_EXPIRATION_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Clean up a specific SSE connection
+ */
+function cleanupConnection(sessionId: string, res: Response): void {
+  const connections = sseConnections.get(sessionId);
+  if (connections) {
+    connections.delete(res);
+    if (connections.size === 0) {
+      sseConnections.delete(sessionId);
+    }
+    logger.debug(`Cleaned up SSE connection for session ${sessionId}`);
+  }
+}
 
 /**
  * Extract and verify session token from request
@@ -98,6 +118,16 @@ function authenticateSession(
     res.status(403).json({
       success: false,
       error: "Token does not match session",
+    });
+    return null;
+  }
+
+  // Check token expiration (24 hour TTL)
+  const tokenAge = Date.now() - tokenData.timestamp;
+  if (tokenAge > TOKEN_EXPIRATION_MS) {
+    res.status(401).json({
+      success: false,
+      error: "Session token expired",
     });
     return null;
   }
@@ -140,21 +170,36 @@ export function broadcastToSession(
 ): void {
   const connections = sseConnections.get(sessionId);
   if (!connections || connections.size === 0) {
+    logger.debug(`No SSE connections for session ${sessionId}`);
     return;
   }
 
   const message = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  const deadConnections = new Set<Response>();
 
   for (const res of connections) {
     try {
+      if (res.destroyed || res.writableEnded) {
+        deadConnections.add(res);
+        continue;
+      }
       res.write(message);
     } catch (error) {
       logger.error(
         `Failed to write to SSE connection for session ${sessionId}:`,
         error
       );
-      connections.delete(res);
+      deadConnections.add(res);
     }
+  }
+
+  // Clean up dead connections
+  for (const deadRes of deadConnections) {
+    connections.delete(deadRes);
+  }
+  
+  if (connections.size === 0) {
+    sseConnections.delete(sessionId);
   }
 }
 
@@ -205,6 +250,32 @@ export function registerSessionsRoutes(
         spaceId,
       } = body;
 
+      // Validate working directory path
+      if (workingDirectory) {
+        try {
+          const resolved = require('path').resolve(workingDirectory);
+          if (!resolved.startsWith('/') && !resolved.match(/^[A-Z]:\\/)) {
+            return res.status(400).json({
+              success: false,
+              error: 'Invalid working directory path'
+            });
+          }
+        } catch (error) {
+          return res.status(400).json({
+            success: false, 
+            error: 'Invalid working directory path'
+          });
+        }
+      }
+
+      // Validate provider
+      if (provider && !['claude'].includes(provider)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid provider. Supported: claude'
+        });
+      }
+
       // Generate unique session ID
       const sessionId = randomUUID();
       const threadId = sessionId; // For API sessions, threadId equals sessionId
@@ -223,7 +294,7 @@ export function registerSessionsRoutes(
 
       const expiresAt = Date.now() + TOKEN_EXPIRATION_MS;
 
-      // Create session record
+      // Create session record with session parameters
       const session: ThreadSession = {
         sessionKey: sessionId,
         threadId,
@@ -232,8 +303,10 @@ export function registerSessionsRoutes(
         threadCreator: userId,
         lastActivity: Date.now(),
         createdAt: Date.now(),
-        // Store additional metadata
         status: "created",
+        // Store session parameters for worker use
+        workingDirectory,
+        provider,
       };
       await sessionManager.setSession(session);
 
@@ -315,11 +388,28 @@ export function registerSessionsRoutes(
         socket.setNoDelay(true);
       }
 
-      // Add to connections map
+      // Check connection limits before adding
+      const totalConnections = Array.from(sseConnections.values()).reduce((acc, set) => acc + set.size, 0);
+      if (totalConnections >= MAX_TOTAL_CONNECTIONS) {
+        return res.status(429).json({
+          success: false,
+          error: 'Server connection limit reached. Try again later.',
+        });
+      }
+
       if (!sseConnections.has(sessionId)) {
         sseConnections.set(sessionId, new Set());
       }
-      sseConnections.get(sessionId)!.add(res);
+      
+      const sessionConnections = sseConnections.get(sessionId)!;
+      if (sessionConnections.size >= MAX_CONNECTIONS_PER_SESSION) {
+        return res.status(429).json({
+          success: false,
+          error: `Maximum ${MAX_CONNECTIONS_PER_SESSION} connections per session`,
+        });
+      }
+      
+      sessionConnections.add(res);
 
       logger.info(`SSE connection established for session ${sessionId}`);
 
@@ -328,30 +418,34 @@ export function registerSessionsRoutes(
         `event: connected\ndata: ${JSON.stringify({ sessionId, timestamp: Date.now() })}\n\n`
       );
 
-      // Setup heartbeat
+      // Setup heartbeat with connection cleanup
       const heartbeatInterval = setInterval(() => {
         try {
+          if (res.destroyed || res.writableEnded) {
+            clearInterval(heartbeatInterval);
+            cleanupConnection(sessionId, res);
+            return;
+          }
           res.write(
             `event: ping\ndata: ${JSON.stringify({ timestamp: Date.now() })}\n\n`
           );
-        } catch {
-          // Connection closed
+        } catch (error) {
+          // Connection closed or errored
           clearInterval(heartbeatInterval);
+          cleanupConnection(sessionId, res);
         }
       }, 30000);
 
       // Handle disconnect
-      req.on("close", () => {
+      const cleanup = () => {
         clearInterval(heartbeatInterval);
-        const connections = sseConnections.get(sessionId);
-        if (connections) {
-          connections.delete(res);
-          if (connections.size === 0) {
-            sseConnections.delete(sessionId);
-          }
-        }
+        cleanupConnection(sessionId, res);
         logger.info(`SSE connection closed for session ${sessionId}`);
-      });
+      };
+
+      req.on("close", cleanup);
+      req.on("error", cleanup);
+      res.on("finish", cleanup);
     }
   );
 
@@ -403,6 +497,12 @@ export function registerSessionsRoutes(
         // Update session activity
         await sessionManager.touchSession(sessionId);
 
+        // Prepare agent options from session data
+        const agentOptions = {
+          workingDirectory: session.workingDirectory || process.cwd(),
+          provider: session.provider || 'claude',
+        };
+
         // Enqueue message for worker processing
         const jobId = await queueProducer.enqueueMessage({
           userId: tokenData.userId,
@@ -418,7 +518,7 @@ export function registerSessionsRoutes(
             sessionId,
             source: "direct-api",
           },
-          agentOptions: {},
+          agentOptions,
         });
 
         logger.info(
