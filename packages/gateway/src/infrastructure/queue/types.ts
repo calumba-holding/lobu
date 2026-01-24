@@ -101,7 +101,7 @@ export interface ThreadResponsePayload {
   threadId: string;
   userId: string;
   teamId: string;
-  platform?: string; // Platform identifier (slack, whatsapp, etc.) for multi-platform routing
+  platform?: string; // Platform identifier (slack, whatsapp, api, etc.) for multi-platform routing
   content?: string; // Used only for ephemeral messages (OAuth/auth flows)
   delta?: string;
   isFullReplacement?: boolean;
@@ -116,4 +116,5 @@ export interface ThreadResponsePayload {
     elapsedSeconds: number;
     state: string;
   };
+  platformMetadata?: Record<string, unknown>; // Platform-specific metadata (e.g., sessionId for API)
 }

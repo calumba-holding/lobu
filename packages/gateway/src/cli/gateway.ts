@@ -173,6 +173,29 @@ function setupHealthEndpoints(
     logger.info("✅ Messaging routes enabled at :8080/api/messaging/send");
   }
 
+  // Setup sessions API routes (direct API access without platform adapters)
+  if (coreServices) {
+    const queueProducer = coreServices.getQueueProducer();
+    const sessionMgr = coreServices.getSessionManager();
+    const interactionSvc = coreServices.getInteractionService();
+    const publicUrl = coreServices.getPublicGatewayUrl();
+
+    if (queueProducer && sessionMgr && interactionSvc) {
+      const { Router } = require("express");
+      const sessionsRouter = Router();
+      const { registerSessionsRoutes } = require("../routes/public/sessions");
+      registerSessionsRoutes(
+        sessionsRouter,
+        queueProducer,
+        sessionMgr,
+        interactionSvc,
+        publicUrl
+      );
+      proxyApp.use(sessionsRouter);
+      logger.info("✅ Sessions API routes enabled at :8080/api/sessions/*");
+    }
+  }
+
   // Setup auth callback routes for WhatsApp and other non-modal platforms
   if (coreServices) {
     const stateStore = coreServices.getClaudeOAuthStateStore();
@@ -272,6 +295,12 @@ export async function startGateway(
     gateway.registerPlatform(whatsappPlatform);
     logger.info("✅ WhatsApp platform registered");
   }
+
+  // Register API platform (always enabled for direct API access)
+  const { ApiPlatform } = await import("../api");
+  const apiPlatform = new ApiPlatform({ enabled: true });
+  gateway.registerPlatform(apiPlatform);
+  logger.info("✅ API platform registered");
 
   // Start gateway (initializes core services + platforms)
   await gateway.start();

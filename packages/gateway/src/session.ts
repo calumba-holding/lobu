@@ -24,6 +24,10 @@ export interface ThreadSession {
   createdAt: number;
   botResponseId?: string; // Bot's response message ID for updates
   turnCount?: number; // Track conversation turns to prevent infinite loops
+  status?: string; // Session status (created, active, completed, error)
+  // API session parameters
+  workingDirectory?: string;
+  provider?: string;
 }
 
 /**
@@ -69,6 +73,7 @@ export interface ISessionManager {
     threadTs: string,
     userId: string
   ): Promise<{ allowed: boolean; owner?: string }>;
+  touchSession(sessionKey: string): Promise<void>;
   cleanupExpired(ttl: number): Promise<number>;
 }
 
