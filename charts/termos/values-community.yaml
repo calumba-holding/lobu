@@ -4,17 +4,9 @@
 global:
   imagePullSecrets: []
 
-# Spegel P2P image distribution
+# Spegel P2P image distribution (disabled - not needed for this deployment)
 spegel:
-  enabled: true
-  # Resources for Spegel containers (required by resource quota)
-  resources:
-    limits:
-      cpu: "200m"
-      memory: "256Mi"
-    requests:
-      cpu: "100m"
-      memory: "128Mi"
+  enabled: false
 
 # Kubernetes namespace
 kubernetes:

@@ -241,7 +241,7 @@ workerQuota:
 
 # Spegel P2P image distribution
 spegel:
-  enabled: true
+  enabled: false
   image:
     tag: "v0.4.0"
   # Resources for Spegel containers (required by resource quota)
