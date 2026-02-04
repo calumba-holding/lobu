@@ -1,6 +1,7 @@
 {
   "name": "create-termos",
   "version": "2.3.0",
+  "license": "Apache-2.0",
   "workspaces": [
     "packages/cli",
     "packages/gateway",
