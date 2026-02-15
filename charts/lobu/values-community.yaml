@@ -12,7 +12,7 @@ kubernetes:
 config:
   githubOrganization: "lobu-ai"
   githubClientId: ""  # Add your GitHub OAuth App Client ID
-  ingressUrl: "https://lobu.owletto.com"  # Critical for OAuth redirects
+  ingressUrl: "https://community.lobu.ai"  # Critical for OAuth redirects
   sessionTimeoutMinutes: "5"
 
 # Bitnami Sealed Secrets (production)
@@ -62,14 +62,14 @@ ingress:
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
   hosts:
-    - host: lobu.owletto.com
+    - host: community.lobu.ai
       paths:
         - path: /
           pathType: Prefix
   tls:
     - secretName: lobu-tls
       hosts:
-        - lobu.owletto.com
+        - community.lobu.ai
 
 # Slack configuration
 slack:

@@ -4,7 +4,11 @@ Join the Slack: https://join.slack.com/t/peerbot/shared_invite/zt-391o8tyw2-iyup
 
 **Enterprise-ready, multi-tenant, sandboxed agent orchestration built on the OpenClaw runtime.** Lobu runs coding agents in isolated workers behind a hardened gateway so teams can use "agentic" workflows without putting a single laptop (or a flat network) in the blast radius.
 
-Supported platforms: **Slack** (primary), **Telegram** (available).
+Supported today (3 entrypoints): **Slack**, **REST API** (programmatic), **Telegram**.
+
+Community gateway: https://community.lobu.ai
+
+API docs (OpenAPI): https://community.lobu.ai/api/docs (schema: https://community.lobu.ai/api/docs/openapi.json)
 
 ## Motivation
 
