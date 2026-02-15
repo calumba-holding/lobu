@@ -6,7 +6,7 @@ type OpenApiDefinition =
   | { type: string; route?: { method: string; path: string } };
 
 // Internal route prefixes - worker-facing, excluded from public docs
-const INTERNAL_PREFIXES = ["/api/anthropic", "/internal", "/worker", "/mcp"];
+const INTERNAL_PREFIXES = ["/api/proxy", "/internal", "/worker", "/mcp"];
 
 // Routes that render HTML pages or are browser redirects (not API endpoints)
 const EXCLUDED_ROUTES = [

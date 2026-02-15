@@ -15,7 +15,7 @@ import type { AgentSettingsStore } from "./auth/settings";
 import type { UserAgentsStore } from "./auth/user-agents-store";
 import type { ChannelBindingService } from "./channels";
 import type { WorkerGateway } from "./gateway";
-import type { AnthropicProxy } from "./infrastructure/model-provider";
+import type { SecretProxy } from "./proxy/secret-proxy";
 import type { IMessageQueue, QueueProducer } from "./infrastructure/queue";
 import type { InteractionService } from "./interactions";
 import type { ResponseRenderer } from "./platform/response-renderer";
@@ -34,7 +34,7 @@ import type { ISessionManager } from "./session";
 export interface CoreServices {
   getQueue(): IMessageQueue;
   getQueueProducer(): QueueProducer;
-  getAnthropicProxy(): AnthropicProxy | undefined;
+  getSecretProxy(): SecretProxy | undefined;
   getWorkerGateway(): WorkerGateway | undefined;
   getMcpProxy(): McpProxy | undefined;
   getClaudeCredentialStore(): ClaudeCredentialStore | undefined;

@@ -41,7 +41,8 @@ export interface WorkerConfig {
   userId: string;
   agentId: string; // Space identifier for multi-tenant isolation
   channelId: string;
-  threadId?: string;
+  conversationId?: string;
+  threadId?: string; // Legacy alias (deprecated)
   userPrompt: string; // Base64 encoded
   responseChannel: string; // Platform-agnostic response channel
   responseId: string; // Platform-agnostic response message ID

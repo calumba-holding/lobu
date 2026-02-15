@@ -64,6 +64,7 @@ export class InteractionService extends EventEmitter {
     const interaction: UserInteraction = {
       id: `ui_${randomUUID()}`,
       userId,
+      conversationId: threadId,
       threadId,
       channelId,
       teamId,
@@ -139,6 +140,7 @@ export class InteractionService extends EventEmitter {
     const suggestion: UserSuggestion = {
       id: `sug_${randomUUID()}`,
       userId,
+      conversationId: threadId,
       threadId,
       channelId,
       teamId,
@@ -195,11 +197,11 @@ export class InteractionService extends EventEmitter {
     );
 
     // Remove from pending set
-    const pendingKey = `interaction:pending:${interaction.threadId}`;
+    const pendingKey = `interaction:pending:${interaction.conversationId}`;
     await this.redis.srem(pendingKey, id);
 
     // Clear active interaction marker (allows heartbeat deltas again)
-    const activeKey = `interaction:active:${interaction.threadId}`;
+    const activeKey = `interaction:active:${interaction.conversationId}`;
     await this.redis.del(activeKey);
 
     const responseStr = response.answer || JSON.stringify(response.formData);

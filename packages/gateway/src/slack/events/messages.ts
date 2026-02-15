@@ -508,7 +508,8 @@ export class MessageHandler {
 
       // Create thread session with turn count
       const threadSession: ThreadSession = {
-        threadId: threadTs,
+        conversationId: threadTs,
+          threadId: threadTs,
         channelId: context.channelId,
         userId: context.userId,
         threadCreator: context.userId, // Store the thread creator
@@ -538,6 +539,7 @@ export class MessageHandler {
         const deploymentPayload: MessagePayload = {
           userId: context.userId,
           botId: this.getBotId(),
+          conversationId: threadTs,
           threadId: threadTs,
           teamId: context.teamId,
           agentId,
@@ -585,6 +587,7 @@ export class MessageHandler {
         const threadPayload: MessagePayload = {
           botId: this.getBotId(),
           userId: context.userId,
+          conversationId: threadTs,
           threadId: threadTs,
           teamId: context.teamId,
           agentId,

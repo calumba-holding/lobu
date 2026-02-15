@@ -275,7 +275,7 @@ export class SlackInteractionRenderer {
 
     const result = await this.client.chat.postMessage({
       channel: interaction.channelId,
-      thread_ts: interaction.threadId,
+      thread_ts: interaction.conversationId,
       text: blocks.text,
       blocks: blocks.blocks,
     });
@@ -284,7 +284,7 @@ export class SlackInteractionRenderer {
       await this.interactionService.setMessageTs(interaction.id, result.ts);
     }
 
-    await this.setThreadStatus(interaction.channelId, interaction.threadId, "");
+    await this.setThreadStatus(interaction.channelId, interaction.conversationId, "");
   }
 
   /**
@@ -294,7 +294,7 @@ export class SlackInteractionRenderer {
     try {
       await this.client.assistant.threads.setSuggestedPrompts({
         channel_id: suggestion.channelId,
-        thread_ts: suggestion.threadId,
+        thread_ts: suggestion.conversationId,
         prompts: suggestion.prompts.map((p) => ({
           title: p.title,
           message: p.message,
@@ -663,7 +663,7 @@ export class SlackInteractionRenderer {
 
     await this.setThreadStatus(
       interaction.channelId,
-      interaction.threadId,
+      interaction.conversationId,
       null
     );
   }

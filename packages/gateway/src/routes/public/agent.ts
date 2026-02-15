@@ -707,6 +707,7 @@ export function createAgentApi(
     const expiresAt = Date.now() + TOKEN_EXPIRATION_MS;
 
     const session: ThreadSession = {
+      conversationId: threadId,
       threadId,
       channelId,
       userId: agentId,
@@ -913,7 +914,8 @@ export function createAgentApi(
     try {
       const jobId = await queueProducer.enqueueMessage({
         userId: tokenData.userId,
-        threadId: tokenData.threadId || agentId,
+        conversationId: tokenData.conversationId || agentId,
+        threadId: tokenData.conversationId || agentId,
         messageId,
         channelId: tokenData.channelId,
         teamId: tokenData.teamId || "api",
@@ -993,7 +995,8 @@ export function createAgentApi(
     try {
       const jobId = await queueProducer.enqueueMessage({
         userId: tokenData.userId,
-        threadId: tokenData.threadId || agentId,
+        conversationId: tokenData.conversationId || agentId,
+        threadId: tokenData.conversationId || agentId,
         messageId: execId,
         channelId: tokenData.channelId,
         teamId: tokenData.teamId || "api",
@@ -1093,8 +1096,8 @@ export function createAgentApi(
     }
 
     if (
-      interaction.threadId !== agentId &&
-      interaction.threadId !== tokenData.threadId
+      interaction.conversationId !== agentId &&
+      interaction.conversationId !== tokenData.conversationId
     ) {
       return c.json(
         { success: false, error: "Interaction does not belong to this agent" },

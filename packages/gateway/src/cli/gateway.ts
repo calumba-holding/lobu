@@ -22,7 +22,7 @@ let httpServer: ReturnType<typeof serve> | null = null;
  * Setup Hono server with all routes on port 8080
  */
 function setupServer(
-  anthropicProxy: any,
+  secretProxy: any,
   workerGateway: any,
   mcpProxy: any,
   fileHandler?: any,
@@ -57,7 +57,7 @@ function setupServer(
         toolApproval: true,
       },
       wsUrl: `ws://localhost:8080/ws`,
-      anthropicProxy: !!anthropicProxy,
+      secretProxy: !!secretProxy,
     });
   });
 
@@ -70,10 +70,10 @@ function setupServer(
     return c.text(getMetricsText());
   });
 
-  // Anthropic proxy (Hono)
-  if (anthropicProxy) {
-    app.route("/api/anthropic", anthropicProxy.getApp());
-    logger.info("Anthropic proxy enabled at :8080/api/anthropic");
+  // Secret injection proxy (Hono)
+  if (secretProxy) {
+    app.route("/api/proxy", secretProxy.getApp());
+    logger.info("Secret proxy enabled at :8080/api/proxy");
   }
 
   // Worker Gateway routes (Hono)
@@ -231,6 +231,10 @@ function setupServer(
     const githubAppInstallUrl = process.env.GITHUB_APP_INSTALL_URL;
     const scheduledWakeupService = coreServices.getScheduledWakeupService();
 
+    const systemClaudeTokenAvailable = !!(
+      process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_CODE_OAUTH_TOKEN
+    );
+
     // Settings HTML page
     if (agentSettingsStore) {
       const { createSettingsPageRoutes } = require("../routes/public/settings");
@@ -265,6 +269,7 @@ function setupServer(
         providerStores: claudeCredentialStore
           ? { claude: claudeCredentialStore }
           : undefined,
+        providerConnectedOverrides: { claude: systemClaudeTokenAvailable },
         githubAuth,
         githubAppInstallUrl,
         githubOAuthClientId: process.env.GITHUB_CLIENT_ID,
@@ -841,7 +846,8 @@ export async function startGateway(
   // Inject core services into orchestrator
   await orchestrator.injectCoreServices(
     coreServices.getClaudeCredentialStore(),
-    config.anthropicProxy.anthropicApiKey
+    config.anthropicProxy.anthropicApiKey,
+    coreServices.getQueue().getRedisClient()
   );
   logger.info("Orchestrator configured with core services");
 
@@ -854,7 +860,7 @@ export async function startGateway(
 
   // Setup server on port 8080
   setupServer(
-    coreServices.getAnthropicProxy(),
+    coreServices.getSecretProxy(),
     coreServices.getWorkerGateway(),
     coreServices.getMcpProxy(),
     fileHandler,

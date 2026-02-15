@@ -399,7 +399,8 @@ export class WhatsAppPlatform implements PlatformAdapter {
 
       const payload = {
         userId: phoneUserId,
-        threadId: space.agentId, // Use resolved space as thread identifier
+        conversationId: space.agentId, // Use resolved space as conversation identifier
+        threadId: space.agentId, // Legacy alias
         messageId,
         channelId: resolvedChannel,
         teamId: "whatsapp",

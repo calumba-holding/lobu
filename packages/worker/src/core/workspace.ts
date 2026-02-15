@@ -44,7 +44,10 @@ function getWorkspacePathForThread(
  * Used by MCP process manager
  */
 export function setupWorkspaceEnv(deploymentName: string | undefined): void {
-  const threadId = extractThreadIdFromDeploymentName(deploymentName);
+  const threadId =
+    process.env.CONVERSATION_ID ||
+    process.env.THREAD_ID ||
+    extractThreadIdFromDeploymentName(deploymentName);
 
   if (threadId) {
     const workspaceDir = getWorkspacePathForThread("/workspace", threadId);
@@ -58,7 +61,12 @@ export function setupWorkspaceEnv(deploymentName: string | undefined): void {
  * Priority: THREAD_ID > sessionKey > username
  */
 function getThreadIdentifier(sessionKey?: string, username?: string): string {
-  const threadId = process.env.THREAD_ID || sessionKey || username || "default";
+  const threadId =
+    process.env.CONVERSATION_ID ||
+    process.env.THREAD_ID ||
+    sessionKey ||
+    username ||
+    "default";
 
   return threadId;
 }

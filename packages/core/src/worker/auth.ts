@@ -4,13 +4,14 @@ import { decrypt, encrypt } from "../utils/encryption";
 const logger = createLogger("worker-auth");
 
 /**
- * Worker authentication using encrypted thread ID
- * Token format: encrypted(userId:threadId:deploymentName:timestamp)
+ * Worker authentication using encrypted conversation ID
+ * Token format: encrypted(userId:conversationId:deploymentName:timestamp)
  */
 
 export interface WorkerTokenData {
   userId: string;
-  threadId: string;
+  conversationId: string;
+  threadId?: string; // Legacy alias (deprecated)
   channelId: string;
   teamId?: string; // Optional - not all platforms have teams
   agentId?: string; // Space ID for multi-tenant isolation
@@ -26,7 +27,7 @@ export interface WorkerTokenData {
  */
 export function generateWorkerToken(
   userId: string,
-  threadId: string,
+  conversationId: string,
   deploymentName: string,
   options: {
     channelId: string;
@@ -45,7 +46,8 @@ export function generateWorkerToken(
   const timestamp = Date.now();
   const payload: WorkerTokenData = {
     userId,
-    threadId,
+    conversationId,
+    threadId: conversationId,
     channelId: options.channelId,
     teamId: options.teamId, // Can be undefined - that's ok
     agentId: options.agentId, // Space ID for multi-tenant credential lookup

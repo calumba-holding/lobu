@@ -29,7 +29,8 @@ export interface HomeTabModule<TModuleData = unknown>
 export interface WorkerContext {
   workspaceDir: string;
   userId: string;
-  threadId: string;
+  conversationId: string;
+  threadId?: string; // Legacy alias (deprecated)
 }
 
 export interface WorkerModule<TModuleData = unknown>
@@ -95,7 +96,8 @@ export interface DispatcherModule<TModuleData = unknown>
 
 export interface ModuleSessionContext {
   userId: string;
-  threadId: string;
+  conversationId: string;
+  threadId?: string; // Legacy alias (deprecated)
   systemPrompt: string;
   workspace?: any;
 }

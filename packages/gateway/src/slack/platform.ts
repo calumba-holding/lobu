@@ -703,6 +703,7 @@ export class SlackPlatform implements PlatformAdapter {
       platform: "slack",
       userId: testUserId,
       botId: this.config.slack.botId || "",
+      conversationId: threadId,
       threadId,
       teamId: teamId || "",
       agentId,

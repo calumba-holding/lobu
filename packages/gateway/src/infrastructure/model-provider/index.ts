@@ -1,6 +1,4 @@
 /**
  * Model provider infrastructure
- * Anthropic API proxy and related services
+ * Secret proxy handles credential injection for all providers
  */
-
-export { AnthropicProxy } from "./anthropic-proxy";

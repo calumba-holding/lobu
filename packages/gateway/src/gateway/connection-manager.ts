@@ -16,7 +16,7 @@ export interface SSEWriter {
 interface WorkerConnection {
   deploymentName: string;
   userId: string;
-  threadId: string;
+  conversationId: string;
   writer: SSEWriter;
   lastActivity: number;
   lastPing: number;
@@ -48,13 +48,13 @@ export class WorkerConnectionManager {
   addConnection(
     deploymentName: string,
     userId: string,
-    threadId: string,
+    conversationId: string,
     writer: SSEWriter
   ): void {
     const connection: WorkerConnection = {
       deploymentName,
       userId,
-      threadId,
+      conversationId,
       writer,
       lastActivity: Date.now(),
       lastPing: Date.now(),
@@ -63,10 +63,10 @@ export class WorkerConnectionManager {
     this.connections.set(deploymentName, connection);
 
     // Send initial connection event
-    this.sendSSE(writer, "connected", { deploymentName, userId, threadId });
+    this.sendSSE(writer, "connected", { deploymentName, userId, conversationId, threadId: conversationId });
 
     logger.info(
-      `Worker ${deploymentName} connected (user: ${userId}, thread: ${threadId})`
+      `Worker ${deploymentName} connected (user: ${userId}, conversation: ${conversationId})`
     );
   }
 

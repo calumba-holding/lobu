@@ -41,6 +41,7 @@ describe("WorkerConnectionManager", () => {
       expect(events[0].data).toEqual({
         deploymentName: "worker-1",
         userId: "U123",
+        conversationId: "thread-1",
         threadId: "thread-1",
       });
     });
@@ -70,7 +71,7 @@ describe("WorkerConnectionManager", () => {
       expect(connection).toBeDefined();
       expect(connection?.deploymentName).toBe("worker-1");
       expect(connection?.userId).toBe("U123");
-      expect(connection?.threadId).toBe("thread-1");
+      expect(connection?.conversationId).toBe("thread-1");
     });
 
     test("returns undefined for non-existent connection", () => {

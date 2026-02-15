@@ -20,7 +20,8 @@ import type {
  * Tracks the state of a conversation thread across any platform
  */
 export interface ThreadSession {
-  threadId: string; // Primary identifier (agentId for API platform)
+  conversationId: string; // Primary identifier (agentId for API platform)
+  threadId?: string; // Legacy alias (deprecated)
   channelId: string;
   userId: string;
   threadCreator?: string; // Track the original thread creator
@@ -52,17 +53,18 @@ export interface ThreadSession {
  */
 export function computeSessionKey(session: {
   channelId: string;
-  threadId: string;
+  conversationId: string;
+  threadId?: string;
 }): string {
   // For API platform, channelId starts with "api-" and we just use threadId
   if (
     session.channelId.startsWith("api-") ||
-    session.channelId === session.threadId
+    session.channelId === (session.threadId || session.conversationId)
   ) {
-    return session.threadId;
+    return session.conversationId;
   }
   // For other platforms, use channelId:threadId
-  return `${session.channelId}:${session.threadId}`;
+  return `${session.channelId}:${session.conversationId}`;
 }
 
 /**
@@ -89,7 +91,7 @@ export interface ISessionManager {
   createSession(
     channelId: string,
     userId: string,
-    threadId?: string,
+    conversationId?: string,
     threadCreator?: string
   ): Promise<ThreadSession>;
   getSession(sessionKey: string): Promise<ThreadSession | null>;
@@ -122,12 +124,12 @@ export interface ISessionManager {
 export function generateSessionKey(context: SessionContext): string {
   // Use thread ID as the session key (if in a thread)
   // Otherwise use message ID
-  const id = context.threadId || context.messageId || "";
+  const id = context.conversationId || context.threadId || context.messageId || "";
 
   // If we have a thread ID, use it directly as the session key
   // This ensures consistency across all worker executions in the same thread
-  if (context.threadId) {
-    return context.threadId;
+  if (context.conversationId || context.threadId) {
+    return context.conversationId || context.threadId || "";
   }
 
   // For direct messages (no thread), use the channel and message ID

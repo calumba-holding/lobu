@@ -920,6 +920,7 @@ The user sent a voice message but transcription failed. Let them know and sugges
       platform: "whatsapp",
       userId: context.senderE164 || context.senderJid,
       botId: "whatsapp",
+      conversationId: threadId,
       threadId,
       teamId: context.isGroup ? context.chatJid : "whatsapp", // Group JID for groups, "whatsapp" for DMs
       agentId,

@@ -23,7 +23,8 @@ import { AgentSettingsStore } from "../auth/settings";
 import { ChannelBindingService } from "../channels";
 import type { GatewayConfig } from "../config";
 import { WorkerGateway } from "../gateway";
-import { AnthropicProxy } from "../infrastructure/model-provider";
+import { SecretProxy } from "../proxy/secret-proxy";
+import { TokenRefreshJob } from "../proxy/token-refresh-job";
 import type { IMessageQueue } from "../infrastructure/queue";
 import {
   QueueProducer,
@@ -77,7 +78,8 @@ export class CoreServices {
   private claudeCredentialStore?: ClaudeCredentialStore;
   private claudeModelPreferenceStore?: ClaudeModelPreferenceStore;
   private claudeOAuthStateStore?: ClaudeOAuthStateStore;
-  private anthropicProxy?: AnthropicProxy;
+  private secretProxy?: SecretProxy;
+  private tokenRefreshJob?: TokenRefreshJob;
 
   // ============================================================================
   // MCP Services
@@ -263,12 +265,28 @@ export class CoreServices {
     );
     logger.info("✅ Claude credential & preference stores initialized");
 
-    // Initialize Anthropic API proxy
-    this.anthropicProxy = new AnthropicProxy(
-      this.config.anthropicProxy,
-      this.claudeCredentialStore
+    // Initialize secret injection proxy
+    this.secretProxy = new SecretProxy({
+      defaultUpstreamUrl:
+        this.config.anthropicProxy.anthropicBaseUrl ||
+        "https://api.anthropic.com",
+    });
+    this.secretProxy.initialize(redisClient);
+    logger.info("✅ Secret proxy initialized");
+
+    // Start background token refresh job
+    if (!this.agentSettingsStore) {
+      throw new Error(
+        "Agent settings store must be initialized before Claude services"
+      );
+    }
+    this.tokenRefreshJob = new TokenRefreshJob(
+      this.claudeCredentialStore,
+      this.agentSettingsStore,
+      redisClient
     );
-    logger.info("✅ Anthropic proxy initialized");
+    this.tokenRefreshJob.start();
+    logger.info("✅ Token refresh job started");
 
     // Register Claude OAuth module
     const systemTokenAvailable = !!this.config.anthropicProxy.anthropicApiKey;
@@ -416,6 +434,10 @@ export class CoreServices {
   async shutdown(): Promise<void> {
     logger.info("Shutting down core services...");
 
+    if (this.tokenRefreshJob) {
+      this.tokenRefreshJob.stop();
+    }
+
     if (this.queueProducer) {
       await this.queueProducer.stop();
     }
@@ -446,8 +468,8 @@ export class CoreServices {
     return this.queueProducer;
   }
 
-  getAnthropicProxy(): AnthropicProxy | undefined {
-    return this.anthropicProxy;
+  getSecretProxy(): SecretProxy | undefined {
+    return this.secretProxy;
   }
 
   getWorkerGateway(): WorkerGateway | undefined {

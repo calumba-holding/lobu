@@ -92,7 +92,8 @@ const JobEventSchema = z.object({
     botId: z.string(),
     userId: z.string(),
     agentId: z.string(),
-    threadId: z.string(),
+    conversationId: z.string(),
+    threadId: z.string().optional(),
     platform: z.string(),
     channelId: z.string(),
     messageId: z.string(),
@@ -441,13 +442,15 @@ export class GatewayClient {
       extractTraceId(data) || this.currentTraceId || process.env.TRACE_ID;
     this.currentTraceId = traceId;
 
+    const conversationId = data.conversationId || data.threadId || "";
+
     if (data.jobId) {
       this.currentJobId = data.jobId;
       // Create child span for job received (linked to parent via traceparent)
       const span = createChildSpan("job_received", traceparent, {
         "termos.job_id": data.jobId,
         "termos.message_id": data.messageId,
-        "termos.thread_id": data.threadId,
+        "termos.conversation_id": conversationId,
         "termos.job_type": data.jobType || "message",
       });
       span?.setStatus({ code: SpanStatusCode.OK });
@@ -488,7 +491,7 @@ export class GatewayClient {
 
     await this.messageBatcher.addMessage(queuedMessage);
     logger.info(
-      { traceId, messageId: data.messageId, threadId: data.threadId },
+      { traceId, messageId: data.messageId, conversationId },
       "Message queued for processing"
     );
   }
@@ -498,6 +501,7 @@ export class GatewayClient {
    */
   private async handleExecJob(data: MessagePayload): Promise<void> {
     const { execId, execCommand, execCwd, execEnv, execTimeout } = data;
+    const conversationId = data.conversationId || data.threadId || "";
     const traceId = this.currentTraceId;
     const traceparent = this.currentTraceparent;
 
@@ -530,7 +534,8 @@ export class GatewayClient {
       workerToken: this.workerToken,
       userId: data.userId,
       channelId: data.channelId,
-      threadId: data.threadId,
+      conversationId,
+      threadId: conversationId,
       originalMessageTs: execId,
       teamId: data.teamId || "api",
       platform: data.platform,
@@ -686,10 +691,12 @@ export class GatewayClient {
       this.currentTraceId ||
       process.env.TRACE_ID;
 
+    const conversationId = message.payload.conversationId || message.payload.threadId || "";
+
     // Create child span for agent execution (linked to parent via traceparent)
     const span = createChildSpan("agent_execution", traceparent, {
       "termos.message_id": message.payload.messageId,
-      "termos.thread_id": message.payload.threadId,
+      "termos.conversation_id": conversationId,
       "termos.user_id": message.payload.userId,
       "termos.model": message.payload.agentOptions?.model || "default",
     });
@@ -763,7 +770,7 @@ export class GatewayClient {
         {
           traceparent,
           messageId: message.payload.messageId,
-          threadId: message.payload.threadId,
+          conversationId,
         },
         "Agent completed"
       );
@@ -780,7 +787,7 @@ export class GatewayClient {
         {
           traceparent,
           messageId: message.payload.messageId,
-          threadId: message.payload.threadId,
+          conversationId,
           error: error instanceof Error ? error.message : String(error),
         },
         "Agent failed"
@@ -817,6 +824,7 @@ export class GatewayClient {
   }
 
   private payloadToWorkerConfig(payload: MessagePayload): WorkerConfig {
+    const conversationId = payload.conversationId || payload.threadId || "default";
     const platformMetadata = payload.platformMetadata;
 
     const agentOptions = {
@@ -833,11 +841,12 @@ export class GatewayClient {
     };
 
     return {
-      sessionKey: `session-${payload.threadId}`,
+      sessionKey: `session-${conversationId}`,
       userId: payload.userId,
       agentId: payload.agentId,
       channelId: payload.channelId,
-      threadId: payload.threadId,
+      conversationId,
+      threadId: conversationId,
       userPrompt: Buffer.from(payload.messageText).toString("base64"),
       responseChannel: String(
         platformMetadata.responseChannel || payload.channelId

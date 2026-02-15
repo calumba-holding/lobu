@@ -84,8 +84,11 @@ export interface WorkerTransportConfig {
   /** Channel/conversation ID */
   channelId: string;
 
-  /** Thread ID for organizing messages */
-  threadId: string;
+  /** Conversation ID for organizing messages */
+  conversationId: string;
+
+  /** Legacy alias (deprecated) */
+  threadId?: string;
 
   /** Original message timestamp/ID */
   originalMessageTs: string;

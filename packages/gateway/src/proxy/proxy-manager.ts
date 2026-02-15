@@ -19,13 +19,19 @@ let proxyServer: Server | null = null;
  */
 export async function startFilteringProxy(): Promise<void> {
   try {
+    const parsedPort = Number.parseInt(
+      process.env.WORKER_PROXY_PORT || "8118",
+      10
+    );
+    const port = Number.isFinite(parsedPort) ? parsedPort : 8118;
+
     // Start our custom HTTP proxy (no GPL dependencies!)
-    proxyServer = startHttpProxy(8118);
+    proxyServer = startHttpProxy(port);
 
     // Wait a bit for proxy to start
     await new Promise((resolve) => setTimeout(resolve, 500));
 
-    logger.info("✅ HTTP proxy started successfully on port 8118");
+    logger.info(`✅ HTTP proxy started successfully on port ${port}`);
   } catch (error) {
     logger.error("Failed to start HTTP proxy:", error);
     throw error;

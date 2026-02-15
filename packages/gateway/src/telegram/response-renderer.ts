@@ -65,7 +65,7 @@ export class TelegramResponseRenderer implements ResponseRenderer {
 
     const traceId = extractTraceId(payload);
     const chatId = this.getChatId(payload);
-    const key = `${chatId}:${payload.threadId}`;
+    const key = `${chatId}:${payload.conversationId}`;
 
     let stream = this.streams.get(key);
 
@@ -195,7 +195,7 @@ export class TelegramResponseRenderer implements ResponseRenderer {
   ): Promise<void> {
     const traceId = extractTraceId(payload);
     const chatId = this.getChatId(payload);
-    const key = `${chatId}:${payload.threadId}`;
+    const key = `${chatId}:${payload.conversationId}`;
 
     const stream = this.streams.get(key);
     if (stream) {
@@ -216,7 +216,7 @@ export class TelegramResponseRenderer implements ResponseRenderer {
 
       this.streams.delete(key);
       logger.info(
-        { traceId, chatId, threadId: payload.threadId },
+        { traceId, chatId, threadId: payload.conversationId },
         "Sent final response"
       );
     }
@@ -303,7 +303,7 @@ export class TelegramResponseRenderer implements ResponseRenderer {
 
     const traceId = extractTraceId(payload);
     const chatId = this.getChatId(payload);
-    const key = `${chatId}:${payload.threadId}`;
+    const key = `${chatId}:${payload.conversationId}`;
 
     // Clean up stream state
     const stream = this.streams.get(key);
@@ -323,7 +323,7 @@ export class TelegramResponseRenderer implements ResponseRenderer {
     }
 
     logger.error(
-      { traceId, chatId, threadId: payload.threadId, error: payload.error },
+      { traceId, chatId, threadId: payload.conversationId, error: payload.error },
       "Sent error response"
     );
   }

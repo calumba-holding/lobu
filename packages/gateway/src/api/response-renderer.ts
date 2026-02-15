@@ -40,7 +40,7 @@ export class ApiResponseRenderer implements ResponseRenderer {
 
     // Extract session ID from platformMetadata or thread ID
     const sessionId =
-      (payload.platformMetadata?.sessionId as string) || payload.threadId;
+      (payload.platformMetadata?.sessionId as string) || payload.conversationId;
 
     if (!sessionId) {
       logger.warn("No session ID found in payload for delta broadcast");
@@ -83,7 +83,7 @@ export class ApiResponseRenderer implements ResponseRenderer {
     }
 
     const sessionId =
-      (payload.platformMetadata?.sessionId as string) || payload.threadId;
+      (payload.platformMetadata?.sessionId as string) || payload.conversationId;
 
     if (!sessionId) {
       logger.warn("No session ID found in payload for completion broadcast");
@@ -122,7 +122,7 @@ export class ApiResponseRenderer implements ResponseRenderer {
     }
 
     const sessionId =
-      (payload.platformMetadata?.sessionId as string) || payload.threadId;
+      (payload.platformMetadata?.sessionId as string) || payload.conversationId;
 
     if (!sessionId) {
       logger.warn("No session ID found in payload for error broadcast");
@@ -146,7 +146,7 @@ export class ApiResponseRenderer implements ResponseRenderer {
    */
   async handleStatusUpdate(payload: ThreadResponsePayload): Promise<void> {
     const sessionId =
-      (payload.platformMetadata?.sessionId as string) || payload.threadId;
+      (payload.platformMetadata?.sessionId as string) || payload.conversationId;
 
     if (!sessionId) {
       return;
@@ -167,7 +167,7 @@ export class ApiResponseRenderer implements ResponseRenderer {
    */
   async handleEphemeral(payload: ThreadResponsePayload): Promise<void> {
     const sessionId =
-      (payload.platformMetadata?.sessionId as string) || payload.threadId;
+      (payload.platformMetadata?.sessionId as string) || payload.conversationId;
 
     if (!sessionId) {
       return;

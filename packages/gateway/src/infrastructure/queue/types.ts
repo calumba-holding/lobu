@@ -100,7 +100,8 @@ export interface IMessageQueue {
 export interface ThreadResponsePayload {
   messageId: string;
   channelId: string;
-  threadId: string;
+  conversationId: string;
+  threadId?: string; // Legacy alias (deprecated)
   userId: string;
   teamId: string;
   platform?: string; // Platform identifier (slack, whatsapp, api, etc.) for multi-platform routing

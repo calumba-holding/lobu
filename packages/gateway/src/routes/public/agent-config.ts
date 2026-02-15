@@ -151,6 +151,10 @@ export interface ProviderCredentialStore {
 export interface AgentConfigRoutesConfig {
   agentSettingsStore: AgentSettingsStore;
   providerStores?: Record<string, ProviderCredentialStore>;
+  /**
+   * Provider connectivity overrides (e.g., system token means "connected" even if no user credentials are stored).
+   */
+  providerConnectedOverrides?: Record<string, boolean>;
   githubAuth?: GitHubAppAuth;
   githubAppInstallUrl?: string;
   githubOAuthClientId?: string;
@@ -181,6 +185,12 @@ export function createAgentConfigRoutes(
     if (config.providerStores) {
       for (const [name, store] of Object.entries(config.providerStores)) {
         try {
+          const overrideConnected = config.providerConnectedOverrides?.[name];
+          if (overrideConnected === true) {
+            providers[name] = { connected: true };
+            continue;
+          }
+
           providers[name] = { connected: await store.hasCredentials(agentId) };
         } catch {
           providers[name] = { connected: false };

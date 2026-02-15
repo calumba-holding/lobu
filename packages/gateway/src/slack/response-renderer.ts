@@ -335,12 +335,12 @@ export class SlackResponseRenderer implements ResponseRenderer {
     }
 
     // Suppress deltas when thread has an active interaction
-    const activeInteractionKey = `interaction:active:${payload.threadId}`;
+    const activeInteractionKey = `interaction:active:${payload.conversationId}`;
     const activeInteractionId = await this.redis.get(activeInteractionKey);
 
     if (activeInteractionId) {
       logger.info(
-        `Suppressing delta for thread ${payload.threadId} - active interaction`
+        `Suppressing delta for thread ${payload.conversationId} - active interaction`
       );
       return null;
     }
@@ -348,7 +348,7 @@ export class SlackResponseRenderer implements ResponseRenderer {
     const streamTs = await this.streamSessionManager.handleDelta(
       sessionKey,
       payload.channelId,
-      payload.threadId,
+      payload.conversationId,
       payload.userId,
       payload.delta,
       payload.isFullReplacement || false,
@@ -376,7 +376,7 @@ export class SlackResponseRenderer implements ResponseRenderer {
       try {
         await this.slackClient.apiCall("assistant.threads.setStatus", {
           channel_id: payload.channelId,
-          thread_ts: payload.threadId,
+          thread_ts: payload.conversationId,
           status: "",
         });
       } catch (error) {
@@ -398,7 +398,7 @@ export class SlackResponseRenderer implements ResponseRenderer {
     const actionButtons = await this.getModuleActionButtons(
       payload.userId,
       payload.channelId,
-      payload.threadId,
+      payload.conversationId,
       payload.moduleData
     );
 
@@ -411,7 +411,7 @@ export class SlackResponseRenderer implements ResponseRenderer {
       if (isFirstResponse) {
         await this.slackClient.chat.postMessage({
           channel: payload.channelId,
-          thread_ts: payload.threadId,
+          thread_ts: payload.conversationId,
           text: errorResult.text,
           mrkdwn: true,
           blocks: errorResult.blocks,
@@ -420,7 +420,7 @@ export class SlackResponseRenderer implements ResponseRenderer {
         });
       } else {
         const botTs =
-          existingBotMessageTs || payload.botResponseId || payload.threadId;
+          existingBotMessageTs || payload.botResponseId || payload.conversationId;
         await this.slackClient.chat.update({
           channel: payload.channelId,
           ts: botTs,
@@ -438,12 +438,12 @@ export class SlackResponseRenderer implements ResponseRenderer {
     if (!payload.statusUpdate) return;
 
     // Don't update status if there's an active interaction
-    const activeInteractionKey = `interaction:active:${payload.threadId}`;
+    const activeInteractionKey = `interaction:active:${payload.conversationId}`;
     const activeInteractionId = await this.redis.get(activeInteractionKey);
 
     if (activeInteractionId) {
       logger.debug(
-        `Skipping status update for thread ${payload.threadId} - active interaction`
+        `Skipping status update for thread ${payload.conversationId} - active interaction`
       );
       return;
     }
@@ -458,7 +458,7 @@ export class SlackResponseRenderer implements ResponseRenderer {
     try {
       await this.slackClient.apiCall("assistant.threads.setStatus", {
         channel_id: payload.channelId,
-        thread_ts: payload.threadId,
+        thread_ts: payload.conversationId,
         status: statusText,
         loading_messages: loadingMessages,
       });
@@ -479,7 +479,7 @@ export class SlackResponseRenderer implements ResponseRenderer {
       await this.slackClient.chat.postEphemeral({
         channel: payload.channelId,
         user: payload.userId,
-        thread_ts: payload.threadId,
+        thread_ts: payload.conversationId,
         text,
         blocks,
       });
@@ -525,7 +525,7 @@ export class SlackResponseRenderer implements ResponseRenderer {
     const moduleButtons = await this.getModuleActionButtons(
       data.userId,
       data.channelId,
-      data.threadId,
+      data.conversationId,
       data.moduleData
     );
 

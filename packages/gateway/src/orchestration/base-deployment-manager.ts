@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   createLogger,
   ErrorCode,
@@ -5,9 +6,14 @@ import {
   generateWorkerToken,
   OrchestratorError,
 } from "@termosdev/core";
+import type Redis from "ioredis";
 import { mcpConfigStore } from "../auth/mcp/mcp-config-store";
 import type { MessagePayload } from "../infrastructure/queue/queue-producer";
 import { networkConfigStore } from "../proxy/network-config-store";
+import {
+  deleteSecretMappings,
+  generatePlaceholder,
+} from "../proxy/secret-proxy";
 import { getScheduledWakeupService } from "./scheduled-wakeup";
 
 // Re-export MessagePayload for use by deployment implementations
@@ -16,21 +22,26 @@ export type { MessagePayload };
 const logger = createLogger("orchestrator");
 
 /**
- * Generate a consistent deployment name from user ID and thread ID
- * This ensures all messages in the same thread use the same worker
+ * Generate a consistent worker runtime ID from user ID and conversation ID.
+ * This ensures all messages in the same conversation route to the same worker runtime.
  * K8s names must be lowercase alphanumeric with hyphens only
  */
 export function generateDeploymentName(
   userId: string,
-  threadId: string
+  conversationId: string
 ): string {
-  // Sanitize threadId: replace dots with hyphens, lowercase, take last 10 chars
-  const shortThreadId = threadId.replace(".", "-").toLowerCase().slice(-10);
-  // Sanitize userId: remove non-alphanumeric, lowercase, take first 8 chars
+  // Keep a short, readable user prefix, but ensure uniqueness via hash.
   const sanitizedUserId = userId.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-  const shortUserId = sanitizedUserId.slice(0, 8);
-  return `termos-worker-${shortUserId}-${shortThreadId}`;
+  const shortUserId = (sanitizedUserId.slice(0, 8) || "user").toLowerCase();
+
+  const hash = createHash("sha256")
+    .update(`${userId}:${conversationId}`)
+    .digest("hex")
+    .slice(0, 12);
+
+  return `termos-worker-${shortUserId}-${hash}`;
 }
+
 
 // Type for module environment variable builder function
 export type ModuleEnvVarsBuilder = (
@@ -86,9 +97,29 @@ export interface DeploymentInfo {
   isVeryOld: boolean;
 }
 
+/** Env var names that are always treated as secrets and get placeholder treatment. */
+const SECRET_ENV_VARS = new Set([
+  "ANTHROPIC_API_KEY",
+  "CLAUDE_CODE_OAUTH_TOKEN",
+  "OPENAI_API_KEY",
+]);
+
+/** Check if an env var name looks like a secret (API key / token / secret / password). */
+function isSecretEnvVar(name: string): boolean {
+  if (SECRET_ENV_VARS.has(name)) return true;
+  const upper = name.toUpperCase();
+  return (
+    upper.includes("_KEY") ||
+    upper.includes("_TOKEN") ||
+    upper.includes("_SECRET") ||
+    upper.includes("_PASSWORD")
+  );
+}
+
 export abstract class BaseDeploymentManager {
   protected config: OrchestratorConfig;
   protected moduleEnvVarsBuilder?: ModuleEnvVarsBuilder;
+  protected redisClient?: Redis;
 
   constructor(
     config: OrchestratorConfig,
@@ -96,6 +127,14 @@ export abstract class BaseDeploymentManager {
   ) {
     this.config = config;
     this.moduleEnvVarsBuilder = moduleEnvVarsBuilder;
+  }
+
+  /**
+   * Inject Redis client for secret placeholder generation.
+   * Called after core services are initialized.
+   */
+  setRedisClient(redis: Redis): void {
+    this.redisClient = redis;
   }
 
   /**
@@ -132,13 +171,13 @@ export abstract class BaseDeploymentManager {
    */
   async createWorkerDeployment(
     userId: string,
-    threadId: string,
+    conversationId: string,
     messageData?: MessagePayload
   ): Promise<void> {
-    const deploymentName = generateDeploymentName(userId, threadId);
+    const deploymentName = generateDeploymentName(userId, conversationId);
 
     logger.info(
-      `Worker deployment - threadId: ${threadId}, deploymentName: ${deploymentName}`
+      `Worker deployment - conversationId: ${conversationId}, deploymentName: ${deploymentName}`
     );
 
     try {
@@ -167,24 +206,31 @@ export abstract class BaseDeploymentManager {
           throw new OrchestratorError(
             ErrorCode.DEPLOYMENT_CREATE_FAILED,
             `Cannot create new deployment: Maximum deployments limit (${maxDeployments}) reached. Current active deployments: ${deploymentsAfterCleanup.length}`,
-            { maxDeployments, currentCount: deploymentsAfterCleanup.length },
+            {
+              maxDeployments,
+              currentCount: deploymentsAfterCleanup.length,
+            },
             true
           );
         }
       }
+
+      // Extract user env vars from agent settings (carried in agentOptions)
+      const userEnvVars =
+        (messageData?.agentOptions as Record<string, any>)?.envVars ?? {};
 
       await this.createDeployment(
         deploymentName,
         userId,
         userId,
         messageData,
-        {}
+        userEnvVars
       );
     } catch (error) {
       throw new OrchestratorError(
         ErrorCode.DEPLOYMENT_CREATE_FAILED,
         `Failed to create worker deployment: ${error instanceof Error ? error.message : String(error)}`,
-        { userId, threadId, error },
+        { userId, conversationId, error },
         true
       );
     }
@@ -211,13 +257,18 @@ export abstract class BaseDeploymentManager {
       );
     }
 
-    const { threadId, channelId, platformMetadata } = messageData;
+    const { conversationId, threadId, channelId, platformMetadata } = messageData as any;
+    const effectiveConversationId = conversationId || threadId;
 
-    if (!threadId || !channelId) {
+    if (!effectiveConversationId || !channelId) {
       throw new OrchestratorError(
         ErrorCode.DEPLOYMENT_CREATE_FAILED,
-        "threadId and channelId are required in message data",
-        { deploymentName, hasThreadId: !!threadId, hasChannelId: !!channelId },
+        "conversationId and channelId are required in message data",
+        {
+          deploymentName,
+          hasConversationId: !!effectiveConversationId,
+          hasChannelId: !!channelId,
+        },
         true
       );
     }
@@ -228,13 +279,18 @@ export abstract class BaseDeploymentManager {
     const agentId = messageData.agentId!;
     // Extract traceId for end-to-end observability
     const traceId = extractTraceId(messageData);
-    const workerToken = generateWorkerToken(userId, threadId, deploymentName, {
-      channelId,
-      teamId,
-      platform: messageData.platform,
-      agentId,
-      traceId,
-    });
+    const workerToken = generateWorkerToken(
+      userId,
+      effectiveConversationId,
+      deploymentName,
+      {
+        channelId,
+        teamId,
+        platform: messageData.platform,
+        agentId,
+        traceId,
+      }
+    );
 
     // Get the dispatcher host for proxy configuration
     const dispatcherHost = this.getDispatcherHost();
@@ -243,7 +299,10 @@ export abstract class BaseDeploymentManager {
     // The HTTP proxy extracts deploymentName from Proxy-Authorization header
     // and looks up the config from networkConfigStore
     if (messageData.networkConfig) {
-      await networkConfigStore.set(deploymentName, messageData.networkConfig);
+      await networkConfigStore.set(
+        deploymentName,
+        messageData.networkConfig
+      );
       logger.debug(
         `Stored network config for ${deploymentName}: allowed=${messageData.networkConfig.allowedDomains?.length ?? 0}, denied=${messageData.networkConfig.deniedDomains?.length ?? 0}`
       );
@@ -294,10 +353,16 @@ export abstract class BaseDeploymentManager {
       );
     }
 
+    const parsedProxyPort = Number.parseInt(
+      process.env.WORKER_PROXY_PORT || "8118",
+      10
+    );
+    const proxyPort = Number.isFinite(parsedProxyPort) ? parsedProxyPort : 8118;
+
     // Build proxy URL with deployment identification via Basic auth
-    // Format: http://<deploymentName>:<workerToken>@<host>:8118
+    // Format: http://<deploymentName>:<workerToken>@<host>:<proxyPort>
     // The proxy extracts deploymentName from username and looks up per-deployment config
-    const proxyUrl = `http://${deploymentName}:${workerToken}@${dispatcherHost}:8118`;
+    const proxyUrl = `http://${deploymentName}:${workerToken}@${dispatcherHost}:${proxyPort}`;
 
     let envVars: { [key: string]: string } = {
       USER_ID: userId,
@@ -305,10 +370,13 @@ export abstract class BaseDeploymentManager {
       DEPLOYMENT_NAME: deploymentName,
       CHANNEL_ID: channelId,
       ORIGINAL_MESSAGE_TS:
-        platformMetadata?.originalMessageTs || messageData.messageId || "",
+        platformMetadata?.originalMessageTs ||
+        messageData.messageId ||
+        "",
       LOG_LEVEL: "info",
       WORKSPACE_DIR: "/workspace",
-      THREAD_ID: threadId,
+      CONVERSATION_ID: effectiveConversationId,
+      THREAD_ID: effectiveConversationId,
       // Worker authentication and communication
       WORKER_TOKEN: workerToken,
       DISPATCHER_URL: this.getDispatcherUrl(),
@@ -327,7 +395,8 @@ export abstract class BaseDeploymentManager {
 
     // Add optional environment variables only if they exist
     if (messageData?.platformMetadata?.botResponseTs) {
-      envVars.BOT_RESPONSE_TS = messageData.platformMetadata.botResponseTs;
+      envVars.BOT_RESPONSE_TS =
+        messageData.platformMetadata.botResponseTs;
     }
 
     // Add trace ID for end-to-end observability
@@ -361,9 +430,16 @@ export abstract class BaseDeploymentManager {
     if (includeSecrets && this.moduleEnvVarsBuilder) {
       // Add module-specific environment variables
       try {
-        envVars = await this.moduleEnvVarsBuilder(userId, agentId, envVars);
+        envVars = await this.moduleEnvVarsBuilder(
+          userId,
+          agentId,
+          envVars
+        );
       } catch (error) {
-        logger.warn("Failed to build module environment variables:", error);
+        logger.warn(
+          "Failed to build module environment variables:",
+          error
+        );
       }
     }
     // Add worker environment variables from configuration
@@ -387,6 +463,51 @@ export abstract class BaseDeploymentManager {
       );
     }
 
+    // Inject system ANTHROPIC_API_KEY if not already set by modules/user
+    if (
+      !envVars.ANTHROPIC_API_KEY &&
+      !envVars.CLAUDE_CODE_OAUTH_TOKEN
+    ) {
+      const systemKey = process.env.ANTHROPIC_API_KEY;
+      if (systemKey) {
+        envVars.ANTHROPIC_API_KEY = systemKey;
+      }
+    }
+
+    // Replace secret env vars with placeholders and point SDK at the proxy
+    if (this.redisClient) {
+      let hasSecrets = false;
+      for (const [key, value] of Object.entries(envVars)) {
+        if (!value || !isSecretEnvVar(key)) continue;
+        // Skip system env vars that should not be swapped
+        if (key === "WORKER_TOKEN") continue;
+        try {
+          const placeholder = await generatePlaceholder(
+            this.redisClient,
+            agentId,
+            key,
+            value,
+            deploymentName
+          );
+          envVars[key] = placeholder;
+          hasSecrets = true;
+        } catch (error) {
+          logger.warn(
+            `Failed to generate placeholder for ${key}:`,
+            error
+          );
+        }
+      }
+
+      if (hasSecrets) {
+        // Point the Claude SDK at the secret proxy instead of directly at Anthropic
+        envVars.ANTHROPIC_BASE_URL = `${this.getDispatcherUrl()}/api/proxy`;
+        logger.info(
+          `🔐 Generated secret placeholders for ${deploymentName}, routing through proxy`
+        );
+      }
+    }
+
     return envVars;
   }
 
@@ -398,6 +519,11 @@ export abstract class BaseDeploymentManager {
       // Clean up per-deployment configs from stores
       await networkConfigStore.delete(deploymentName);
       await mcpConfigStore.delete(deploymentName);
+
+      // Clean up secret placeholder mappings
+      if (this.redisClient) {
+        await deleteSecretMappings(this.redisClient, deploymentName);
+      }
 
       // Clean up any scheduled wakeups for this deployment
       const scheduledWakeupService = getScheduledWakeupService();
@@ -435,14 +561,16 @@ export abstract class BaseDeploymentManager {
 
       // Sort deployments by last activity (oldest first)
       const sortedDeployments = [...activeDeployments].sort(
-        (a, b) => a.lastActivity.getTime() - b.lastActivity.getTime()
+        (a, b) =>
+          a.lastActivity.getTime() - b.lastActivity.getTime()
       );
 
       let processedCount = 0;
 
       // Process each deployment based on its state
       for (const analysis of sortedDeployments) {
-        const { deploymentName, replicas, isIdle, isVeryOld } = analysis;
+        const { deploymentName, replicas, isIdle, isVeryOld } =
+          analysis;
 
         if (isVeryOld) {
           // Delete very old deployments (>= 7 days)
@@ -474,9 +602,13 @@ export abstract class BaseDeploymentManager {
         (d) => !d.isVeryOld
       );
       if (remainingDeployments.length > maxDeployments) {
-        const excessCount = remainingDeployments.length - maxDeployments;
+        const excessCount =
+          remainingDeployments.length - maxDeployments;
 
-        const deploymentsToDelete = remainingDeployments.slice(0, excessCount);
+        const deploymentsToDelete = remainingDeployments.slice(
+          0,
+          excessCount
+        );
         for (const { deploymentName } of deploymentsToDelete) {
           try {
             await this.deleteWorkerDeployment(deploymentName);

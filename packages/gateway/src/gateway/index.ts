@@ -98,7 +98,11 @@ export class WorkerGateway {
       return c.json({ error: "Invalid token" }, 401);
     }
 
-    const { deploymentName, userId, threadId } = auth.tokenData;
+    const { deploymentName, userId, conversationId, threadId } = auth.tokenData as any;
+    const effectiveConversationId = conversationId || threadId;
+    if (!effectiveConversationId) {
+      return c.json({ error: "Invalid token (missing conversationId)" }, 401);
+    }
 
     // Create an SSE stream
     return stream(c, async (streamWriter) => {
@@ -135,7 +139,7 @@ export class WorkerGateway {
       this.connectionManager.addConnection(
         deploymentName,
         userId,
-        threadId,
+        effectiveConversationId,
         sseWriter
       );
 
@@ -144,7 +148,7 @@ export class WorkerGateway {
       await this.jobRouter.resumeWorker(deploymentName);
 
       // Send any pending interaction responses
-      await this.sendPendingInteractionResponses(threadId, deploymentName);
+      await this.sendPendingInteractionResponses(effectiveConversationId, deploymentName);
 
       // Handle client disconnect
       sseWriter.onClose(() => {
@@ -222,11 +226,16 @@ export class WorkerGateway {
         userId,
         platform,
         sessionKey,
+        conversationId,
         threadId,
         agentId,
         deploymentName,
       } = auth.tokenData;
       const baseUrl = this.getRequestBaseUrl(c);
+      const effectiveConversationId = conversationId || threadId;
+      if (!effectiveConversationId) {
+        return c.json({ error: "Invalid token (missing conversationId)" }, 401);
+      }
 
       // Build instruction context
       const instructionContext: InstructionContext = {
@@ -249,7 +258,7 @@ export class WorkerGateway {
             platform || "unknown",
             instructionContext
           ),
-          this.interactionService.getPendingUnansweredInteractions(threadId),
+          this.interactionService.getPendingUnansweredInteractions(effectiveConversationId),
         ]);
 
       logger.info(
@@ -315,7 +324,7 @@ export class WorkerGateway {
   private async handleInteractionResponse(interaction: any): Promise<void> {
     const deploymentName = generateDeploymentName(
       interaction.userId,
-      interaction.threadId
+      interaction.conversationId
     );
     const connection = this.connectionManager.getConnection(deploymentName);
 
@@ -355,7 +364,7 @@ export class WorkerGateway {
   private async storeInteractionResponse(interaction: any): Promise<void> {
     if (!this.interactionService) return;
 
-    const key = `interaction:response:${interaction.threadId}:${interaction.id}`;
+    const key = `interaction:response:${interaction.conversationId}:${interaction.id}`;
     const response = {
       interactionId: interaction.id,
       response: interaction.response,

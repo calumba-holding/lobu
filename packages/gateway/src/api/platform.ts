@@ -15,7 +15,6 @@ import {
 import type { CoreServices, PlatformAdapter } from "../platform";
 import type { ResponseRenderer } from "../platform/response-renderer";
 import { broadcastToAgent } from "../routes/public/agent";
-import type { ThreadSession } from "../session";
 import { ApiResponseRenderer } from "./response-renderer";
 
 const logger = createLogger("api-platform");
@@ -129,7 +128,7 @@ export class ApiPlatform implements PlatformAdapter {
   private async handleToolApproval(
     interaction: UserInteraction
   ): Promise<void> {
-    const agentId = interaction.threadId;
+    const agentId = interaction.conversationId;
     if (!agentId) {
       logger.warn("No agent ID found for tool approval interaction");
       return;
@@ -210,7 +209,7 @@ export class ApiPlatform implements PlatformAdapter {
 
     if (!session) {
       session = {
-        sessionKey: agentId,
+        conversationId: agentId,
         threadId: agentId,
         channelId: agentId,
         userId,
@@ -219,10 +218,14 @@ export class ApiPlatform implements PlatformAdapter {
         createdAt: Date.now(),
         status: "created",
         provider: "claude",
-      } as ThreadSession;
+      };
 
       await sessionManager.setSession(session);
       logger.info(`Created new API session: ${agentId}`);
+    }
+
+    if (!session) {
+      throw new Error("Session not found after creation");
     }
 
     // Update session activity
@@ -245,6 +248,7 @@ export class ApiPlatform implements PlatformAdapter {
     // Enqueue message for worker processing
     await queueProducer.enqueueMessage({
       userId,
+      conversationId: agentId,
       threadId: agentId,
       messageId,
       channelId: agentId,

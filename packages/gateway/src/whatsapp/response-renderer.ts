@@ -60,7 +60,7 @@ export class WhatsAppResponseRenderer implements ResponseRenderer {
     const traceId = extractTraceId(payload);
 
     const chatJid = this.getChatJid(payload);
-    const key = `${chatJid}:${payload.threadId}`;
+    const key = `${chatJid}:${payload.conversationId}`;
 
     if (payload.isFullReplacement) {
       this.responseBuffer.set(key, payload.delta);
@@ -166,7 +166,7 @@ export class WhatsAppResponseRenderer implements ResponseRenderer {
   ): Promise<void> {
     const traceId = extractTraceId(payload);
     const chatJid = this.getChatJid(payload);
-    const key = `${chatJid}:${payload.threadId}`;
+    const key = `${chatJid}:${payload.conversationId}`;
 
     // Clear timers
     this.clearTypingTimer(chatJid);
@@ -177,7 +177,7 @@ export class WhatsAppResponseRenderer implements ResponseRenderer {
     if (buffered?.trim()) {
       await this.sendMessage(chatJid, buffered);
       logger.info(
-        { traceId, chatJid, threadId: payload.threadId },
+        { traceId, chatJid, threadId: payload.conversationId },
         "Sent final response"
       );
     }
@@ -195,7 +195,7 @@ export class WhatsAppResponseRenderer implements ResponseRenderer {
 
     const traceId = extractTraceId(payload);
     const chatJid = this.getChatJid(payload);
-    const key = `${chatJid}:${payload.threadId}`;
+    const key = `${chatJid}:${payload.conversationId}`;
 
     // Clear timers
     this.clearTypingTimer(chatJid);
@@ -209,7 +209,7 @@ export class WhatsAppResponseRenderer implements ResponseRenderer {
     const errorMessage = `Error: ${payload.error}`;
     await this.sendMessage(chatJid, errorMessage);
     logger.error(
-      { traceId, chatJid, threadId: payload.threadId, error: payload.error },
+      { traceId, chatJid, threadId: payload.conversationId, error: payload.error },
       "Sent error response"
     );
   }

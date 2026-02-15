@@ -23,6 +23,7 @@ import {
   type MessagePayload,
   type OrchestratorConfig,
 } from "./base-deployment-manager";
+import { SystemMessageLimiter } from "../infrastructure/redis/system-message-limiter";
 
 const logger = createLogger("orchestrator");
 
@@ -33,7 +34,7 @@ export class MessageConsumer {
   private isRunning = false;
   private credentialStore?: ClaudeCredentialStore;
   private systemApiKey?: string;
-  private promptThrottle = new Map<string, number>();
+  private systemMessageLimiter?: SystemMessageLimiter;
 
   constructor(
     config: OrchestratorConfig,
@@ -109,6 +110,15 @@ export class MessageConsumer {
     await this.queue.stop();
   }
 
+  private getSystemMessageLimiter(): SystemMessageLimiter {
+    if (!this.systemMessageLimiter) {
+      // RedisQueue provides a shared ioredis client.
+      const redis = this.queue.getRedisClient();
+      this.systemMessageLimiter = new SystemMessageLimiter(redis, "termos:sysmsg");
+    }
+    return this.systemMessageLimiter;
+  }
+
   /**
    * Handle all messages - creates deployment for new threads or routes to existing thread queues
    */
@@ -147,7 +157,7 @@ export class MessageConsumer {
         traceId,
         jobId,
         userId: data?.userId,
-        threadId: data?.threadId,
+        conversationId: ((data as any)?.conversationId || data?.threadId),
       },
       "Processing job with trace context"
     );
@@ -165,7 +175,7 @@ export class MessageConsumer {
             `Agent ${data.agentId} has no credentials - sending authentication prompt`
           );
 
-          // Prevent spamming the user if platforms echo our outbound messages or retry deliveries.
+          // Prevent resending the same setup/auth prompt in tight loops.
           // Default: one prompt per (platform, channel, agent) per hour.
           const parsedThrottleSeconds = Number.parseInt(
             process.env.AUTH_PROMPT_DEBOUNCE_SECONDS || "3600",
@@ -174,22 +184,114 @@ export class MessageConsumer {
           const throttleSeconds = Number.isFinite(parsedThrottleSeconds)
             ? parsedThrottleSeconds
             : 3600;
-          const throttleKey = [
-            "prompt:auth_required",
+
+          const parsedLockSeconds = Number.parseInt(
+            process.env.AUTH_PROMPT_LOCK_SECONDS || "30",
+            10
+          );
+          const lockSeconds = Number.isFinite(parsedLockSeconds)
+            ? parsedLockSeconds
+            : 30;
+
+          const dedupeKey = [
+            "auth_required",
             data.platform,
             data.channelId,
             data.agentId,
           ].join(":");
 
-          const shouldSend = await this.shouldSendThrottledPrompt(
-            throttleKey,
-            throttleSeconds
-          );
-          if (!shouldSend) {
+          let didSend = false;
+          try {
+            didSend = await this.getSystemMessageLimiter().sendOnce(
+              dedupeKey,
+              async () => {
+                // Use platform auth adapter if available
+                const authAdapter = platformAuthRegistry.get(data.platform);
+                if (authAdapter) {
+                  // Platform-specific auth prompt (e.g., WhatsApp numbered list)
+                  await authAdapter.sendAuthPrompt(
+                    data.userId,
+                    data.channelId,
+                    data.conversationId,
+                    [{ id: "claude", name: "Claude" }],
+                    data.platformMetadata
+                  );
+                  logger.info(
+                    `✅ Sent platform-specific auth prompt for agent ${data.agentId} via ${data.platform} adapter`
+                  );
+                  return;
+                }
+
+                // Fallback: Send Slack-style ephemeral message for platforms without adapter
+                const responseQueue = "thread_response";
+                await this.queue.createQueue(responseQueue);
+                await this.queue.send(responseQueue, {
+                  messageId: data.messageId,
+                  userId: data.userId,
+                  channelId: data.channelId,
+                  conversationId: effectiveConversationId,
+            threadId: (data as any).threadId,
+                  platform: data.platform,
+                  platformMetadata: data.platformMetadata,
+                  ephemeral: true,
+                  content: JSON.stringify({
+                    blocks: [
+                      {
+                        type: "section",
+                        text: {
+                          type: "mrkdwn",
+                          text: "🔐 *Authentication Required*\n\nYou need to login with your Claude account to use this bot. Please visit the app home tab to authenticate.",
+                        },
+                      },
+                      {
+                        type: "actions",
+                        elements: [
+                          {
+                            type: "button",
+                            text: {
+                              type: "plain_text",
+                              text: "Login with Claude",
+                            },
+                            style: "primary",
+                            action_id: "claude_auth_start",
+                            value: "start_auth",
+                          },
+                        ],
+                      },
+                    ],
+                  }),
+                  processedMessageIds: [data.messageId],
+                });
+                logger.info(
+                  `✅ Sent Slack-style auth prompt for agent ${data.agentId}`
+                );
+              },
+              {
+                sentTtlSeconds: throttleSeconds,
+                lockTtlSeconds: lockSeconds,
+                failOpen: false,
+              }
+            );
+          } catch (error) {
+            // Treat as processed. Without credentials we can't proceed anyway, and retries can spam.
+            logger.error(
+              {
+                error: error instanceof Error ? error.message : String(error),
+                platform: data.platform,
+                channelId: data.channelId,
+                agentId: data.agentId,
+              },
+              "Failed to send auth prompt"
+            );
+            return;
+          }
+
+          if (!didSend) {
             logger.info(
               {
-                throttleKey,
+                dedupeKey,
                 throttleSeconds,
+                lockSeconds,
                 platform: data.platform,
                 channelId: data.channelId,
                 agentId: data.agentId,
@@ -199,80 +301,29 @@ export class MessageConsumer {
             return; // Don't create worker
           }
 
-          // Use platform auth adapter if available
-          const authAdapter = platformAuthRegistry.get(data.platform);
-          if (authAdapter) {
-            // Platform-specific auth prompt (e.g., WhatsApp numbered list)
-            await authAdapter.sendAuthPrompt(
-              data.userId,
-              data.channelId,
-              data.threadId,
-              [{ id: "claude", name: "Claude" }],
-              data.platformMetadata
-            );
-            logger.info(
-              `✅ Sent platform-specific auth prompt for agent ${data.agentId} via ${data.platform} adapter`
-            );
-          } else {
-            // Fallback: Send Slack-style ephemeral message for platforms without adapter
-            const responseQueue = "thread_response";
-            await this.queue.createQueue(responseQueue);
-            await this.queue.send(responseQueue, {
-              messageId: data.messageId,
-              userId: data.userId,
-              channelId: data.channelId,
-              threadId: data.threadId,
-              platform: data.platform,
-              platformMetadata: data.platformMetadata,
-              ephemeral: true,
-              content: JSON.stringify({
-                blocks: [
-                  {
-                    type: "section",
-                    text: {
-                      type: "mrkdwn",
-                      text: "🔐 *Authentication Required*\n\nYou need to login with your Claude account to use this bot. Please visit the app home tab to authenticate.",
-                    },
-                  },
-                  {
-                    type: "actions",
-                    elements: [
-                      {
-                        type: "button",
-                        text: {
-                          type: "plain_text",
-                          text: "Login with Claude",
-                        },
-                        style: "primary",
-                        action_id: "claude_auth_start",
-                        value: "start_auth",
-                      },
-                    ],
-                  },
-                ],
-              }),
-              processedMessageIds: [data.messageId],
-            });
-            logger.info(
-              `✅ Sent Slack-style auth prompt for agent ${data.agentId}`
-            );
-          }
-
           return; // Don't create worker
         }
       }
 
-      // CRITICAL: For consistent worker naming, threadId must be the thread_ts (root message timestamp)
-      // Platform adapters (e.g., Slack) must ensure threadId is the root thread ID, NOT individual message timestamps
-      const effectiveThreadId = data.threadId;
+      // CRITICAL: For consistent worker naming, conversationId must be the root conversation ID
+      // (e.g., Slack thread root ts), not individual message timestamps.
+      const effectiveConversationId = data.conversationId ?? data.threadId;
+      if (!effectiveConversationId) {
+        throw new OrchestratorError(
+          ErrorCode.QUEUE_JOB_PROCESSING_FAILED,
+          "conversationId is required for message routing",
+          { messageId: data.messageId, userId: data.userId },
+          true
+        );
+      }
 
       const deploymentName = generateDeploymentName(
         data.userId,
-        effectiveThreadId
+        effectiveConversationId
       );
 
       logger.info(
-        `Thread routing - effectiveThreadId: ${effectiveThreadId}, deploymentName: ${deploymentName}`
+        `Conversation routing - effectiveConversationId: ${effectiveConversationId}, deploymentName: ${deploymentName}`
       );
 
       // 1) Send to thread queue immediately (Redis persists; worker will drain on attach)
@@ -282,7 +333,7 @@ export class MessageConsumer {
           op: "orchestrator.message_routing",
           attributes: {
             "user.id": data.userId,
-            "thread.id": data.threadId,
+            "conversation.id": effectiveConversationId || "unknown",
             "deployment.name": deploymentName,
           },
         },
@@ -301,6 +352,7 @@ export class MessageConsumer {
       this.ensureWorkerExists(
         deploymentName,
         data,
+        effectiveConversationId,
         traceId,
         childTraceparent
       ).catch((bgError) => {
@@ -310,7 +362,8 @@ export class MessageConsumer {
             component: "deployment-creation",
             deploymentName,
             userId: data.userId,
-            threadId: data.threadId,
+            conversationId: effectiveConversationId,
+            threadId: (data as any).threadId,
           },
           level: "error",
         });
@@ -322,7 +375,8 @@ export class MessageConsumer {
             stack: bgError instanceof Error ? bgError.stack : undefined,
             deploymentName,
             userId: data.userId,
-            threadId: data.threadId,
+            conversationId: effectiveConversationId,
+            threadId: (data as any).threadId,
           },
           "Critical: Background worker creation failed. Messages are queued but worker unavailable."
         );
@@ -358,39 +412,6 @@ export class MessageConsumer {
     }
   }
 
-  private async shouldSendThrottledPrompt(
-    key: string,
-    ttlSeconds: number
-  ): Promise<boolean> {
-    const now = Date.now();
-    const ttlMs = Math.max(1, ttlSeconds) * 1000;
-
-    // Fast path: local throttle (helps when Redis is unavailable)
-    const nextAllowedAt = this.promptThrottle.get(key);
-    if (nextAllowedAt && nextAllowedAt > now) {
-      return false;
-    }
-
-    try {
-      const redis = this.queue.getRedisClient();
-      // NX ensures only the first request within TTL wins.
-      const result = await redis.set(key, "1", "EX", ttlSeconds, "NX");
-      const ok = result === "OK";
-      if (ok) {
-        this.promptThrottle.set(key, now + ttlMs);
-      }
-      return ok;
-    } catch (error) {
-      // Fail open, but keep a best-effort local throttle to avoid tight loops.
-      logger.warn(
-        { error: String(error), key },
-        "Prompt throttle Redis check failed; using local throttle"
-      );
-      this.promptThrottle.set(key, now + ttlMs);
-      return true;
-    }
-  }
-
   /**
    * Send message to worker queue for the worker to consume
    */
@@ -423,7 +444,7 @@ export class MessageConsumer {
       }
 
       logger.info(
-        `✅ Sent message to thread queue ${threadQueueName} for thread ${data.threadId}, jobId: ${jobId}`
+        `✅ Sent message to thread queue ${threadQueueName} for conversation ${(data.conversationId || data.threadId)}, jobId: ${jobId}`
       );
     } catch (error) {
       logger.error(`❌ [ERROR] sendToWorkerQueue failed:`, error);
@@ -443,6 +464,7 @@ export class MessageConsumer {
   private async ensureWorkerExists(
     deploymentName: string,
     data: MessagePayload,
+    conversationId: string,
     traceId: string,
     traceparent?: string
   ): Promise<void> {
@@ -466,18 +488,18 @@ export class MessageConsumer {
 
         if (isNewThread) {
           logger.info(
-            { traceId, traceparent, threadId: data.threadId, deploymentName },
+            { traceId, traceparent, conversationId, deploymentName },
             "New thread - creating deployment"
           );
           await this.deploymentManager.createWorkerDeployment(
             data.userId,
-            data.threadId,
+            conversationId,
             dataWithTrace
           );
           logger.info({ traceId, deploymentName }, "Created deployment");
         } else {
           logger.info(
-            { traceId, threadId: data.threadId, deploymentName },
+            { traceId, conversationId, deploymentName },
             "Existing thread - ensuring worker exists"
           );
           try {
@@ -488,12 +510,12 @@ export class MessageConsumer {
             );
           } catch (_error) {
             logger.info(
-              { traceId, threadId: data.threadId, deploymentName },
+              { traceId, conversationId, deploymentName },
               "Worker doesn't exist, creating it"
             );
             await this.deploymentManager.createWorkerDeployment(
               data.userId,
-              data.threadId,
+              conversationId,
               dataWithTrace
             );
             logger.info({ traceId, deploymentName }, "Created worker");
@@ -533,7 +555,8 @@ export class MessageConsumer {
       const failureData = {
         deploymentName,
         userId: data.userId,
-        threadId: data.threadId,
+        conversationId: data.conversationId || data.threadId,
+        threadId: data.threadId || data.conversationId,
         error: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack : undefined,
         timestamp: new Date().toISOString(),

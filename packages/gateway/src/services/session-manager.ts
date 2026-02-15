@@ -66,7 +66,7 @@ export class RedisSessionStore implements SessionStore {
       // Create thread index for fast lookups
       const indexKey = this.getThreadIndexKey(
         session.channelId,
-        session.threadId
+        session.conversationId
       );
       await this.redis.setex(
         indexKey,
@@ -90,10 +90,10 @@ export class RedisSessionStore implements SessionStore {
       await this.redis.del(key);
 
       // Clean up thread index
-      if (session?.threadId) {
+      if (session?.conversationId) {
         const indexKey = this.getThreadIndexKey(
           session.channelId,
-          session.threadId
+          session.conversationId
         );
         await this.redis.del(indexKey);
       }
@@ -152,13 +152,14 @@ export class SessionManager implements ISessionManager {
   async createSession(
     channelId: string,
     userId: string,
-    threadId?: string,
+    conversationId?: string,
     threadCreator?: string
   ): Promise<ThreadSession> {
     // threadId is required for the new schema
-    const effectiveThreadId = threadId || userId;
+    const effectiveConversationId = conversationId || userId;
     const session: ThreadSession = {
-      threadId: effectiveThreadId,
+      conversationId: effectiveConversationId,
+      threadId: effectiveConversationId,
       channelId,
       userId,
       threadCreator: threadCreator || userId,

@@ -9,6 +9,7 @@ import type { WorkerConfig } from "../core/types";
 const mockEnvVars = {
   DISPATCHER_URL: "https://test-dispatcher.example.com",
   WORKER_TOKEN: "test-worker-token-123",
+  CONVERSATION_ID: "1234567890.123456",
   THREAD_ID: "1234567890.123456",
   WORKER_SESSION_KEY: "test-session-key",
   WORKER_USER_ID: "U1234567890",
@@ -29,6 +30,7 @@ export const mockWorkerConfig: WorkerConfig = {
   sessionKey: "test-session-key",
   userId: "U1234567890",
   channelId: "C1234567890",
+  conversationId: "1234567890.123456",
   threadId: "1234567890.123456",
   userPrompt: Buffer.from("Test user prompt").toString("base64"),
   responseChannel: "C1234567890",

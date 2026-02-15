@@ -6,7 +6,8 @@ export interface SessionContext {
   messageId: string; // Required - always needed for tracking
 
   // Optional context
-  threadId?: string;
+  conversationId?: string;
+  threadId?: string; // Legacy alias (deprecated)
   teamId?: string; // Platform workspace/team identifier
   userDisplayName?: string; // For logging/display purposes
   workingDirectory?: string;
@@ -289,7 +290,8 @@ export interface InstructionProvider {
 export interface ThreadResponsePayload {
   messageId: string;
   channelId: string;
-  threadId: string;
+  conversationId: string;
+  threadId?: string; // Legacy alias (deprecated)
   userId: string;
   teamId: string;
   platform?: string; // Platform identifier (slack, whatsapp, api, etc.) for routing
@@ -369,7 +371,8 @@ export type InteractionType =
 export interface UserInteraction {
   id: string;
   userId: string;
-  threadId: string;
+  conversationId: string;
+  threadId?: string; // Legacy alias (deprecated)
   channelId: string;
   teamId?: string;
 
@@ -421,7 +424,8 @@ export interface SuggestedPrompt {
 export interface UserSuggestion {
   id: string;
   userId: string;
-  threadId: string;
+  conversationId: string;
+  threadId?: string; // Legacy alias (deprecated)
   channelId: string;
   teamId?: string;
 

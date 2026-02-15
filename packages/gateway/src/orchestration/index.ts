@@ -3,6 +3,7 @@ export * from "./deployment-utils";
 export * from "./impl";
 
 import { createLogger, moduleRegistry } from "@termosdev/core";
+import type Redis from "ioredis";
 import type { ClaudeCredentialStore } from "../auth/claude/credential-store";
 import type {
   BaseDeploymentManager,
@@ -37,8 +38,14 @@ export class Orchestrator {
    */
   async injectCoreServices(
     credentialStore?: ClaudeCredentialStore,
-    systemApiKey?: string
+    systemApiKey?: string,
+    redisClient?: Redis
   ): Promise<void> {
+    // Inject Redis client into deployment manager for secret placeholder generation
+    if (redisClient) {
+      this.deploymentManager.setRedisClient(redisClient);
+    }
+
     // Stop the old consumer if running
     if (this.isRunning) {
       await this.queueConsumer.stop();

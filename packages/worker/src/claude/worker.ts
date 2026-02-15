@@ -90,8 +90,8 @@ export class ClaudeWorker extends BaseWorker {
 
       logger.info(
         sessionExists
-          ? `Continuing existing Claude session for thread ${this.config.threadId}`
-          : `Starting new Claude session for thread ${this.config.threadId}`
+          ? `Continuing existing Claude session for conversation ${this.config.conversationId || this.config.threadId}`
+          : `Starting new Claude session for conversation ${this.config.conversationId || this.config.threadId}`
       );
 
       // Execute Claude with SDK
@@ -108,7 +108,8 @@ export class ClaudeWorker extends BaseWorker {
         this.getWorkingDirectory(),
         {
           channelId: this.config.channelId,
-          threadId: this.config.threadId || "",
+          conversationId: this.config.conversationId || this.config.threadId || "",
+          threadId: this.config.conversationId || this.config.threadId || "",
           platform: this.config.platform,
           historyEnabled,
         },

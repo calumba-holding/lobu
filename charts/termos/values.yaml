@@ -209,7 +209,7 @@ gateway:
       hosts:
         - host: termos-internal.local
           paths:
-            - path: /api/anthropic
+            - path: /api/proxy
               pathType: Prefix
       tls: []
 

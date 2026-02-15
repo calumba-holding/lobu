@@ -455,6 +455,7 @@ export class TelegramMessageHandler {
       platform: "telegram",
       userId,
       botId: "telegram",
+      conversationId: threadId,
       threadId,
       teamId: context.isGroup ? chatId : "telegram",
       agentId,

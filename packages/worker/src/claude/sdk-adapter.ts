@@ -9,7 +9,6 @@ import {
 } from "@termosdev/core";
 import type { InteractionClient } from "../common/interaction-client";
 import type { ProgressCallback } from "../core/types";
-import { ensureBaseUrl } from "../core/url-utils";
 import { createCustomToolsServer } from "./custom-tools";
 import { getSessionContext } from "./session-manager";
 
@@ -145,7 +144,8 @@ export async function runClaudeWithSDK(
   workingDirectory?: string,
   customToolsConfig?: {
     channelId: string;
-    threadId: string;
+    conversationId: string;
+    threadId?: string; // Legacy alias (deprecated)
     platform?: string;
     historyEnabled?: boolean;
   },
@@ -209,14 +209,9 @@ export async function runClaudeWithSDK(
       env: {
         ...process.env,
         DEBUG: "0", // Disable debug mode for Claude CLI (reduces noise in logs)
-        // Use worker token as API key - SDK will send this in x-api-key header
-        ANTHROPIC_API_KEY: workerToken,
-        // Proxy all Anthropic API requests through gateway
-        ...(dispatcherUrl
-          ? {
-              ANTHROPIC_BASE_URL: `${ensureBaseUrl(dispatcherUrl)}/api/anthropic`,
-            }
-          : {}),
+        // ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN and ANTHROPIC_BASE_URL
+        // are set by the deployment manager as placeholder tokens that the
+        // gateway SecretProxy swaps for real values at request time.
       },
       stderr: (message: string) => {
         logger.error(`[Claude CLI stderr] ${message}`);
@@ -266,7 +261,7 @@ Use it when the user references past discussions or you need context.`);
         dispatcherUrl,
         workerToken,
         customToolsConfig.channelId,
-        customToolsConfig.threadId,
+        (customToolsConfig.conversationId ?? customToolsConfig.threadId ?? ""),
         interactionClient,
         {
           platform: customToolsConfig.platform,

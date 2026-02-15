@@ -21,7 +21,7 @@ export class HttpWorkerTransport implements WorkerTransport {
   private workerToken: string;
   private userId: string;
   private channelId: string;
-  private threadId: string;
+  private conversationId: string;
   private originalMessageTs: string;
   private botResponseTs?: string;
   public processedMessageIds: string[] = [];
@@ -37,7 +37,7 @@ export class HttpWorkerTransport implements WorkerTransport {
     this.workerToken = config.workerToken;
     this.userId = config.userId;
     this.channelId = config.channelId;
-    this.threadId = config.threadId;
+    this.conversationId = config.conversationId || config.threadId || "";
     this.originalMessageTs = config.originalMessageTs;
     this.botResponseTs = config.botResponseTs;
     this.teamId = config.teamId;
@@ -134,7 +134,8 @@ export class HttpWorkerTransport implements WorkerTransport {
     await this.sendResponse({
       messageId: this.originalMessageTs,
       channelId: this.channelId,
-      threadId: this.threadId,
+      conversationId: this.conversationId,
+      threadId: this.conversationId,
       userId: this.userId,
       teamId: this.teamId,
       delta: actualDelta,
@@ -150,7 +151,8 @@ export class HttpWorkerTransport implements WorkerTransport {
     await this.sendResponse({
       messageId: this.originalMessageTs,
       channelId: this.channelId,
-      threadId: this.threadId,
+      conversationId: this.conversationId,
+      threadId: this.conversationId,
       userId: this.userId,
       teamId: this.teamId,
       timestamp: Date.now(),
@@ -165,7 +167,8 @@ export class HttpWorkerTransport implements WorkerTransport {
     await this.sendResponse({
       messageId: this.originalMessageTs,
       channelId: this.channelId,
-      threadId: this.threadId,
+      conversationId: this.conversationId,
+      threadId: this.conversationId,
       userId: this.userId,
       teamId: this.teamId,
       error: error.message,
@@ -179,7 +182,8 @@ export class HttpWorkerTransport implements WorkerTransport {
     await this.sendResponse({
       messageId: this.originalMessageTs,
       channelId: this.channelId,
-      threadId: this.threadId,
+      conversationId: this.conversationId,
+      threadId: this.conversationId,
       userId: this.userId,
       teamId: this.teamId,
       timestamp: Date.now(),
@@ -202,7 +206,8 @@ export class HttpWorkerTransport implements WorkerTransport {
     return {
       messageId: this.originalMessageTs,
       channelId: this.channelId,
-      threadId: this.threadId,
+      conversationId: this.conversationId,
+      threadId: this.conversationId,
       userId: this.userId,
       teamId: this.teamId,
       timestamp: Date.now(),
