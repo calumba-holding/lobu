@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
 
 import { createLogger, moduleRegistry } from "@termosdev/core";
+import { AdminStatusCache } from "../auth/admin-status-cache";
+import { AgentMetadataStore } from "../auth/agent-metadata-store";
 import { ClaudeCredentialStore } from "../auth/claude/credential-store";
 import { ClaudeModelPreferenceStore } from "../auth/claude/model-preference-store";
 import { ClaudeOAuthModule } from "../auth/claude/oauth-module";
@@ -11,6 +13,7 @@ import { mcpConfigStore } from "../auth/mcp/mcp-config-store";
 import { McpOAuthModule } from "../auth/mcp/oauth-module";
 import { McpProxy } from "../auth/mcp/proxy";
 import { OAuthDiscoveryService } from "../auth/oauth/discovery";
+import { UserAgentsStore } from "../auth/user-agents-store";
 import {
   type ClaudeOAuthStateStore,
   createClaudeOAuthStateStore,
@@ -99,6 +102,9 @@ export class CoreServices {
   private agentSettingsStore?: AgentSettingsStore;
   private channelBindingService?: ChannelBindingService;
   private transcriptionService?: TranscriptionService;
+  private userAgentsStore?: UserAgentsStore;
+  private agentMetadataStore?: AgentMetadataStore;
+  private adminStatusCache?: AdminStatusCache;
 
   // ============================================================================
   // Modules
@@ -231,7 +237,12 @@ export class CoreServices {
     this.transcriptionService = new TranscriptionService(
       this.agentSettingsStore
     );
-    logger.info("✅ Agent settings & channel binding services initialized");
+    this.userAgentsStore = new UserAgentsStore(redisClient);
+    this.agentMetadataStore = new AgentMetadataStore(redisClient);
+    this.adminStatusCache = new AdminStatusCache(redisClient);
+    logger.info(
+      "✅ Agent settings, channel binding, user agents & metadata stores initialized"
+    );
   }
 
   // ============================================================================
@@ -509,5 +520,23 @@ export class CoreServices {
 
   getTranscriptionService(): TranscriptionService | undefined {
     return this.transcriptionService;
+  }
+
+  getUserAgentsStore(): UserAgentsStore {
+    if (!this.userAgentsStore)
+      throw new Error("User agents store not initialized");
+    return this.userAgentsStore;
+  }
+
+  getAgentMetadataStore(): AgentMetadataStore {
+    if (!this.agentMetadataStore)
+      throw new Error("Agent metadata store not initialized");
+    return this.agentMetadataStore;
+  }
+
+  getAdminStatusCache(): AdminStatusCache {
+    if (!this.adminStatusCache)
+      throw new Error("Admin status cache not initialized");
+    return this.adminStatusCache;
   }
 }

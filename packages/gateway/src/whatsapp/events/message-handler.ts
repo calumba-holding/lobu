@@ -16,17 +16,20 @@ import {
   type proto,
   type WAMessage,
 } from "@whiskeysockets/baileys";
+import type { AgentMetadataStore } from "../../auth/agent-metadata-store";
 import {
   type AgentSettingsStore,
   buildSettingsUrl,
   generateSettingsToken,
 } from "../../auth/settings";
+import type { UserAgentsStore } from "../../auth/user-agents-store";
 import type { ChannelBindingService } from "../../channels";
 import type {
   MessagePayload,
   QueueProducer,
 } from "../../infrastructure/queue/queue-producer";
 import type { ISessionManager } from "../../session";
+import { generateAgentSelectorToken } from "../../routes/public/agent-selector-page";
 import { resolveSpace } from "../../spaces";
 import type { TranscriptionService } from "../../services/transcription-service";
 import type { WhatsAppAuthAdapter } from "../auth-adapter";
@@ -78,6 +81,8 @@ export class WhatsAppMessageHandler {
   private channelBindingService?: ChannelBindingService;
   private agentSettingsStore?: AgentSettingsStore;
   private transcriptionService?: TranscriptionService;
+  private userAgentsStore?: UserAgentsStore;
+  private agentMetadataStore?: AgentMetadataStore;
 
   constructor(
     private client: BaileysClient,
@@ -106,6 +111,51 @@ export class WhatsAppMessageHandler {
    */
   setTranscriptionService(service: TranscriptionService): void {
     this.transcriptionService = service;
+  }
+
+  setUserAgentsStore(store: UserAgentsStore): void {
+    this.userAgentsStore = store;
+  }
+
+  setAgentMetadataStore(store: AgentMetadataStore): void {
+    this.agentMetadataStore = store;
+  }
+
+  /**
+   * Send a configuration prompt for WhatsApp.
+   * WhatsApp always uses first-user fallback for groups (limited admin API).
+   */
+  private async sendWhatsAppConfigPrompt(
+    context: WhatsAppContext
+  ): Promise<boolean> {
+    if (!this.userAgentsStore || !this.agentMetadataStore) {
+      return false;
+    }
+
+    try {
+      const publicGatewayUrl =
+        process.env.PUBLIC_GATEWAY_URL || "http://localhost:8080";
+      const userId = context.senderE164 || context.senderJid;
+
+      const token = generateAgentSelectorToken(
+        userId,
+        "whatsapp",
+        context.chatJid
+      );
+      const configUrl = `${publicGatewayUrl}/agent-selector?token=${encodeURIComponent(token)}`;
+
+      await this.client.sendMessage(context.chatJid, {
+        text: `Welcome! To get started, please configure which agent should handle messages here.\n\nConfigure: ${configUrl}`,
+      });
+
+      logger.info(
+        `Sent WhatsApp configuration prompt to ${userId} in ${context.chatJid}`
+      );
+      return true;
+    } catch (error) {
+      logger.error("Failed to send WhatsApp config prompt", { error });
+      return false;
+    }
   }
 
   /**
@@ -701,7 +751,11 @@ export class WhatsAppMessageHandler {
           `Using bound agentId: ${agentId} for chat ${context.chatJid}`
         );
       } else {
-        // Fall back to space-based resolution
+        // No binding - send configuration prompt
+        const sent = await this.sendWhatsAppConfigPrompt(context);
+        if (sent) return;
+
+        // Fallback if config prompt fails
         const space = resolveSpace({
           platform: "whatsapp",
           userId: context.senderE164 || context.senderJid,

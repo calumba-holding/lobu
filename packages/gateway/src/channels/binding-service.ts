@@ -11,6 +11,9 @@ export interface ChannelBinding {
   channelId: string;
   agentId: string;
   teamId?: string; // Optional workspace/team ID for multi-tenant platforms
+  configuredBy?: string; // userId of who configured this binding
+  configuredAt?: number; // When the binding was configured
+  wasAdmin?: boolean; // Whether the configurer was an admin at time of configuration
   createdAt: number;
 }
 
@@ -89,7 +92,8 @@ export class ChannelBindingService extends BaseRedisStore<StoredBinding> {
     agentId: string,
     platform: string,
     channelId: string,
-    teamId?: string
+    teamId?: string,
+    options?: { configuredBy?: string; wasAdmin?: boolean }
   ): Promise<void> {
     const key = this.buildBindingKey(platform, channelId, teamId);
 
@@ -110,6 +114,9 @@ export class ChannelBindingService extends BaseRedisStore<StoredBinding> {
       channelId,
       agentId,
       teamId,
+      configuredBy: options?.configuredBy,
+      configuredAt: Date.now(),
+      wasAdmin: options?.wasAdmin,
       createdAt: Date.now(),
     };
     await this.set(key, binding);

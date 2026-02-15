@@ -707,6 +707,33 @@ export class SlackEventHandlers {
   }
 
   /**
+   * Set the user agents store for agent configuration flow
+   */
+  setUserAgentsStore(
+    store: import("../auth/user-agents-store").UserAgentsStore
+  ): void {
+    this.messageHandler.setUserAgentsStore(store);
+  }
+
+  /**
+   * Set the agent metadata store for agent configuration flow
+   */
+  setAgentMetadataStore(
+    store: import("../auth/agent-metadata-store").AgentMetadataStore
+  ): void {
+    this.messageHandler.setAgentMetadataStore(store);
+  }
+
+  /**
+   * Set the admin status cache for permission checks
+   */
+  setAdminStatusCache(
+    cache: import("../auth/admin-status-cache").AdminStatusCache
+  ): void {
+    this.messageHandler.setAdminStatusCache(cache);
+  }
+
+  /**
    * Cleanup method for graceful shutdown
    */
   cleanup(): void {

@@ -1,10 +1,13 @@
 import { createLogger, DEFAULTS } from "@termosdev/core";
 import type { WebClient } from "@slack/web-api";
+import type { AdminStatusCache } from "../../auth/admin-status-cache";
+import type { AgentMetadataStore } from "../../auth/agent-metadata-store";
 import {
   type AgentSettingsStore,
   buildSettingsUrl,
   generateSettingsToken,
 } from "../../auth/settings";
+import type { UserAgentsStore } from "../../auth/user-agents-store";
 import type { ChannelBindingService } from "../../channels";
 import type {
   MessagePayload,
@@ -13,6 +16,7 @@ import type {
 import type { InteractionService } from "../../interactions";
 import type { ISessionManager, ThreadSession } from "../../session";
 import { generateSessionKey } from "../../session";
+import { generateAgentSelectorToken } from "../../routes/public/agent-selector-page";
 import type { TranscriptionService } from "../../services/transcription-service";
 import { resolveSpace } from "../../spaces";
 import type { MessageHandlerConfig } from "../config";
@@ -25,6 +29,9 @@ export class MessageHandler {
   private channelBindingService?: ChannelBindingService;
   private agentSettingsStore?: AgentSettingsStore;
   private transcriptionService?: TranscriptionService;
+  private userAgentsStore?: UserAgentsStore;
+  private agentMetadataStore?: AgentMetadataStore;
+  private adminStatusCache?: AdminStatusCache;
 
   constructor(
     private queueProducer: QueueProducer,
@@ -53,6 +60,27 @@ export class MessageHandler {
    */
   setTranscriptionService(service: TranscriptionService): void {
     this.transcriptionService = service;
+  }
+
+  /**
+   * Set user agents store for agent configuration flow
+   */
+  setUserAgentsStore(store: UserAgentsStore): void {
+    this.userAgentsStore = store;
+  }
+
+  /**
+   * Set agent metadata store for agent configuration flow
+   */
+  setAgentMetadataStore(store: AgentMetadataStore): void {
+    this.agentMetadataStore = store;
+  }
+
+  /**
+   * Set admin status cache for permission checks
+   */
+  setAdminStatusCache(cache: AdminStatusCache): void {
+    this.adminStatusCache = cache;
   }
 
   /**
@@ -330,7 +358,15 @@ export class MessageHandler {
           `Using bound agentId: ${agentId} for channel ${context.channelId}`
         );
       } else {
-        // Fall back to space-based resolution
+        // No binding - send configuration prompt
+        const sent = await this.sendConfigurationPrompt(
+          context,
+          client,
+          isDirectMessage
+        );
+        if (sent) return;
+
+        // Fallback if config prompt fails (e.g., stores not wired)
         const space = resolveSpace({
           platform: "slack",
           userId: context.userId,
@@ -339,7 +375,7 @@ export class MessageHandler {
         });
         agentId = space.agentId;
         logger.info(
-          `Resolved agentId: ${agentId} (isGroup: ${!isDirectMessage})`
+          `Fallback resolved agentId: ${agentId} (isGroup: ${!isDirectMessage})`
         );
       }
     } else {
@@ -607,6 +643,279 @@ export class MessageHandler {
 
       // Clean up session
       await this.sessionManager.deleteSession(sessionKey);
+    }
+  }
+
+  /**
+   * Send a configuration prompt to the user when no agent is bound to a channel.
+   * Returns true if the prompt was sent (caller should stop processing).
+   * Returns false if the prompt could not be sent (caller should fallback).
+   */
+  private async sendConfigurationPrompt(
+    context: SlackContext,
+    client: WebClient,
+    isDirectMessage: boolean
+  ): Promise<boolean> {
+    // Need all stores to send a config prompt
+    if (!this.userAgentsStore || !this.agentMetadataStore) {
+      return false;
+    }
+
+    try {
+      const publicGatewayUrl =
+        process.env.PUBLIC_GATEWAY_URL || "http://localhost:8080";
+
+      const token = generateAgentSelectorToken(
+        context.userId,
+        "slack",
+        context.channelId,
+        context.teamId
+      );
+
+      const configUrl = `${publicGatewayUrl}/agent-selector?token=${encodeURIComponent(token)}`;
+      const threadTs = context.threadTs || context.messageTs;
+
+      if (isDirectMessage) {
+        // DM - reply directly in the conversation
+        await client.chat.postMessage({
+          channel: context.channelId,
+          thread_ts: threadTs,
+          text: `Welcome! To get started, please configure which agent should handle this conversation.`,
+          blocks: [
+            {
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                text: `Welcome! To get started, please configure which agent should handle this conversation.`,
+              },
+            },
+            {
+              type: "actions",
+              elements: [
+                {
+                  type: "button",
+                  text: { type: "plain_text", text: "Configure Agent" },
+                  url: configUrl,
+                  style: "primary",
+                  action_id: "configure_agent",
+                },
+              ],
+            },
+          ],
+        });
+      } else {
+        // Group channel - check admin permissions
+        const canConfigure = await this.checkCanConfigure(
+          "slack",
+          context.channelId,
+          context.userId,
+          context.teamId
+        );
+
+        if (!canConfigure.allowed) {
+          await client.chat.postEphemeral({
+            channel: context.channelId,
+            user: context.userId,
+            text:
+              canConfigure.reason ||
+              "Only admins can configure the bot for this channel.",
+          });
+          return true;
+        }
+
+        // Slack chat.postMessage needs a channel ID. Open (or find) a DM channel first.
+        let dmChannelId: string | undefined;
+        try {
+          const opened = await client.conversations.open({
+            users: context.userId,
+            return_im: true,
+          });
+          dmChannelId = opened.channel?.id;
+        } catch (error) {
+          logger.warn("Failed to open DM channel for configuration link", {
+            error,
+            userId: context.userId,
+          });
+        }
+
+        if (dmChannelId) {
+          await client.chat.postMessage({
+            channel: dmChannelId,
+            text: `Please configure which agent should handle messages in <#${context.channelId}>`,
+            blocks: [
+              {
+                type: "section",
+                text: {
+                  type: "mrkdwn",
+                  text: `Please configure which agent should handle messages in <#${context.channelId}>`,
+                },
+              },
+              {
+                type: "actions",
+                elements: [
+                  {
+                    type: "button",
+                    text: { type: "plain_text", text: "Configure Agent" },
+                    url: configUrl,
+                    style: "primary",
+                    action_id: "configure_agent",
+                  },
+                ],
+              },
+            ],
+          });
+        } else {
+          // If DM can't be opened (scopes, Slack restrictions), send ephemeral with a button.
+          await client.chat.postEphemeral({
+            channel: context.channelId,
+            user: context.userId,
+            text: `Configure which agent should handle messages in <#${context.channelId}>: ${configUrl}`,
+            blocks: [
+              {
+                type: "section",
+                text: {
+                  type: "mrkdwn",
+                  text: `Configure which agent should handle messages in <#${context.channelId}>`,
+                },
+              },
+              {
+                type: "actions",
+                elements: [
+                  {
+                    type: "button",
+                    text: { type: "plain_text", text: "Configure Agent" },
+                    url: configUrl,
+                    style: "primary",
+                    action_id: "configure_agent",
+                  },
+                ],
+              },
+            ],
+          });
+          return true;
+        }
+
+        // Ephemeral reply in the channel
+        await client.chat.postEphemeral({
+          channel: context.channelId,
+          user: context.userId,
+          text: "I sent you a DM with a link to configure your agent for this channel.",
+        });
+      }
+
+      logger.info(
+        `Sent configuration prompt to user ${context.userId} for channel ${context.channelId}`
+      );
+      return true;
+    } catch (error) {
+      logger.error("Failed to send configuration prompt", { error });
+      return false;
+    }
+  }
+
+  /**
+   * Check if a user can configure an agent for a channel.
+   * DMs always allow. Groups check admin status with fallback to first-user.
+   */
+  private async checkCanConfigure(
+    platform: string,
+    channelId: string,
+    userId: string,
+    teamId?: string
+  ): Promise<{ allowed: boolean; reason?: string }> {
+    // Always allow in DMs
+    if (channelId.startsWith("D")) {
+      return { allowed: true };
+    }
+
+    // Check if already configured by someone else
+    if (this.channelBindingService) {
+      const existing = await this.channelBindingService.getBinding(
+        platform,
+        channelId,
+        teamId
+      );
+      if (existing?.configuredBy && existing.configuredBy !== userId) {
+        // Already configured by someone else - check if current user is admin
+        const isAdmin = await this.isSlackWorkspaceAdmin(userId);
+        if (isAdmin !== true) {
+          return {
+            allowed: false,
+            reason: `This channel is already configured by another user. Only workspace admins can reconfigure.`,
+          };
+        }
+      }
+    }
+
+    // Try admin check
+    const isAdmin = await this.isSlackWorkspaceAdmin(userId);
+
+    if (isAdmin === true) {
+      return { allowed: true };
+    }
+
+    if (isAdmin === false) {
+      return {
+        allowed: false,
+        reason:
+          "Only workspace admins can configure the bot for group channels.",
+      };
+    }
+
+    // isAdmin === null (API error) - fallback to first-user
+    if (this.channelBindingService) {
+      const existing = await this.channelBindingService.getBinding(
+        platform,
+        channelId,
+        teamId
+      );
+      if (!existing) {
+        logger.info(
+          `Admin check failed for ${userId}, using first-user fallback`
+        );
+        return { allowed: true };
+      }
+    }
+
+    return { allowed: true };
+  }
+
+  /**
+   * Check if a Slack user is a workspace admin.
+   * Returns true/false for definitive answer, null if API check failed.
+   */
+  private async isSlackWorkspaceAdmin(userId: string): Promise<boolean | null> {
+    // Check cache first
+    if (this.adminStatusCache) {
+      const cached = await this.adminStatusCache.getStatus(
+        "slack",
+        "workspace",
+        userId
+      );
+      if (cached !== null) return cached;
+    }
+
+    try {
+      const userInfo = await this.slackClient.users.info({ user: userId });
+      const isAdmin =
+        userInfo.user?.is_admin || userInfo.user?.is_owner || false;
+
+      // Cache the result
+      if (this.adminStatusCache) {
+        await this.adminStatusCache.setStatus(
+          "slack",
+          "workspace",
+          userId,
+          isAdmin
+        );
+      }
+
+      return isAdmin;
+    } catch (error) {
+      logger.warn(`Failed to check Slack admin status for ${userId}`, {
+        error,
+      });
+      return null;
     }
   }
 

@@ -5,11 +5,14 @@ import type {
   UserInteraction,
   UserSuggestion,
 } from "@termosdev/core";
+import type { AdminStatusCache } from "./auth/admin-status-cache";
+import type { AgentMetadataStore } from "./auth/agent-metadata-store";
 import type { ClaudeCredentialStore } from "./auth/claude/credential-store";
 import type { ClaudeModelPreferenceStore } from "./auth/claude/model-preference-store";
 import type { McpProxy } from "./auth/mcp/proxy";
 import type { ClaudeOAuthStateStore } from "./auth/oauth/state-store";
 import type { AgentSettingsStore } from "./auth/settings";
+import type { UserAgentsStore } from "./auth/user-agents-store";
 import type { ChannelBindingService } from "./channels";
 import type { WorkerGateway } from "./gateway";
 import type { AnthropicProxy } from "./infrastructure/model-provider";
@@ -44,6 +47,9 @@ export interface CoreServices {
   getAgentSettingsStore(): AgentSettingsStore;
   getChannelBindingService(): ChannelBindingService;
   getTranscriptionService(): TranscriptionService | undefined;
+  getUserAgentsStore(): UserAgentsStore;
+  getAgentMetadataStore(): AgentMetadataStore;
+  getAdminStatusCache(): AdminStatusCache;
 }
 
 // ============================================================================

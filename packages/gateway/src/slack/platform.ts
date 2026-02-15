@@ -208,6 +208,17 @@ export class SlackPlatform implements PlatformAdapter {
       logger.info("✅ Transcription service wired to Slack event handlers");
     }
 
+    // Wire up user agent configuration stores
+    const userAgentsStore = services.getUserAgentsStore();
+    const agentMetadataStore = services.getAgentMetadataStore();
+    const adminStatusCache = services.getAdminStatusCache();
+    this.eventHandlers.setUserAgentsStore(userAgentsStore);
+    this.eventHandlers.setAgentMetadataStore(agentMetadataStore);
+    this.eventHandlers.setAdminStatusCache(adminStatusCache);
+    logger.info(
+      "✅ User agents and admin status stores wired to Slack event handlers"
+    );
+
     logger.info("✅ Slack platform initialized");
   }
 
@@ -368,7 +379,12 @@ export class SlackPlatform implements PlatformAdapter {
       if (authResponse.ok) {
         botUserId = authResponse.user_id;
         // Use resolved team ID if not provided
-        if (!resolvedTeamId || resolvedTeamId === "unknown") {
+        // NOTE: "api" is used as a placeholder by /api/v1/messaging/send when no team is provided.
+        if (
+          !resolvedTeamId ||
+          resolvedTeamId === "unknown" ||
+          resolvedTeamId === "api"
+        ) {
           resolvedTeamId = authResponse.team_id;
         }
       }

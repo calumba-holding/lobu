@@ -348,6 +348,40 @@ function setupServer(
         "Channel binding routes enabled at :8080/api/v1/agents/{agentId}/channels/*"
       );
     }
+
+    // Agent management routes (separate from Agent API's /api/v1/agents)
+    {
+      const userAgentsStore = coreServices.getUserAgentsStore();
+      const agentMetadataStore = coreServices.getAgentMetadataStore();
+      const { createAgentRoutes } = require("../routes/public/agents");
+      const agentManagementRouter = createAgentRoutes({
+        userAgentsStore,
+        agentMetadataStore,
+        agentSettingsStore,
+        channelBindingService,
+      });
+      app.route("/api/v1/agent-management/agents", agentManagementRouter);
+      logger.info(
+        "Agent management routes enabled at :8080/api/v1/agent-management/agents/*"
+      );
+    }
+
+    // Agent selector page (/agent-selector)
+    {
+      const userAgentsStore = coreServices.getUserAgentsStore();
+      const agentMetadataStore = coreServices.getAgentMetadataStore();
+      const {
+        createAgentSelectorRoutes,
+      } = require("../routes/public/agent-selector-page");
+      const agentSelectorRouter = createAgentSelectorRoutes({
+        userAgentsStore,
+        agentMetadataStore,
+        agentSettingsStore,
+        channelBindingService,
+      });
+      app.route("", agentSelectorRouter);
+      logger.info("Agent selector page enabled at :8080/agent-selector");
+    }
   }
 
   // Auto-register any non-openapi routes so everything shows up in the schema

@@ -9,17 +9,21 @@ import {
   type AgentOptions as CoreAgentOptions,
 } from "@termosdev/core";
 import type { Bot } from "grammy";
+import type { AdminStatusCache } from "../../auth/admin-status-cache";
+import type { AgentMetadataStore } from "../../auth/agent-metadata-store";
 import {
   type AgentSettingsStore,
   buildSettingsUrl,
   generateSettingsToken,
 } from "../../auth/settings";
+import type { UserAgentsStore } from "../../auth/user-agents-store";
 import type { ChannelBindingService } from "../../channels";
 import type {
   MessagePayload,
   QueueProducer,
 } from "../../infrastructure/queue/queue-producer";
 import type { ISessionManager } from "../../session";
+import { generateAgentSelectorToken } from "../../routes/public/agent-selector-page";
 import { resolveSpace } from "../../spaces";
 import type { TelegramConfig } from "../config";
 import type { TelegramInteractionRenderer } from "../interactions";
@@ -53,6 +57,9 @@ export class TelegramMessageHandler {
   private channelBindingService?: ChannelBindingService;
   private agentSettingsStore?: AgentSettingsStore;
   private interactionRenderer?: TelegramInteractionRenderer;
+  private userAgentsStore?: UserAgentsStore;
+  private agentMetadataStore?: AgentMetadataStore;
+  private adminStatusCache?: AdminStatusCache;
   private botUsername?: string;
 
   constructor(
@@ -73,6 +80,18 @@ export class TelegramMessageHandler {
 
   setInteractionRenderer(renderer: TelegramInteractionRenderer): void {
     this.interactionRenderer = renderer;
+  }
+
+  setUserAgentsStore(store: UserAgentsStore): void {
+    this.userAgentsStore = store;
+  }
+
+  setAgentMetadataStore(store: AgentMetadataStore): void {
+    this.agentMetadataStore = store;
+  }
+
+  setAdminStatusCache(cache: AdminStatusCache): void {
+    this.adminStatusCache = cache;
   }
 
   /**
@@ -375,6 +394,11 @@ export class TelegramMessageHandler {
         agentId = binding.agentId;
         logger.info({ agentId, chatId }, "Using bound agentId");
       } else {
+        // No binding - send configuration prompt
+        const sent = await this.sendConfigurationPrompt(context);
+        if (sent) return;
+
+        // Fallback if config prompt fails
         const space = resolveSpace({
           platform: "telegram",
           userId,
@@ -382,6 +406,7 @@ export class TelegramMessageHandler {
           isGroup: context.isGroup,
         });
         agentId = space.agentId;
+        logger.info({ agentId }, "Fallback resolved agentId");
       }
     } else {
       const space = resolveSpace({
@@ -469,6 +494,136 @@ export class TelegramMessageHandler {
       },
       "Message enqueued"
     );
+  }
+
+  /**
+   * Send a configuration prompt when no agent is bound.
+   * Returns true if sent (caller should stop), false if failed (caller should fallback).
+   */
+  private async sendConfigurationPrompt(
+    context: TelegramContext
+  ): Promise<boolean> {
+    if (!this.userAgentsStore || !this.agentMetadataStore) {
+      return false;
+    }
+
+    try {
+      const publicGatewayUrl =
+        process.env.PUBLIC_GATEWAY_URL || "http://localhost:8080";
+      const userId = String(context.senderId);
+      const chatId = String(context.chatId);
+
+      // For groups, check admin permissions
+      if (context.isGroup) {
+        const canConfigure = await this.checkCanConfigureTelegram(
+          chatId,
+          userId
+        );
+        if (!canConfigure.allowed) {
+          await this.bot.api.sendMessage(
+            context.chatId,
+            canConfigure.reason ||
+              "Only group admins can configure the bot for this group."
+          );
+          return true;
+        }
+      }
+
+      const token = generateAgentSelectorToken(userId, "telegram", chatId);
+      const configUrl = `${publicGatewayUrl}/agent-selector?token=${encodeURIComponent(token)}`;
+
+      await this.bot.api.sendMessage(
+        context.chatId,
+        `Welcome! To get started, please configure which agent should handle messages here.\n\nConfigure: ${configUrl}`,
+        {
+          reply_markup: {
+            inline_keyboard: [
+              [
+                {
+                  text: "Configure Agent",
+                  url: configUrl,
+                },
+              ],
+            ],
+          },
+        }
+      );
+
+      logger.info(
+        { userId, chatId: context.chatId },
+        "Sent configuration prompt"
+      );
+      return true;
+    } catch (error) {
+      logger.error({ error }, "Failed to send configuration prompt");
+      return false;
+    }
+  }
+
+  /**
+   * Check if a Telegram user can configure a group.
+   */
+  private async checkCanConfigureTelegram(
+    chatId: string,
+    userId: string
+  ): Promise<{ allowed: boolean; reason?: string }> {
+    // Check cache
+    if (this.adminStatusCache) {
+      const cached = await this.adminStatusCache.getStatus(
+        "telegram",
+        chatId,
+        userId
+      );
+      if (cached !== null) {
+        return cached
+          ? { allowed: true }
+          : {
+              allowed: false,
+              reason: "Only group admins can configure the bot for this group.",
+            };
+      }
+    }
+
+    try {
+      const member = await this.bot.api.getChatMember(
+        Number(chatId),
+        Number(userId)
+      );
+      const isAdmin =
+        member.status === "creator" || member.status === "administrator";
+
+      // Cache result
+      if (this.adminStatusCache) {
+        await this.adminStatusCache.setStatus(
+          "telegram",
+          chatId,
+          userId,
+          isAdmin
+        );
+      }
+
+      if (isAdmin) {
+        return { allowed: true };
+      }
+
+      return {
+        allowed: false,
+        reason: "Only group admins can configure the bot for this group.",
+      };
+    } catch (error) {
+      logger.warn({ error, chatId, userId }, "Failed Telegram admin check");
+      // Fallback to first-user
+      if (this.channelBindingService) {
+        const existing = await this.channelBindingService.getBinding(
+          "telegram",
+          chatId
+        );
+        if (!existing) {
+          return { allowed: true };
+        }
+      }
+      return { allowed: true };
+    }
   }
 
   /**

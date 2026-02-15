@@ -126,6 +126,19 @@ export class TelegramPlatform implements PlatformAdapter {
       logger.info("Agent settings store wired to Telegram message handler");
     }
 
+    // Wire up user agent configuration stores
+    if (this.messageHandler) {
+      const userAgentsStore = services.getUserAgentsStore();
+      const agentMetadataStore = services.getAgentMetadataStore();
+      const adminStatusCache = services.getAdminStatusCache();
+      this.messageHandler.setUserAgentsStore(userAgentsStore);
+      this.messageHandler.setAgentMetadataStore(agentMetadataStore);
+      this.messageHandler.setAdminStatusCache(adminStatusCache);
+      logger.info(
+        "User agents and admin status stores wired to Telegram message handler"
+      );
+    }
+
     logger.info("Telegram platform initialized");
   }
 

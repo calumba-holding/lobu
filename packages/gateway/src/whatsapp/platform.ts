@@ -146,6 +146,15 @@ export class WhatsAppPlatform implements PlatformAdapter {
       logger.info("✅ Transcription service wired to WhatsApp message handler");
     }
 
+    // Wire up user agent configuration stores
+    if (this.messageHandler) {
+      const userAgentsStore = services.getUserAgentsStore();
+      const agentMetadataStore = services.getAgentMetadataStore();
+      this.messageHandler.setUserAgentsStore(userAgentsStore);
+      this.messageHandler.setAgentMetadataStore(agentMetadataStore);
+      logger.info("✅ User agents stores wired to WhatsApp message handler");
+    }
+
     logger.info("WhatsApp platform initialized");
   }
 
