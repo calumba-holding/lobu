@@ -273,9 +273,6 @@ redis:
       limits:
         memory: "256Mi"
         cpu: "200m"
-    # Label for network policy
-    podLabels:
-      app.kubernetes.io/component: redis
   # Connection URL used by gateway: redis://termos-redis-master:6379
 
 # Grafana Loki datasource for log aggregation
