@@ -4,11 +4,14 @@
 
 ## Interfaces:
 
-1. **Slack**: Supports single bot to have different OpenClaws for each channel and DM. [Join the community Slack](https://join.slack.com/t/peerbot/shared_invite/zt-391o8tyw2-iyupjTG1xHIz9Og8C7JOnw) to try it!
+1. **Slack**: Supports single bot to have different OpenClaws for each channel and DM.
+[Join the community Slack](https://join.slack.com/t/peerbot/shared_invite/zt-391o8tyw2-iyupjTG1xHIz9Og8C7JOnw) to try it!
 
-2. **REST API**: Allows you to programmatically create OpenClaw instances to build your own applications. [See the API Docs](https://community.lobu.ai/api/docs)
+3. **REST API**: Allows you to programmatically create OpenClaw instances to build your own applications.
+[See the API Docs](https://community.lobu.ai/api/docs)
 
-3. **Telegram**: Lets you create personal AI assistants. Try it on [t.me/lobuaibot](t.me/lobuaibot) (soon to be ready). 
+6. **Telegram**: Lets you create personal AI assistants.
+Try it on [t.me/lobuaibot](t.me/lobuaibot). 
 
 ## Installation
 
@@ -25,10 +28,9 @@ make build-worker
 
 # Start gateway + redis
 docker compose up -d
-docker compose logs -f gateway
 ```
 
-Security model (Docker Compose): workers run on an internal Docker network with **no direct internet access**; outbound traffic goes through the gateway's HTTP proxy with domain filtering. See `SECURITY.md#docker-compose`.
+Each agent runs on a container in your Docker deamon. Workers run on an internal Docker network with **no direct internet access**; outbound traffic goes through the gateway's HTTP proxy with domain filtering. See `SECURITY.md#docker-compose`.
 
 ### 2) Kubernetes (production)
 
@@ -41,13 +43,7 @@ cp .env.example .env
 make deploy
 ```
 
-Security model (Kubernetes): workers run as isolated pods (optionally with stronger runtimes like **gVisor** on GCP or **Kata Containers** / microVMs where available), are not externally reachable, and route egress through the gateway proxy. See `SECURITY.md#kubernetes`.
-
-## Motivation
-
-OpenClaw is great at the "magic" part: the embedded agent runtime (tools, sessions, skills, and the agent loop). Securing a local, always-on gateway that can execute code and install third-party skills is hard.
-
-Lobu keeps the OpenClaw runtime experience, but moves execution into **sandboxed, disposable workers** with **centralized secret management** and **network egress control**.
+Security model (Kubernetes): workers run as isolated pods (optionally with stronger runtime **gVisor** or **Kata Containers** / microVMs (where available), are not externally reachable, and route egress through the gateway proxy. See `SECURITY.md#kubernetes`.
 
 ## How It Works
 
@@ -68,35 +64,20 @@ flowchart LR
 ```
 
 **Key concepts**
-- **Session = workspace**: each Slack thread (and other contexts) maps to an isolated workspace with its own lifecycle.
 - **Multi-tenant by default**: different channels/DMs can run different models, tools, skills, Nix environments, and credentials safely.
 - **Agent abstraction**: per-context configuration controls runtime/model/tools so the bot behaves differently in different places.
 - **Gateway as single egress point**: workers route outbound traffic through the gateway, which enforces domain policy.
-
-More details: `ARCHITECTURE.md`
-
-## Differences Vs OpenClaw
-
-Lobu is **built on OpenClaw's embedded runtime**, but the control plane is designed for multi-tenant operation and stronger isolation.
-
-- **Claude Code runtime (subscriptions)**: Lobu can run **Claude Code CLI** as a worker runtime, letting teams use Claude subscriptions and OAuth flows rather than managing raw API keys everywhere.
-- **Server-side, multi-tenant gateway**: OpenClaw is typically "one gateway per machine / workspace". Lobu treats each context (channel, thread, DM) as a tenant-scoped environment with separated workspaces and scoped secrets.
-- **Security-first execution model**: Lobu runs execution in sandboxed workers and keeps the gateway as the only component that can talk to external services directly.
-- **Gateway scope**: OpenClaw's gateway implementation is substantial (as of commit `80abb5a`, `src/gateway` is ~49k TS/TSX LoC). Lobu's gateway is architecturally different: it focuses on ingestion, policy, and orchestration, while work happens in workers.
-- **Pi/skills ecosystem**: OpenClaw's harness is powered by pi-mono (pi-agent-core) and a growing set of CLIs. Lobu aims to make those capabilities safe to use in sandboxes via **skills** plus reproducible tooling via **Nix**.
-
-OpenClaw references:
-- Gateway: https://docs.openclaw.ai/cli/gateway
-- Agent loop / embedded harness: https://docs.openclaw.ai/concepts/agent-loop
-- pi-mono (harness + CLIs): https://github.com/badlogic/pi-mono
 
 ## Yet Another OpenClaw Copy?
 
 I built and exited a B2B SaaS business (acquired by LiveRamp) and then started working on this full-time. Follow along: https://x.com/bu7emba
 
-This project started in **July 2025** and was first published under **peerbot.ai**, initially focused on Claude Code. Peter's OpenClaw is more interesting long-term because it has a better harness (built on pi-mono) and an army of CLIs that make agents actually useful.
+This project started in **July 2025** and was first published under [peerbot.ai](https://peeerbot.ai), initially focused on Claude Code. After OpenClaw is released, I added its runtime support so all OpenClaw skills can be used but Lobu has its own gateway system that replaces OpenClaw gateway. Here are the main differences:
 
-Lobu exists because the runtime is great, but enterprise-grade isolation, secrets, and egress control are non-trivial. The plan is to monetize via enterprise support so the project stays sustainable.
+1. Lobu OpenClaw workers **scale to zero** unlike Openclaw where you need to keep your computer open 7/24 even though you're not talking to your agent.
+2. A single bot (Telegram / Slack user) can use different environment based on DMs and channels. That enables you to have a single Lobu instead of multiple OpenClaw instances.
+3. Lobu supports Claude Code SDK for Claude models so Anthropic doesn't block your account.
+4. Agents are strictly sandboxed, they can't talk to internet, or change gateway's environment. All access goes through the gateway and you configure where you want the agent to have access explicitly.
 
 ## Security And Privacy
 
@@ -105,12 +86,6 @@ Lobu exists because the runtime is great, but enterprise-grade isolation, secret
 - **Defense-in-depth on Kubernetes**: NetworkPolicies, RBAC, resource limits/quotas, and optional gVisor/Kata. (`SECURITY.md#kubernetes`)
 - **Nix environments**: per-session environments can be activated using Nix (flake/packages) inside workers for reproducible tooling without baking everything into images. (`ARCHITECTURE.md#nix-environments`)
 - **Skills**: curated skills support is available; treat skills as executable capability and apply policy accordingly. (`SECURITY.md#skills-and-policy`)
-
-## History
-
-- **July 2025**: development started under **peerbot.ai** (Claude Code-first)
-- **Renamed**: the project was later renamed to **Lobu**
-- **Later**: OpenClaw runtime was added as an alternative runtime
 
 ## License
 
