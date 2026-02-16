@@ -5,12 +5,15 @@
 ## Interfaces:
 
 1. **Slack**: Supports single bot to have different OpenClaws for each channel and DM.
+
 [Join the community Slack](https://join.slack.com/t/peerbot/shared_invite/zt-391o8tyw2-iyupjTG1xHIz9Og8C7JOnw) to try it!
 
 3. **REST API**: Allows you to programmatically create OpenClaw instances to build your own applications.
+
 [See the API Docs](https://community.lobu.ai/api/docs)
 
 6. **Telegram**: Lets you create personal AI assistants.
+   
 Try it on [t.me/lobuaibot](t.me/lobuaibot). 
 
 ## Installation
