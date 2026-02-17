@@ -83,8 +83,8 @@ slack:
 
 # WhatsApp configuration
 whatsapp:
-  enabled: true
-  selfChat: true  # Allow self-chat mode for testing
+  enabled: false
+  selfChat: true
   allowGroups: true
   requireMention: true
 
