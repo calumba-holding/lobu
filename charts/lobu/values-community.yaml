@@ -61,6 +61,7 @@ ingress:
   className: traefik
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.middlewares: lobu-lobu-redirect-https@kubernetescrd
   hosts:
     - host: community.lobu.ai
       paths:
