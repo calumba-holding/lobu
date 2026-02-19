@@ -20,8 +20,8 @@ import {
 } from "../platform/platform-factory";
 import type { ResponseRenderer } from "../platform/response-renderer";
 import { TelegramAuthAdapter } from "./auth-adapter";
-import { TELEGRAM_WEBHOOK_PATH, shouldUseWebhook } from "./config";
 import type { TelegramConfig } from "./config";
+import { shouldUseWebhook, TELEGRAM_WEBHOOK_PATH } from "./config";
 import { TelegramMessageHandler } from "./events/message-handler";
 import { TelegramInteractionRenderer } from "./interactions";
 import { TelegramResponseRenderer } from "./response-renderer";
@@ -190,6 +190,15 @@ export class TelegramPlatform implements PlatformAdapter {
           "Failed to set Telegram webhook, falling back to long polling"
         );
         this.useWebhook = false;
+        // Delete any existing webhook before starting long polling
+        try {
+          await this.bot.api.deleteWebhook();
+        } catch (e) {
+          logger.debug(
+            { error: String(e) },
+            "Could not delete webhook before fallback polling"
+          );
+        }
         this.bot.start({
           onStart: () => {
             this.running = true;
@@ -200,7 +209,15 @@ export class TelegramPlatform implements PlatformAdapter {
         });
       }
     } else {
-      // Start long polling (non-blocking)
+      // Delete any existing webhook before starting long polling
+      try {
+        await this.bot.api.deleteWebhook();
+      } catch (e) {
+        logger.debug(
+          { error: String(e) },
+          "Could not delete webhook before polling"
+        );
+      }
       this.bot.start({
         onStart: () => {
           this.running = true;

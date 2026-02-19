@@ -2,9 +2,9 @@
  * Telegram webhook route using Grammy's built-in Hono adapter.
  */
 
-import { Hono } from "hono";
 import type { Bot } from "grammy";
 import { webhookCallback } from "grammy";
+import { Hono } from "hono";
 
 /**
  * Create a Hono router that handles Telegram webhook updates.
