@@ -709,14 +709,11 @@ export class K8sDeploymentManager extends BaseDeploymentManager {
       );
 
       if ((deployment as any).body?.spec?.replicas !== replicas) {
-        // Use a proper JSON patch for scaling
-        const patch = [
-          {
-            op: "replace",
-            path: "/spec/replicas",
-            value: replicas,
+        const patch = {
+          spec: {
+            replicas: replicas,
           },
-        ];
+        };
 
         await this.appsV1Api.patchNamespacedDeployment(
           deploymentName,
