@@ -289,111 +289,208 @@ export async function initCommand(
     }
   }
 
-  const { slackAppOption } = await inquirer.prompt([
+  // Platform selection
+  const { selectedPlatforms } = await inquirer.prompt([
     {
-      type: "list",
-      name: "slackAppOption",
-      message: "Slack app setup?",
+      type: "checkbox",
+      name: "selectedPlatforms",
+      message: "Which messaging platform(s) do you want to configure?",
       choices: [
         {
-          name: "Create a new Slack app using the Lobu manifest",
-          value: "create",
+          name: "Telegram (quickest — 1 token from @BotFather)",
+          value: "telegram",
         },
         {
-          name: "Use an existing Slack app",
-          value: "existing",
+          name: "Slack (requires app creation + 3 credentials)",
+          value: "slack",
+        },
+        {
+          name: "API only (no chat platform, use REST endpoints)",
+          value: "api",
         },
       ],
-      default: "create",
+      validate: (input: string[]) => {
+        if (input.length === 0) {
+          return "Select at least one platform";
+        }
+        return true;
+      },
     },
   ]);
 
-  if (slackAppOption === "create") {
-    const manifestUrl = await getSlackManifestUrl();
-    console.log(chalk.bold("\n🔗 Create your Slack app"));
-    console.log(
-      `Open this link to create the app with the recommended manifest:\n${chalk.cyan(
-        chalk.underline(manifestUrl)
-      )}\n`
-    );
-    await inquirer.prompt([
+  // Telegram setup
+  let telegramBotToken = "";
+  let telegramAllowFrom = "";
+  if (selectedPlatforms.includes("telegram")) {
+    console.log(chalk.bold("\n📱 Telegram Setup"));
+    console.log(chalk.dim("  Step 1: Open Telegram and message @BotFather"));
+    console.log(chalk.dim("  Step 2: Send /newbot and follow the prompts"));
+    console.log(chalk.dim("  Step 3: Copy the bot token\n"));
+
+    const telegramAnswers = await inquirer.prompt([
       {
-        type: "confirm",
-        name: "slackAppCreated",
+        type: "password",
+        name: "telegramBotToken",
+        message: "Telegram Bot Token?",
+        validate: (input: string) => {
+          if (!input) {
+            return "Please enter your Telegram bot token";
+          }
+          if (!/^\d+:[A-Za-z0-9_-]+$/.test(input)) {
+            return "Invalid token format. Expected: digits:alphanumeric (e.g., 123456789:ABCdefGHI...)";
+          }
+          return true;
+        },
+      },
+    ]);
+    telegramBotToken = telegramAnswers.telegramBotToken;
+
+    // Validate token via Telegram API
+    const spinner = ora("Verifying Telegram bot token...").start();
+    try {
+      const response = await fetch(
+        `https://api.telegram.org/bot${telegramBotToken}/getMe`
+      );
+      const data = (await response.json()) as {
+        ok: boolean;
+        result?: { username?: string };
+      };
+      if (data.ok && data.result?.username) {
+        spinner.succeed(`Bot verified: @${data.result.username}`);
+      } else {
+        spinner.warn(
+          "Could not verify bot token — check it after setup if needed"
+        );
+      }
+    } catch {
+      spinner.warn("Could not reach Telegram API — token will be saved as-is");
+    }
+
+    const { telegramAllowFromInput } = await inquirer.prompt([
+      {
+        type: "input",
+        name: "telegramAllowFromInput",
         message:
-          "Press enter after clicking “Create” and returning here to continue.",
-        default: true,
+          "Restrict to specific Telegram user IDs? (comma-separated, leave empty to allow all)",
+        default: "",
+      },
+    ]);
+    telegramAllowFrom = telegramAllowFromInput;
+  }
+
+  // Slack setup
+  let credentialAnswers = {
+    slackSigningSecret: "",
+    slackAppToken: "",
+    slackBotToken: "",
+  };
+  if (selectedPlatforms.includes("slack")) {
+    const { slackAppOption } = await inquirer.prompt([
+      {
+        type: "list",
+        name: "slackAppOption",
+        message: "Slack app setup?",
+        choices: [
+          {
+            name: "Create a new Slack app using the Lobu manifest",
+            value: "create",
+          },
+          {
+            name: "Use an existing Slack app",
+            value: "existing",
+          },
+        ],
+        default: "create",
+      },
+    ]);
+
+    if (slackAppOption === "create") {
+      const manifestUrl = await getSlackManifestUrl();
+      console.log(chalk.bold("\n🔗 Create your Slack app"));
+      console.log(
+        `Open this link to create the app with the recommended manifest:\n${chalk.cyan(
+          chalk.underline(manifestUrl)
+        )}\n`
+      );
+      await inquirer.prompt([
+        {
+          type: "confirm",
+          name: "slackAppCreated",
+          message:
+            "Press enter after clicking \u201CCreate\u201D and returning here to continue.",
+          default: true,
+        },
+      ]);
+    }
+
+    const { slackAppId } = await inquirer.prompt([
+      {
+        type: "input",
+        name: "slackAppId",
+        message: "Slack App ID (optional)?",
+        default: "",
+      },
+    ]);
+
+    const trimmedAppId = slackAppId.trim();
+    const appIdForLinks = trimmedAppId !== "" ? trimmedAppId : "<YOUR_APP_ID>";
+    const appDashboardUrl = `https://api.slack.com/apps/${appIdForLinks}`;
+    const oauthUrl = `${appDashboardUrl}/oauth`;
+
+    console.log(chalk.bold("\n🔐 Collect your Slack credentials"));
+    console.log(
+      `Signing Secret & App-Level Tokens: ${chalk.cyan(
+        chalk.underline(appDashboardUrl)
+      )}`
+    );
+    console.log(
+      `OAuth Tokens (Bot Token): ${chalk.cyan(chalk.underline(oauthUrl))}, you need to install the app first.\n`
+    );
+    if (trimmedAppId === "") {
+      console.log(
+        chalk.dim(
+          "Replace <YOUR_APP_ID> in the links above once you locate your Slack app ID."
+        )
+      );
+      console.log();
+    }
+
+    credentialAnswers = await inquirer.prompt([
+      {
+        type: "password",
+        name: "slackSigningSecret",
+        message: "Slack Signing Secret?",
+        validate: (input: string) => {
+          if (!input) {
+            return "Please enter your Slack signing secret.";
+          }
+          return true;
+        },
+      },
+      {
+        type: "password",
+        name: "slackAppToken",
+        message: "Slack App Token (xapp-...)?",
+        validate: (input: string) => {
+          if (!input || !input.startsWith("xapp-")) {
+            return "Please enter a valid Slack app token starting with xapp-";
+          }
+          return true;
+        },
+      },
+      {
+        type: "password",
+        name: "slackBotToken",
+        message: "Slack Bot Token (xoxb-...)?",
+        validate: (input: string) => {
+          if (!input || !input.startsWith("xoxb-")) {
+            return "Please enter a valid Slack bot token starting with xoxb-";
+          }
+          return true;
+        },
       },
     ]);
   }
-
-  const { slackAppId } = await inquirer.prompt([
-    {
-      type: "input",
-      name: "slackAppId",
-      message: "Slack App ID (optional)?",
-      default: "",
-    },
-  ]);
-
-  const trimmedAppId = slackAppId.trim();
-  const appIdForLinks = trimmedAppId !== "" ? trimmedAppId : "<YOUR_APP_ID>";
-  const appDashboardUrl = `https://api.slack.com/apps/${appIdForLinks}`;
-  const oauthUrl = `${appDashboardUrl}/oauth`;
-
-  console.log(chalk.bold("\n🔐 Collect your Slack credentials"));
-  console.log(
-    `Signing Secret & App-Level Tokens: ${chalk.cyan(
-      chalk.underline(appDashboardUrl)
-    )}`
-  );
-  console.log(
-    `OAuth Tokens (Bot Token): ${chalk.cyan(chalk.underline(oauthUrl))}, you need to install the app first.\n`
-  );
-  if (trimmedAppId === "") {
-    console.log(
-      chalk.dim(
-        "Replace <YOUR_APP_ID> in the links above once you locate your Slack app ID."
-      )
-    );
-    console.log();
-  }
-
-  const credentialAnswers = await inquirer.prompt([
-    {
-      type: "password",
-      name: "slackSigningSecret",
-      message: "Slack Signing Secret?",
-      validate: (input: string) => {
-        if (!input) {
-          return "Please enter your Slack signing secret.";
-        }
-        return true;
-      },
-    },
-    {
-      type: "password",
-      name: "slackAppToken",
-      message: "Slack App Token (xapp-...)?",
-      validate: (input: string) => {
-        if (!input || !input.startsWith("xapp-")) {
-          return "Please enter a valid Slack app token starting with xapp-";
-        }
-        return true;
-      },
-    },
-    {
-      type: "password",
-      name: "slackBotToken",
-      message: "Slack Bot Token (xoxb-...)?",
-      validate: (input: string) => {
-        if (!input || !input.startsWith("xoxb-")) {
-          return "Please enter a valid Slack bot token starting with xoxb-";
-        }
-        return true;
-      },
-    },
-  ]);
 
   const { aiKeyStrategy } = await inquirer.prompt([
     {
@@ -426,11 +523,10 @@ export async function initCommand(
     anthropicApiKey = sharedAnthropicApiKey;
   }
   if (anthropicApiKey === "") {
-    console.log(
-      chalk.dim(
-        "\nℹ With no shared API key, teammates authorize Claude/OpenAI from the Slack Home tab on first use.\n"
-      )
-    );
+    const authHint = selectedPlatforms.includes("slack")
+      ? "teammates authorize Claude/OpenAI from the Slack Home tab on first use"
+      : "users authorize Claude/OpenAI on first use";
+    console.log(chalk.dim(`\nℹ With no shared API key, ${authHint}.\n`));
   }
 
   // Worker network access configuration
@@ -553,12 +649,14 @@ export async function initCommand(
 
   const answers = {
     ...baseAnswers,
-    slackAppId: trimmedAppId,
     ...credentialAnswers,
     anthropicApiKey,
     publicUrl,
     encryptionKey,
     selectedMcpServers,
+    selectedPlatforms,
+    telegramBotToken,
+    telegramAllowFrom,
     allowedDomains,
     disallowedDomains,
   };
@@ -613,6 +711,11 @@ export async function initCommand(
       SLACK_SIGNING_SECRET: answers.slackSigningSecret,
       SLACK_BOT_TOKEN: answers.slackBotToken,
       SLACK_APP_TOKEN: answers.slackAppToken,
+      TELEGRAM_ENABLED: answers.selectedPlatforms.includes("telegram")
+        ? "true"
+        : "false",
+      TELEGRAM_BOT_TOKEN: answers.telegramBotToken,
+      TELEGRAM_ALLOW_FROM: answers.telegramAllowFrom,
       ENCRYPTION_KEY: answers.encryptionKey,
       ANTHROPIC_API_KEY: answers.anthropicApiKey || "",
       PUBLIC_GATEWAY_URL: answers.publicUrl || "http://localhost:8080",
@@ -687,6 +790,7 @@ export async function initCommand(
       gatewayPort: "8080",
       dockerfilePath: "./Dockerfile.worker",
       hasMcpServers: answers.selectedMcpServers.length > 0,
+      platforms: answers.selectedPlatforms,
     });
     await writeFile(join(projectDir, composeFilename), composeContent);
 
@@ -828,8 +932,10 @@ function generateDockerCompose(options: {
   gatewayPort: string;
   dockerfilePath: string;
   hasMcpServers: boolean;
+  platforms: string[];
 }): string {
-  const { projectName, gatewayPort, dockerfilePath, hasMcpServers } = options;
+  const { projectName, gatewayPort, dockerfilePath, hasMcpServers, platforms } =
+    options;
   const workerImage = `${projectName}-worker:latest`;
   const gatewayImage = `buremba/lobu-gateway:latest`;
 
@@ -842,6 +948,20 @@ function generateDockerCompose(options: {
     ? `
       MCP_CONFIG_URL: file:///app/.lobu/mcp.config.json
       ENCRYPTION_KEY: \${ENCRYPTION_KEY}`
+    : "";
+
+  const telegramEnvVars = platforms.includes("telegram")
+    ? `
+      TELEGRAM_ENABLED: \${TELEGRAM_ENABLED:-false}
+      TELEGRAM_BOT_TOKEN: \${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_ALLOW_FROM: \${TELEGRAM_ALLOW_FROM:-}`
+    : "";
+
+  const slackEnvVars = platforms.includes("slack")
+    ? `
+      SLACK_BOT_TOKEN: \${SLACK_BOT_TOKEN}
+      SLACK_APP_TOKEN: \${SLACK_APP_TOKEN}
+      SLACK_SIGNING_SECRET: \${SLACK_SIGNING_SECRET}`
     : "";
 
   return `# Generated by @lobu/cli
@@ -870,10 +990,7 @@ services:
     environment:
       DEPLOYMENT_MODE: docker
       WORKER_IMAGE: ${workerImage}
-      QUEUE_URL: redis://redis:6379/0
-      SLACK_BOT_TOKEN: \${SLACK_BOT_TOKEN}
-      SLACK_APP_TOKEN: \${SLACK_APP_TOKEN}
-      SLACK_SIGNING_SECRET: \${SLACK_SIGNING_SECRET}
+      QUEUE_URL: redis://redis:6379/0${slackEnvVars}${telegramEnvVars}
       PUBLIC_GATEWAY_URL: \${PUBLIC_GATEWAY_URL:-}
       NODE_ENV: production
       ANTHROPIC_API_KEY: \${ANTHROPIC_API_KEY:-}
