@@ -5,13 +5,16 @@
  */
 
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
+import { createLogger } from "@lobu/core";
 import type { AgentSettings, AgentSettingsStore } from "../../auth/settings";
 import { verifySettingsToken } from "../../auth/settings/token-service";
+import type { IMessageQueue } from "../../infrastructure/queue";
 import type { GitHubAppAuth } from "../../modules/git-filesystem/github-app";
 
 const TAG = "Agents";
 const ErrorResponse = z.object({ error: z.string() });
 const TokenQuery = z.object({ token: z.string() });
+const logger = createLogger("agent-config-routes");
 
 // --- Route Definitions ---
 
@@ -115,6 +118,17 @@ const updateConfigRoute = createRoute({
                 ),
               })
               .optional(),
+            pluginsConfig: z
+              .object({
+                plugins: z.array(
+                  z.object({
+                    source: z.string(),
+                    slot: z.enum(["tool", "provider"]),
+                    enabled: z.boolean().optional(),
+                  })
+                ),
+              })
+              .optional(),
             verboseLogging: z.boolean().optional(),
             githubUser: z
               .null()
@@ -159,6 +173,7 @@ export interface AgentConfigRoutesConfig {
   githubAuth?: GitHubAppAuth;
   githubAppInstallUrl?: string;
   githubOAuthClientId?: string;
+  queue?: IMessageQueue;
 }
 
 export function createAgentConfigRoutes(
@@ -264,6 +279,8 @@ export function createAgentConfigRoutes(
     if (!payload) return c.json({ error: "Unauthorized" }, 401);
 
     try {
+      const existingSettings =
+        await config.agentSettingsStore.getSettings(agentId);
       const body = c.req.valid("json");
 
       const updates: Partial<AgentSettings> = {};
@@ -293,6 +310,21 @@ export function createAgentConfigRoutes(
 
       if (Object.keys(updates).length > 0) {
         await config.agentSettingsStore.updateSettings(agentId, updates);
+      }
+
+      if (body.mcpServers && config.queue && payload.sourceContext) {
+        await maybeSendMcpInstalledNotifications({
+          queue: config.queue,
+          agentSettingsStore: config.agentSettingsStore,
+          agentId,
+          userId: payload.userId,
+          platform: payload.sourceContext.platform || payload.platform,
+          channelId: payload.sourceContext.channelId,
+          conversationId: payload.sourceContext.conversationId,
+          teamId: payload.sourceContext.teamId,
+          previousSettings: existingSettings,
+          nextMcpServers: updates.mcpServers || existingSettings?.mcpServers,
+        });
       }
 
       return c.json({ success: true, agentId });
@@ -456,9 +488,115 @@ function validateSettings(
     settings.skillsConfig = input.skillsConfig;
   }
 
+  if (input.pluginsConfig) {
+    settings.pluginsConfig = {
+      plugins: input.pluginsConfig.plugins
+        .filter((p) => typeof p.source === "string" && p.source.trim())
+        .map((p) => ({
+          source: p.source.trim(),
+          slot: p.slot,
+          enabled: p.enabled ?? true,
+        })),
+    };
+  }
+
   if (typeof input.verboseLogging === "boolean") {
     settings.verboseLogging = input.verboseLogging;
   }
 
   return settings;
+}
+
+function getEnabledHttpMcpIds(
+  mcpServers: AgentSettings["mcpServers"] | undefined
+): Set<string> {
+  const ids = new Set<string>();
+  for (const [id, config] of Object.entries(mcpServers || {})) {
+    if (!config || typeof config !== "object") continue;
+    const cfg = config as Record<string, unknown>;
+    if (cfg.enabled === false) continue;
+    if (typeof cfg.url !== "string") continue;
+    const url = cfg.url.trim();
+    if (!url.startsWith("http://") && !url.startsWith("https://")) continue;
+    ids.add(id);
+  }
+  return ids;
+}
+
+async function maybeSendMcpInstalledNotifications(options: {
+  queue: IMessageQueue;
+  agentSettingsStore: AgentSettingsStore;
+  agentId: string;
+  userId: string;
+  platform: string;
+  channelId: string;
+  conversationId: string;
+  teamId?: string;
+  previousSettings: AgentSettings | null;
+  nextMcpServers: AgentSettings["mcpServers"] | undefined;
+}): Promise<void> {
+  const {
+    queue,
+    agentSettingsStore,
+    agentId,
+    userId,
+    platform,
+    channelId,
+    conversationId,
+    teamId,
+    previousSettings,
+    nextMcpServers,
+  } = options;
+
+  const previousMcpIds = getEnabledHttpMcpIds(previousSettings?.mcpServers);
+  const previousNotified = { ...(previousSettings?.mcpInstallNotified || {}) };
+  const currentMcpIds = getEnabledHttpMcpIds(nextMcpServers);
+
+  const candidatesToNotify = Array.from(currentMcpIds).filter(
+    (mcpId) => !previousMcpIds.has(mcpId) && !previousNotified[mcpId]
+  );
+
+  if (candidatesToNotify.length === 0) return;
+
+  await queue.createQueue("thread_response");
+
+  const notifiedUpdates: Record<string, number> = { ...previousNotified };
+  for (const mcpId of candidatesToNotify) {
+    const messageId = `mcp-installed:${agentId}:${mcpId}:${Date.now()}`;
+    try {
+      await queue.send("thread_response", {
+        messageId,
+        channelId,
+        conversationId,
+        userId,
+        teamId: teamId || "no-team",
+        platform,
+        content: `MCP "${mcpId}" is installed and ready. You can use it in this chat on your next message.`,
+        timestamp: Date.now(),
+        ephemeral: true,
+      });
+      notifiedUpdates[mcpId] = Date.now();
+      logger.info("Sent MCP installed notification", {
+        agentId,
+        mcpId,
+        channelId,
+        conversationId,
+      });
+    } catch (error) {
+      logger.warn("Failed to send MCP installed notification", {
+        agentId,
+        mcpId,
+        error,
+      });
+    }
+  }
+
+  const changed =
+    Object.keys(notifiedUpdates).length !==
+    Object.keys(previousNotified).length;
+  if (changed) {
+    await agentSettingsStore.updateSettings(agentId, {
+      mcpInstallNotified: notifiedUpdates,
+    });
+  }
 }

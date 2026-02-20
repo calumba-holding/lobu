@@ -4,6 +4,7 @@ import {
   type McpServerConfig,
   type NetworkConfig,
   type NixConfig,
+  type PluginsConfig,
   type SkillsConfig,
   type ToolsConfig,
 } from "@lobu/core";
@@ -24,6 +25,8 @@ export interface AgentSettings {
   nixConfig?: NixConfig;
   /** Additional MCP servers */
   mcpServers?: Record<string, McpServerConfig>;
+  /** Internal marker: MCP IDs already acknowledged to the user in chat */
+  mcpInstallNotified?: Record<string, number>;
   /** Environment variables passed to worker (KEY=VALUE pairs) */
   envVars?: Record<string, string>;
   /** Workspace identity/instruction files (markdown content) */
@@ -36,6 +39,8 @@ export interface AgentSettings {
   skillsConfig?: SkillsConfig;
   /** Tool permission configuration - allowed/denied tools */
   toolsConfig?: ToolsConfig;
+  /** OpenClaw plugin configuration */
+  pluginsConfig?: PluginsConfig;
   /** Enable verbose logging (show tool calls, reasoning, etc.) */
   verboseLogging?: boolean;
   /** Connected GitHub user info */

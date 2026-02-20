@@ -35,6 +35,17 @@ export interface PrefillMcpServer {
 }
 
 /**
+ * Source message context where settings link was requested.
+ * Used to send follow-up notifications back to the same conversation.
+ */
+export interface SettingsSourceContext {
+  conversationId: string;
+  channelId: string;
+  teamId?: string;
+  platform?: string;
+}
+
+/**
  * Payload stored in the settings token
  */
 export interface SettingsTokenPayload {
@@ -50,6 +61,10 @@ export interface SettingsTokenPayload {
   prefillSkills?: PrefillSkill[];
   /** Optional MCP servers to pre-fill (user confirms to enable) */
   prefillMcpServers?: PrefillMcpServer[];
+  /** Optional Nix packages to pre-fill in the system packages section */
+  prefillNixPackages?: string[];
+  /** Optional source context for post-install notifications */
+  sourceContext?: SettingsSourceContext;
 }
 
 /**
@@ -71,6 +86,10 @@ export interface SettingsTokenOptions {
   prefillSkills?: PrefillSkill[];
   /** Optional MCP servers to pre-fill (user confirms to enable) */
   prefillMcpServers?: PrefillMcpServer[];
+  /** Optional Nix packages to pre-fill in system packages section */
+  prefillNixPackages?: string[];
+  /** Optional source context for post-install notifications */
+  sourceContext?: SettingsSourceContext;
 }
 
 /**
@@ -108,6 +127,10 @@ export function generateSettingsToken(
     ...(opts.prefillMcpServers?.length && {
       prefillMcpServers: opts.prefillMcpServers,
     }),
+    ...(opts.prefillNixPackages?.length && {
+      prefillNixPackages: opts.prefillNixPackages,
+    }),
+    ...(opts.sourceContext && { sourceContext: opts.sourceContext }),
   };
 
   const encrypted = encrypt(JSON.stringify(payload));

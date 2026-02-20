@@ -6,6 +6,10 @@ import { createLogger } from "@lobu/core";
 import FormData from "form-data";
 import { z } from "zod";
 import type { InteractionClient } from "../common/interaction-client";
+import {
+  createMcpDiscoveryClient,
+  formatSearchResults,
+} from "../common/mcp-discovery-client";
 
 const logger = createLogger("custom-tools");
 
@@ -21,6 +25,8 @@ export function createCustomToolsServer(
   options?: { platform?: string }
 ) {
   const platform = options?.platform || "slack";
+  const mcpClient = createMcpDiscoveryClient(gatewayUrl, workerToken);
+
   const tools: any[] = [
     tool(
       "UploadUserFile",
@@ -572,6 +578,101 @@ export function createCustomToolsServer(
     )
   );
 
+  tools.push(
+    tool(
+      "SearchMcpServers",
+      "Search for installable remote MCP servers. Returns up to 5 candidates. Use this when the user asks to connect a service (for example Gmail, Notion, Linear) and you need to find matching MCP options.",
+      {
+        query: z
+          .string()
+          .min(1)
+          .describe("What to search for (e.g., 'gmail', 'notion', 'github')"),
+        limit: z
+          .number()
+          .min(1)
+          .max(5)
+          .optional()
+          .describe("Maximum candidates to return (default 5, max 5)"),
+      } as const,
+      async (args) => {
+        try {
+          const results = await mcpClient.search(args.query, args.limit || 5);
+          if (!results.length) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `No MCP servers found for "${args.query}". Try a broader query.`,
+                },
+              ],
+            };
+          }
+
+          return {
+            content: [
+              {
+                type: "text",
+                text:
+                  `Found ${Math.min(results.length, 5)} MCP candidate(s):\n\n${formatSearchResults(results)}\n\n` +
+                  `Ask the user which one they want, then call InstallMcpServer with the selected mcpId.`,
+              },
+            ],
+          };
+        } catch (error) {
+          logger.error("SearchMcpServers error:", error);
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+              },
+            ],
+          };
+        }
+      }
+    )
+  );
+
+  tools.push(
+    tool(
+      "InstallMcpServer",
+      "Generate a settings link that pre-fills one selected MCP server for explicit user confirmation.",
+      {
+        mcpId: z.string().describe("MCP ID from SearchMcpServers results"),
+        reason: z
+          .string()
+          .optional()
+          .describe("Optional user-facing reason for this installation"),
+      } as const,
+      async (args) => {
+        try {
+          const result = await mcpClient.install(args.mcpId, args.reason);
+          return {
+            content: [
+              {
+                type: "text",
+                text:
+                  `Install link generated for ${result.mcp.name} (${result.mcp.id}).\n\n` +
+                  `URL: ${result.url}\n\n` +
+                  `Ask the user to open the link and explicitly confirm installation.`,
+              },
+            ],
+          };
+        } catch (error) {
+          logger.error("InstallMcpServer error:", error);
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+              },
+            ],
+          };
+        }
+      }
+    )
+  );
+
   // Add GetSettingsLink tool for directing users to configure their agent
   tools.push(
     tool(
@@ -614,6 +715,12 @@ export function createCustomToolsServer(
           .optional()
           .describe(
             "Optional list of skills to pre-fill for the user to enable (e.g., [{ repo: 'anthropics/skills/pdf', name: 'PDF Reader' }])"
+          ),
+        prefillNixPackages: z
+          .array(z.string())
+          .optional()
+          .describe(
+            "Optional list of Nix packages to pre-fill in the system packages section (e.g., ['chromium', 'ffmpeg'])"
           ),
         prefillMcpServers: z
           .array(
@@ -668,6 +775,7 @@ export function createCustomToolsServer(
               reason: args.reason,
               message: args.message,
               prefillEnvVars: args.prefillEnvVars,
+              prefillNixPackages: args.prefillNixPackages,
               prefillSkills: args.prefillSkills,
               prefillMcpServers: args.prefillMcpServers,
             }),

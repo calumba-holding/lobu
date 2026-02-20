@@ -7,6 +7,10 @@ import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import FormData from "form-data";
 import type { InteractionClient } from "../common/interaction-client";
+import {
+  createMcpDiscoveryClient,
+  formatSearchResults,
+} from "../common/mcp-discovery-client";
 
 const logger = createLogger("openclaw-custom-tools");
 
@@ -88,6 +92,10 @@ export function createOpenClawCustomTools(params: {
   platform?: string;
 }): ToolDefinition[] {
   const tools: ToolDefinition[] = [];
+  const mcpClient = createMcpDiscoveryClient(
+    params.gatewayUrl,
+    params.workerToken
+  );
 
   tools.push({
     name: "UploadUserFile",
@@ -483,7 +491,77 @@ export function createOpenClawCustomTools(params: {
     },
   });
 
-  // GetSettingsLink
+  tools.push({
+    name: "SearchMcpServers",
+    label: "SearchMcpServers",
+    description:
+      "Search for installable remote MCP servers. Returns up to 5 candidates.",
+    parameters: Type.Object({
+      query: Type.String({
+        description: "What to search for (e.g., 'gmail', 'notion', 'github')",
+      }),
+      limit: Type.Optional(
+        Type.Number({
+          description: "Maximum candidates to return (default 5, max 5)",
+        })
+      ),
+    }),
+    execute: async (_toolCallId, args) => {
+      try {
+        const toolArgs = args as { query: string; limit?: number };
+        const results = await mcpClient.search(
+          toolArgs.query,
+          toolArgs.limit || 5
+        );
+        if (!results.length) {
+          return buildTextResult(
+            `No MCP servers found for "${toolArgs.query}". Try a broader query.`
+          );
+        }
+
+        return buildTextResult(
+          `Found ${Math.min(results.length, 5)} MCP candidate(s):\n\n${formatSearchResults(results)}\n\nAsk the user which one they want, then call InstallMcpServer with the selected mcpId.`
+        );
+      } catch (error) {
+        logger.error("SearchMcpServers error:", error);
+        return buildTextResult(
+          `Error: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    },
+  });
+
+  tools.push({
+    name: "InstallMcpServer",
+    label: "InstallMcpServer",
+    description:
+      "Generate a settings link that pre-fills one selected MCP server for explicit user confirmation.",
+    parameters: Type.Object({
+      mcpId: Type.String({
+        description: "MCP ID from SearchMcpServers results",
+      }),
+      reason: Type.Optional(
+        Type.String({
+          description: "Optional user-facing reason for this installation",
+        })
+      ),
+    }),
+    execute: async (_toolCallId, args) => {
+      try {
+        const toolArgs = args as { mcpId: string; reason?: string };
+        const result = await mcpClient.install(toolArgs.mcpId, toolArgs.reason);
+        return buildTextResult(
+          `Install link generated for ${result.mcp.name} (${result.mcp.id}).\n\nURL: ${result.url}\n\nAsk the user to open the link and explicitly confirm installation.`
+        );
+      } catch (error) {
+        logger.error("InstallMcpServer error:", error);
+        return buildTextResult(
+          `Error: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    },
+  });
+
   tools.push({
     name: "GetSettingsLink",
     label: "GetSettingsLink",
