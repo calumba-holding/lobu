@@ -27,6 +27,10 @@ COPY packages/cli/src/mcp-servers.json ./packages/cli/src/mcp-servers.json
 WORKDIR /app/packages/core
 RUN bun run build
 
+# Generate Tailwind CSS for settings page
+WORKDIR /app/packages/gateway
+RUN bun run generate:css
+
 WORKDIR /app
 
 # Runtime configuration
