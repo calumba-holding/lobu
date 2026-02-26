@@ -108,10 +108,10 @@ If you want to deploy agents for your organization but need expert implementatio
 
 ---
 
-**Expert Implementation.** I'm a second-time technical founder. Previously, I founded [rakam.io](https://rakam.io), an enterprise analytics PaaS acquired by [LiveRamp](https://liveramp.com) (NYSE: RAMP). I bring years of experience building secure, scalable enterprise infrastructure to the world of autonomous agents.
+**Expert Implementation.** I'm a second-time technical founder. Previously, I founded [rakam.io](https://rakam.io), an enterprise analytics PaaS acquired by [LiveRamp](https://liveramp.com) (NYSE: RAMP). I focus on building secure, scalable infrastructure for autonomous agents.
 
 > [!TIP]
-> **Need help architecting your agent workforce?** [🗓️ **Book a Strategy Call**](https://calendar.app.google/LwAk3ecptkJQaYr87)
+> **Need help architecting your agent workforce?** [🗓️ **Book a Strategy Call**](https://calendar.app.google/LwAk3ecptkJQaYr87) or [reach out on **X/Twitter**](https://x.com/bu7emba).
 
 ## How Lobu Differs
 
@@ -136,5 +136,3 @@ Lobu provides a hardened gateway and orchestration layer for the [OpenClaw](http
 - [**Nix system packages**](docs/SECURITY.md#skills-and-policy) — per-agent reproducible tooling and skills policy enforcement.
 
 ---
-
-Follow along: https://x.com/bu7emba
