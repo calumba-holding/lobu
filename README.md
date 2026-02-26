@@ -75,12 +75,14 @@ flowchart LR
 
 Every Lobu agent comes equipped with a suite of tools for autonomous execution and persistence:
 
-*   **Autonomous Scheduling** — Agents can schedule themselves for one-time or recurring execution via **cron expressions** (`ScheduleReminder`).
-*   **Human-in-the-Loop** — Pause execution to ask the user a question with button options (`AskUserQuestion`) and resume when they respond.
-*   **Full Linux Toolbox** — Sandboxed `bash` access, atomic file editing (`read`/`write`/`edit`), and advanced searching (`grep`/`find`).
-*   **File & Media Delivery** — Generate and share charts, reports, or documents (`UploadUserFile`) and voice messages (`GenerateAudio`).
-*   **Self-Expansion** — Search for and dynamically install new capabilities, skills, and MCP servers (`SearchExtensions`, `InstallExtension`).
-*   **Managed MCP Proxy** — Securely connect to any [Model Context Protocol](https://modelcontextprotocol.io) server with gateway-level OAuth and secret injection.
+| Feature | Description | Built-in Tools |
+| :--- | :--- | :--- |
+| **Autonomous Scheduling** | Schedule one-time or recurring execution via cron. | `ScheduleReminder` |
+| **Human-in-the-Loop** | Pause for user input via buttons and resume when answered. | `AskUserQuestion` |
+| **Full Linux Toolbox** | Sandboxed shell access, file editing, and advanced search. | `bash`, `read`, `write`, `edit`, `grep`, `find` |
+| **File & Media Delivery** | Share reports, charts, or generated voice messages. | `UploadUserFile`, `GenerateAudio` |
+| **Self-Expansion** | Search and dynamically install new skills or MCP servers. | `SearchExtensions`, `InstallExtension` |
+| **Managed MCP Proxy** | Securely connect to any MCP server with OAuth. | [MCP Proxy](docs/SECURITY.md#mcp-oauth-and-credentials) |
 
 ### Key Concepts
 
@@ -134,5 +136,3 @@ Lobu provides a hardened gateway and orchestration layer for the [OpenClaw](http
 - [**Secrets stay in gateway**](docs/SECURITY.md#mcp-oauth-and-credentials) — MCP OAuth, provider credentials, and `${env:}` substitution.
 - [**Defense-in-depth on K8s**](docs/SECURITY.md#kubernetes) — NetworkPolicies, RBAC, and optional gVisor/Kata runtimes.
 - [**Nix system packages**](docs/SECURITY.md#skills-and-policy) — per-agent reproducible tooling and skills policy enforcement.
-
----
