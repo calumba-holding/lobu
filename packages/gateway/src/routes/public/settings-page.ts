@@ -9,142 +9,142 @@ import { platformRegistry } from "../../platform";
 import { settingsPageCSS } from "./settings-page-styles";
 
 function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+	return text
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;")
+		.replace(/'/g, "&#039;");
 }
 
 /**
  * Format userId for display - handles phone numbers and platform-specific IDs
  */
 function formatUserId(userId: string): string {
-  if (userId.startsWith("+")) {
-    return userId;
-  }
-  if (userId.includes("@")) {
-    const parts = userId.split("@");
-    const id = parts[0] || "";
-    const domain = parts[1] || "";
-    if (domain === "lid") {
-      return `ID: ${id.slice(0, 8)}...`;
-    }
-    if (domain === "s.whatsapp.net") {
-      return `+${id}`;
-    }
-    return userId;
-  }
-  return userId;
+	if (userId.startsWith("+")) {
+		return userId;
+	}
+	if (userId.includes("@")) {
+		const parts = userId.split("@");
+		const id = parts[0] || "";
+		const domain = parts[1] || "";
+		if (domain === "lid") {
+			return `ID: ${id.slice(0, 8)}...`;
+		}
+		if (domain === "s.whatsapp.net") {
+			return `+${id}`;
+		}
+		return userId;
+	}
+	return userId;
 }
 
 /**
  * Get platform display info from the registry, with fallback for unknown platforms
  */
 function getPlatformDisplay(platform: string): { icon: string; name: string } {
-  const adapter = platformRegistry.get(platform);
-  if (adapter?.getDisplayInfo) {
-    const info = adapter.getDisplayInfo();
-    const icon = info.icon.includes('class="')
-      ? info.icon.replace('class="', 'class="w-4 h-4 inline-block ')
-      : info.icon.replace("<svg", '<svg class="w-4 h-4 inline-block"');
-    return { icon, name: info.name };
-  }
+	const adapter = platformRegistry.get(platform);
+	if (adapter?.getDisplayInfo) {
+		const info = adapter.getDisplayInfo();
+		const icon = info.icon.includes('class="')
+			? info.icon.replace('class="', 'class="w-4 h-4 inline-block ')
+			: info.icon.replace("<svg", '<svg class="w-4 h-4 inline-block"');
+		return { icon, name: info.name };
+	}
 
-  return {
-    icon: '<svg class="w-4 h-4 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>',
-    name: platform || "API",
-  };
+	return {
+		icon: '<svg class="w-4 h-4 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>',
+		name: platform || "API",
+	};
 }
 
 export interface ProviderMeta {
-  id: string;
-  name: string;
-  iconUrl: string;
-  authType: "oauth" | "device-code" | "api-key";
-  supportedAuthTypes: ("oauth" | "device-code" | "api-key")[];
-  apiKeyInstructions: string;
-  apiKeyPlaceholder: string;
-  catalogDescription?: string;
+	id: string;
+	name: string;
+	iconUrl: string;
+	authType: "oauth" | "device-code" | "api-key";
+	supportedAuthTypes: ("oauth" | "device-code" | "api-key")[];
+	apiKeyInstructions: string;
+	apiKeyPlaceholder: string;
+	catalogDescription?: string;
 }
 
 export interface SettingsPageOptions {
-  githubAppConfigured: boolean;
-  githubAppInstallUrl?: string;
-  githubOAuthConfigured?: boolean;
-  providers?: ProviderMeta[];
-  catalogProviders?: ProviderMeta[];
-  providerModelOptions?: Record<string, ModelOption[]>;
+	githubAppConfigured: boolean;
+	githubAppInstallUrl?: string;
+	githubOAuthConfigured?: boolean;
+	providers?: ProviderMeta[];
+	catalogProviders?: ProviderMeta[];
+	providerModelOptions?: Record<string, ModelOption[]>;
 }
 
 export function renderSettingsPage(
-  payload: SettingsTokenPayload,
-  settings: AgentSettings | null,
-  token: string,
-  options?: SettingsPageOptions
+	payload: SettingsTokenPayload,
+	settings: AgentSettings | null,
+	token: string,
+	options?: SettingsPageOptions,
 ): string {
-  const s: Partial<AgentSettings> = settings || {};
-  const githubAppConfigured = options?.githubAppConfigured ?? false;
-  const githubAppInstallUrl = options?.githubAppInstallUrl ?? "";
-  const githubOAuthConfigured = options?.githubOAuthConfigured ?? false;
-  // Installed providers (already resolved in order by settings.ts)
-  const providers: ProviderMeta[] = options?.providers ?? [];
+	const s: Partial<AgentSettings> = settings || {};
+	const githubAppConfigured = options?.githubAppConfigured ?? false;
+	const githubAppInstallUrl = options?.githubAppInstallUrl ?? "";
+	const githubOAuthConfigured = options?.githubOAuthConfigured ?? false;
+	// Installed providers (already resolved in order by settings.ts)
+	const providers: ProviderMeta[] = options?.providers ?? [];
 
-  // Catalog providers (available but not installed)
-  const catalogProviders: ProviderMeta[] = options?.catalogProviders ?? [];
+	// Catalog providers (available but not installed)
+	const catalogProviders: ProviderMeta[] = options?.catalogProviders ?? [];
 
-  const providerModelOptions: Record<string, ModelOption[]> =
-    options?.providerModelOptions || {};
+	const providerModelOptions: Record<string, ModelOption[]> =
+		options?.providerModelOptions || {};
 
-  const providerOrder = providers.map((p) => p.id);
+	const providerOrder = providers.map((p) => p.id);
 
-  const envVarsValue = (() => {
-    const existingEnvVars = s.envVars || {};
-    const prefillKeys = payload.prefillEnvVars || [];
-    const allKeys = new Set([...Object.keys(existingEnvVars), ...prefillKeys]);
-    return Array.from(allKeys)
-      .map((k) => `${k}=${existingEnvVars[k] || ""}`)
-      .join("\n");
-  })();
+	const envVarsValue = (() => {
+		const existingEnvVars = s.envVars || {};
+		const prefillKeys = payload.prefillEnvVars || [];
+		const allKeys = new Set([...Object.keys(existingEnvVars), ...prefillKeys]);
+		return Array.from(allKeys)
+			.map((k) => `${k}=${existingEnvVars[k] || ""}`)
+			.join("\n");
+	})();
 
-  const initialState = {
-    token,
-    agentId: payload.agentId,
-    githubOAuthConfigured,
-    githubAppConfigured,
-    githubAppInstallUrl,
-    PROVIDERS: Object.fromEntries(
-      providers.map((p) => [
-        p.id,
-        {
-          name: p.name,
-          authType: p.authType,
-          supportedAuthTypes: p.supportedAuthTypes,
-          apiKeyInstructions: p.apiKeyInstructions,
-          apiKeyPlaceholder: p.apiKeyPlaceholder,
-        },
-      ])
-    ),
-    providerOrder,
-    providerModels: providerModelOptions,
-    catalogProviders: catalogProviders.map((p) => ({
-      id: p.id,
-      name: p.name,
-      iconUrl: p.iconUrl,
-      authType: p.authType,
-      supportedAuthTypes: p.supportedAuthTypes,
-      description: p.catalogDescription || "",
-      apiKeyInstructions: p.apiKeyInstructions,
-      apiKeyPlaceholder: p.apiKeyPlaceholder,
-    })),
-    initialSkills: s.skillsConfig?.skills || [],
-    initialMcpServers: s.mcpServers || {},
-    prefillSkills: payload.prefillSkills || [],
-    prefillMcpServers: payload.prefillMcpServers || [],
-  };
+	const initialState = {
+		token,
+		agentId: payload.agentId,
+		githubOAuthConfigured,
+		githubAppConfigured,
+		githubAppInstallUrl,
+		PROVIDERS: Object.fromEntries(
+			providers.map((p) => [
+				p.id,
+				{
+					name: p.name,
+					authType: p.authType,
+					supportedAuthTypes: p.supportedAuthTypes,
+					apiKeyInstructions: p.apiKeyInstructions,
+					apiKeyPlaceholder: p.apiKeyPlaceholder,
+				},
+			]),
+		),
+		providerOrder,
+		providerModels: providerModelOptions,
+		catalogProviders: catalogProviders.map((p) => ({
+			id: p.id,
+			name: p.name,
+			iconUrl: p.iconUrl,
+			authType: p.authType,
+			supportedAuthTypes: p.supportedAuthTypes,
+			description: p.catalogDescription || "",
+			apiKeyInstructions: p.apiKeyInstructions,
+			apiKeyPlaceholder: p.apiKeyPlaceholder,
+		})),
+		initialSkills: s.skillsConfig?.skills || [],
+		initialMcpServers: s.mcpServers || {},
+		prefillSkills: payload.prefillSkills || [],
+		prefillMcpServers: payload.prefillMcpServers || [],
+	};
 
-  return `<!DOCTYPE html>
+	return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -164,30 +164,30 @@ export function renderSettingsPage(
     <div x-show="successMsg" x-transition class="bg-green-100 text-green-800 px-3 py-2 rounded-lg mb-4 text-center text-sm" x-text="successMsg"></div>
     <div x-show="errorMsg" x-transition class="bg-red-100 text-red-800 px-3 py-2 rounded-lg mb-4 text-center text-sm" x-text="errorMsg"></div>
     ${
-      payload.message
-        ? `<div class="bg-blue-50 border border-blue-200 text-blue-800 px-4 py-3 rounded-lg mb-4 text-sm">
+			payload.message
+				? `<div class="bg-blue-50 border border-blue-200 text-blue-800 px-4 py-3 rounded-lg mb-4 text-sm">
       <div class="flex items-start gap-2">
         <span class="text-lg">&#128161;</span>
         <div>${escapeHtml(payload.message)}</div>
       </div>
     </div>`
-        : ""
-    }
+				: ""
+		}
     ${
-      payload.prefillSkills?.length || payload.prefillMcpServers?.length
-        ? `<!-- Suggested Additions Section -->
+			payload.prefillSkills?.length || payload.prefillMcpServers?.length
+				? `<!-- Suggested Additions Section -->
     <div class="bg-slate-50 border border-slate-200 rounded-lg p-4 mb-4">
       <h3 class="text-sm font-medium text-slate-900 mb-3 flex items-center gap-2">
         <span>&#9889;</span> Quick Setup
       </h3>
       ${
-        payload.prefillSkills?.length
-          ? `<div class="mb-3">
+				payload.prefillSkills?.length
+					? `<div class="mb-3">
         <p class="text-xs font-medium text-slate-800 mb-2">Suggested Skills:</p>
         <div class="space-y-2">
           ${payload.prefillSkills
-            .map(
-              (skill, idx) => `
+						.map(
+							(skill, idx) => `
           <div class="flex items-center justify-between bg-white rounded-lg p-2 border border-slate-200" x-data="{ added: false, adding: false }">
             <div class="flex-1 min-w-0">
               <p class="text-xs font-medium text-gray-800">${escapeHtml(skill.name || skill.repo)}</p>
@@ -199,21 +199,21 @@ export function renderSettingsPage(
               :class="added ? 'bg-green-600 text-white' : 'bg-slate-600 text-white hover:bg-slate-700'"
               x-text="adding ? 'Adding...' : (added ? 'Added \\u2713' : 'Add')">
             </button>
-          </div>`
-            )
-            .join("")}
+          </div>`,
+						)
+						.join("")}
         </div>
       </div>`
-          : ""
-      }
+					: ""
+			}
       ${
-        payload.prefillMcpServers?.length
-          ? `<div>
+				payload.prefillMcpServers?.length
+					? `<div>
         <p class="text-xs font-medium text-slate-800 mb-2">Suggested External Integrations (MCP):</p>
         <div class="space-y-2">
           ${payload.prefillMcpServers
-            .map(
-              (mcp, idx) => `
+						.map(
+							(mcp, idx) => `
           <div class="flex items-center justify-between bg-white rounded-lg p-2 border border-slate-200" x-data="{ added: false, adding: false }">
             <div class="flex-1 min-w-0">
               <p class="text-xs font-medium text-gray-800">${escapeHtml(mcp.name || mcp.id)}</p>
@@ -226,16 +226,16 @@ export function renderSettingsPage(
               :class="added ? 'bg-green-600 text-white' : 'bg-slate-600 text-white hover:bg-slate-700'"
               x-text="adding ? 'Adding...' : (added ? 'Added \\u2713' : 'Add')">
             </button>
-          </div>`
-            )
-            .join("")}
+          </div>`,
+						)
+						.join("")}
         </div>
       </div>`
-          : ""
-      }
+					: ""
+			}
     </div>`
-        : ""
-    }
+				: ""
+		}
 
     <form @submit.prevent="saveSettings()" @keydown.enter="if ($event.target.tagName !== 'TEXTAREA' && $event.target.type !== 'submit') $event.preventDefault()" class="space-y-3">
       <!-- Model Selection -->
@@ -248,16 +248,16 @@ export function renderSettingsPage(
         <div x-show="open" x-transition class="pt-3">
           <div id="provider-list">
           ${
-            providers.length === 0
-              ? `<div class="text-center py-6 text-gray-500">
+						providers.length === 0
+							? `<div class="text-center py-6 text-gray-500">
               <p class="text-sm font-medium text-gray-700 mb-1">No model providers configured</p>
               <p class="text-xs">Add a provider below to get started.</p>
             </div>`
-              : ""
-          }
+							: ""
+					}
           ${providers
-            .map(
-              (p, i) => `
+						.map(
+							(p, i) => `
       <div id="provider-card-${escapeHtml(p.id)}"
         class="${i > 0 ? "mt-3 pt-3 border-t border-gray-200" : ""}">
         <div class="flex items-center justify-between gap-2">
@@ -315,60 +315,63 @@ export function renderSettingsPage(
           </div>
         </div>
         ${(() => {
-          const authTypes = p.supportedAuthTypes || [p.authType];
-          const hasMultiAuth = authTypes.length > 1;
-          const hasApiKey = authTypes.includes("api-key");
-          const hasOAuth = authTypes.includes("oauth");
-          const hasDeviceCode = authTypes.includes("device-code");
+					const authTypes = p.supportedAuthTypes || [p.authType];
+					const hasMultiAuth = authTypes.length > 1;
+					const hasApiKey = authTypes.includes("api-key");
+					const hasOAuth = authTypes.includes("oauth");
+					const hasDeviceCode = authTypes.includes("device-code");
 
-          // Build tab bar + content panels
-          let html = `<!-- Auth flow (${authTypes.join(", ")}) -->
+					// Build tab bar + content panels
+					let html = `<!-- Auth flow (${authTypes.join(", ")}) -->
         <div x-show="providerState['${p.id}']?.showAuthFlow" x-transition class="mt-3 pt-3 border-t border-gray-200">`;
 
-          if (hasMultiAuth) {
-            // Tab bar
-            html += `
+					if (hasMultiAuth) {
+						// Tab bar
+						html += `
           <div class="flex gap-1 mb-3 border-b border-gray-200">`;
-            for (const at of authTypes) {
-              const label =
-                at === "api-key"
-                  ? "API Key"
-                  : at === "device-code"
-                    ? "Device Auth"
-                    : "Login";
-              html += `
+						for (const at of authTypes) {
+							                                                        const label =
+							                                                                at === "api-key"
+							                                                                        ? "API Key"
+							                                                                        : at === "device-code"
+							                                                                                ? "Device Auth"
+							                                                                                : "OAuth";							html += `
             <button type="button" @click="providerState['${p.id}'].activeAuthTab = '${at}'"
               class="px-3 py-1.5 text-xs font-medium rounded-t-lg transition-all border-b-2 -mb-px"
               :class="providerState['${p.id}']?.activeAuthTab === '${at}' ? 'border-slate-600 text-slate-800 bg-white' : 'border-transparent text-gray-500 hover:text-gray-700'">${label}</button>`;
-            }
-            html += `
+						}
+						html += `
           </div>`;
-          }
+					}
 
-          // OAuth code input panel
-          if (hasOAuth) {
-            const showCond = hasMultiAuth
-              ? `providerState['${p.id}']?.activeAuthTab === 'oauth' && providerState['${p.id}']?.showCodeInput`
-              : `providerState['${p.id}']?.showCodeInput`;
-            html += `
-          <div x-show="${showCond}" x-transition>
-            <p class="text-xs text-gray-600 mb-2">Paste the authentication code from ${escapeHtml(p.name)}:</p>
-            <div class="flex gap-2">
-              <input type="text" x-model="providerState['${p.id}'].code" placeholder="CODE#STATE" class="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-xs font-mono focus:border-slate-600 focus:ring-1 focus:ring-slate-200 outline-none">
-              <button type="button" @click="submitOAuthCode('${p.id}')" class="px-3 py-2 text-xs font-medium rounded-lg bg-slate-600 text-white hover:bg-slate-700 transition-all">
-                Submit
-              </button>
-            </div>
-            <p class="text-xs text-gray-400 mt-1">Format: CODE#STATE (copy the entire code shown after login)</p>
-          </div>`;
-          }
+					// OAuth code input panel
+					if (hasOAuth) {
+						const showCond = hasMultiAuth
+							? `providerState['${p.id}']?.activeAuthTab === 'oauth' && providerState['${p.id}']?.showCodeInput`
+							: `providerState['${p.id}']?.showCodeInput`;
+						                                                html += `
+						          <div x-show="${showCond}" x-transition>
+						            <div class="mb-3 text-center">
+						              <a :href="'/api/v1/oauth/providers/${p.id}/login?token=' + encodeURIComponent(token)" target="_blank" class="inline-block px-4 py-2 text-xs font-medium rounded-lg bg-slate-600 text-white hover:bg-slate-700 transition-all">
+						                Login with ${escapeHtml(p.name)}
+						              </a>
+						            </div>
+						            <p class="text-xs text-gray-600 mb-2">Paste the authentication code from ${escapeHtml(p.name)}:</p>
+						            <div class="flex gap-2">
+						              <input type="text" x-model="providerState['${p.id}'].code" placeholder="CODE#STATE" class="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-xs font-mono focus:border-slate-600 focus:ring-1 focus:ring-slate-200 outline-none">
+						              <button type="button" @click="submitOAuthCode('${p.id}')" class="px-3 py-2 text-xs font-medium rounded-lg bg-slate-600 text-white hover:bg-slate-700 transition-all">
+						                Submit
+						              </button>
+						            </div>
+						            <p class="text-xs text-gray-400 mt-1">Format: CODE#STATE (copy the entire code shown after login)</p>
+						          </div>`;					}
 
-          // Device code panel
-          if (hasDeviceCode) {
-            const showCond = hasMultiAuth
-              ? `providerState['${p.id}']?.activeAuthTab === 'device-code' && providerState['${p.id}']?.showDeviceCode`
-              : `providerState['${p.id}']?.showDeviceCode`;
-            html += `
+					// Device code panel
+					if (hasDeviceCode) {
+						const showCond = hasMultiAuth
+							? `providerState['${p.id}']?.activeAuthTab === 'device-code' && providerState['${p.id}']?.showDeviceCode`
+							: `providerState['${p.id}']?.showDeviceCode`;
+						html += `
           <div x-show="${showCond}" x-transition>
             <div class="text-center">
               <p class="text-xs text-gray-600 mb-2">Enter this code at the verification page:</p>
@@ -379,14 +382,14 @@ export function renderSettingsPage(
               <p class="text-xs text-gray-400" x-text="providerState['${p.id}']?.pollStatus || 'Waiting for authorization...'"></p>
             </div>
           </div>`;
-          }
+					}
 
-          // API key panel
-          if (hasApiKey) {
-            const showCond = hasMultiAuth
-              ? `providerState['${p.id}']?.activeAuthTab === 'api-key'`
-              : `providerState['${p.id}']?.showApiKeyInput`;
-            html += `
+					// API key panel
+					if (hasApiKey) {
+						const showCond = hasMultiAuth
+							? `providerState['${p.id}']?.activeAuthTab === 'api-key'`
+							: `providerState['${p.id}']?.showApiKeyInput`;
+						html += `
           <div x-show="${showCond}" x-transition>
             <p class="text-xs text-gray-600 mb-2">${p.apiKeyInstructions}</p>
             <div class="flex gap-2">
@@ -396,15 +399,15 @@ export function renderSettingsPage(
               </button>
             </div>
           </div>`;
-          }
+					}
 
-          html += `
+					html += `
         </div>`;
-          return html;
-        })()}
-      </div>`
-            )
-            .join("")}
+					return html;
+				})()}
+      </div>`,
+						)
+						.join("")}
           </div>
 
           <!-- Add Provider Catalog -->
@@ -455,7 +458,7 @@ export function renderSettingsPage(
                     <button type="button" @click="providerState[pendingProvider.id].activeAuthTab = at; if (at !== 'api-key') connectProvider(pendingProvider.id)"
                       class="px-3 py-1.5 text-xs font-medium rounded-t-lg transition-all border-b-2 -mb-px"
                       :class="providerState[pendingProvider.id]?.activeAuthTab === at ? 'border-slate-600 text-slate-800 bg-white' : 'border-transparent text-gray-500 hover:text-gray-700'"
-                      x-text="at === 'api-key' ? 'API Key' : at === 'device-code' ? 'Device Auth' : 'Login'">
+                      x-text="at === 'api-key' ? 'API Key' : at === 'device-code' ? 'Device Auth' : 'OAuth'">
                     </button>
                   </template>
                 </div>
@@ -477,6 +480,10 @@ export function renderSettingsPage(
               <!-- OAuth code input for pending provider -->
               <template x-if="pendingProvider && providerState[pendingProvider.id]?.activeAuthTab !== 'api-key' && (providerState[pendingProvider.id]?.showCodeInput || ((pendingProvider.supportedAuthTypes || [pendingProvider.authType]).length === 1 && pendingProvider.authType === 'oauth'))">
                 <div>
+                  <div class="mb-3 text-center">
+                    <a :href="'/api/v1/oauth/providers/' + pendingProvider.id + '/login?token=' + encodeURIComponent(token)" target="_blank" class="inline-block px-4 py-2 text-xs font-medium rounded-lg bg-slate-600 text-white hover:bg-slate-700 transition-all" x-text="'Login with ' + pendingProvider.name">
+                    </a>
+                  </div>
                   <p class="text-xs text-gray-600 mb-2" x-text="'Paste the authentication code from ' + pendingProvider.name + ':'"></p>
                   <div class="flex gap-2">
                     <input type="text" x-model="providerState[pendingProvider.id].code" placeholder="CODE#STATE" class="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-xs font-mono focus:border-slate-600 focus:ring-1 focus:ring-slate-200 outline-none">
@@ -814,8 +821,8 @@ export function renderSettingsPage(
 
       <!-- Git Configuration -->
       ${
-        githubAppConfigured
-          ? `
+				githubAppConfigured
+					? `
       <div class="bg-gray-50 rounded-lg p-3" x-data="{ open: false }">
         <h3 class="flex items-center gap-2 text-sm font-medium text-gray-800 cursor-pointer select-none" @click="open = !open">
           <span>&#128193;</span>
@@ -862,12 +869,12 @@ export function renderSettingsPage(
             <p class="text-xs text-gray-600 mb-2">Install the GitHub App to enable repository access</p>
             <div class="flex items-center justify-center gap-2">
               ${
-                githubAppInstallUrl
-                  ? `<a href="${escapeHtml(githubAppInstallUrl)}" target="_blank" class="inline-block px-4 py-2 text-xs font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-800 transition-all">
+								githubAppInstallUrl
+									? `<a href="${escapeHtml(githubAppInstallUrl)}" target="_blank" class="inline-block px-4 py-2 text-xs font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-800 transition-all">
                 Install on GitHub &rarr;
               </a>`
-                  : `<p class="text-xs text-gray-400">Contact administrator to install the GitHub App</p>`
-              }
+									: `<p class="text-xs text-gray-400">Contact administrator to install the GitHub App</p>`
+							}
               <button type="button" @click="refreshGitHub()" class="px-4 py-2 text-xs font-medium rounded-lg bg-slate-100 text-slate-800 hover:bg-slate-200 transition-all">
                 &#8635; Refresh
               </button>
@@ -928,7 +935,7 @@ export function renderSettingsPage(
         </div>
       </div>
       `
-          : `
+					: `
       <div class="bg-gray-50 rounded-lg p-3" x-data="{ open: false }">
         <h3 class="flex items-center gap-2 text-sm font-medium text-gray-800 cursor-pointer select-none" @click="open = !open">
           <span>&#128193;</span>
@@ -953,7 +960,7 @@ export function renderSettingsPage(
         </div>
       </div>
       `
-      }
+			}
 
       <!-- System Packages -->
       <div class="bg-gray-50 rounded-lg p-3" x-data="{ open: ${payload.prefillNixPackages?.length ? "true" : "false"} }">
@@ -967,13 +974,13 @@ export function renderSettingsPage(
           <div>
             <label for="nixPackages" class="block text-xs font-medium text-gray-600 mb-1">Packages (one per line)</label>
             <textarea id="nixPackages" name="nixPackages" placeholder="python311&#10;ffmpeg&#10;jq" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs font-mono min-h-[60px] resize-y focus:border-slate-600 focus:ring-1 focus:ring-slate-200 outline-none">${escapeHtml(
-              (() => {
-                const existing = s.nixConfig?.packages || [];
-                const prefill = payload.prefillNixPackages || [];
-                const merged = [...new Set([...existing, ...prefill])];
-                return merged.join("\n");
-              })()
-            )}</textarea>
+							(() => {
+								const existing = s.nixConfig?.packages || [];
+								const prefill = payload.prefillNixPackages || [];
+								const merged = [...new Set([...existing, ...prefill])];
+								return merged.join("\n");
+							})(),
+						)}</textarea>
             ${payload.prefillNixPackages?.length ? '<p class="text-xs text-slate-600 mt-1">&#11014;&#65039; Suggested packages have been pre-filled. Review and save to apply.</p>' : ""}
           </div>
         </div>
@@ -990,10 +997,10 @@ export function renderSettingsPage(
         <div x-show="open" x-transition class="pt-3">
           <textarea id="envVars" name="envVars" placeholder="API_KEY=your_key&#10;DEBUG=true" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs font-mono min-h-[60px] resize-y focus:border-slate-600 focus:ring-1 focus:ring-slate-200 outline-none">${escapeHtml(envVarsValue)}</textarea>
           ${
-            payload.prefillEnvVars?.length
-              ? `<p class="text-xs text-slate-600 mt-1">&#11014;&#65039; Please fill in the values for the highlighted variables above.</p>`
-              : ""
-          }
+						payload.prefillEnvVars?.length
+							? `<p class="text-xs text-slate-600 mt-1">&#11014;&#65039; Please fill in the values for the highlighted variables above.</p>`
+							: ""
+					}
         </div>
       </div>
 
@@ -1248,9 +1255,8 @@ export function renderSettingsPage(
             this.connectDeviceCode(providerId);
           } else {
             // OAuth
-            window.open('/api/v1/oauth/providers/' + providerId + '/login?token=' + encodeURIComponent(this.token), '_blank');
             this.providerState[providerId].showCodeInput = true;
-            this.providerState[providerId].status = 'Waiting for code...';
+            this.providerState[providerId].status = 'Click Login to start authentication.';
           }
         },
 
@@ -1482,9 +1488,8 @@ export function renderSettingsPage(
 
           // OAuth flow
           ps.activeAuthTab = 'oauth';
-          window.open('/api/v1/oauth/providers/' + provider + '/login?token=' + encodeURIComponent(this.token), '_blank');
           ps.showCodeInput = true;
-          ps.status = 'Waiting for code...';
+          ps.status = 'Click Login to start authentication.';
         },
 
         async submitOAuthCode(provider) {
@@ -2341,7 +2346,7 @@ export function renderSettingsPage(
 }
 
 export function renderErrorPage(message: string): string {
-  return `<!DOCTYPE html>
+	return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
