@@ -322,7 +322,7 @@ export class CoreServices {
       slug: "nvidia",
       upstreamBaseUrl: "https://integrate.api.nvidia.com",
       apiKeyInstructions:
-        'Get your API key from <a href="https://build.nvidia.com" target="_blank" class="text-slate-600 hover:underline">NVIDIA Build</a>',
+        'Get your API key from <a href="https://build.nvidia.com/settings/api-keys" target="_blank" class="text-blue-600 hover:underline">NVIDIA Build</a>',
       apiKeyPlaceholder: "nvapi-...",
       agentSettingsStore: this.agentSettingsStore,
     });
@@ -362,7 +362,7 @@ export class CoreServices {
       slug: "gemini",
       upstreamBaseUrl: "https://generativelanguage.googleapis.com",
       apiKeyInstructions:
-        'Get your API key from <a href="https://aistudio.google.com/apikey" target="_blank" class="text-slate-600 hover:underline">Google AI Studio</a>',
+        'Get your API key from <a href="https://aistudio.google.com/apikey" target="_blank" class="text-blue-600 hover:underline">Google AI Studio</a>',
       apiKeyPlaceholder: "AIza...",
       agentSettingsStore: this.agentSettingsStore,
     });
@@ -378,9 +378,9 @@ export class CoreServices {
       providerIconUrl: "https://www.google.com/s2/favicons?domain=z.ai&sz=128",
       envVarName: "Z_AI_API_KEY",
       slug: "z-ai",
-      upstreamBaseUrl: "https://api.z.ai",
+      upstreamBaseUrl: "https://api.z.ai/api/coding/paas/v4",
       apiKeyInstructions:
-        'Get your API key from <a href="https://z.ai/manage-apikey/apikey-list" target="_blank" class="text-slate-600 hover:underline">z.ai</a>',
+        'Get your API key from <a href="https://z.ai/manage-apikey/apikey-list" target="_blank" class="text-blue-600 hover:underline">z.ai</a>',
       apiKeyPlaceholder: "zai-...",
       agentSettingsStore: this.agentSettingsStore,
     });
@@ -399,7 +399,7 @@ export class CoreServices {
       slug: "elevenlabs",
       upstreamBaseUrl: "https://api.elevenlabs.io",
       apiKeyInstructions:
-        'Get your API key from <a href="https://elevenlabs.io/app/api-keys" target="_blank" class="text-slate-600 hover:underline">ElevenLabs</a>',
+        'Get your API key from <a href="https://elevenlabs.io/app/api-keys" target="_blank" class="text-blue-600 hover:underline">ElevenLabs</a>',
       apiKeyPlaceholder: "sk_...",
       agentSettingsStore: this.agentSettingsStore,
     });
