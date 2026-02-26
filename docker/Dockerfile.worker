@@ -146,6 +146,8 @@ WORKDIR /app/packages/worker
 ENV NODE_ENV=${NODE_ENV}
 
 # Set HOME to /workspace so agent sessions persist in mounted volume
+# Set USER so nix profile sourcing works (nix.sh checks -n "${USER-}")
 ENV HOME=/workspace
+ENV USER=worker
 
 ENTRYPOINT ["/app/entrypoint.sh"]

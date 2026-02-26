@@ -171,10 +171,6 @@ if [ "$(pwd)" != "/app/packages/worker" ]; then
     cd /app/packages/worker || { echo "❌ Failed to cd to /app/packages/worker"; exit 1; }
 fi
 
-# In development mode, run from source to avoid path resolution issues with modules
-if [ "${NODE_ENV}" = "development" ]; then
-    echo "📝 Running in development mode from source..."
-    activate_nix_env "bun run src/index.ts"
-else
-    activate_nix_env "bun run dist/index.js"
-fi
+# Always run from source — Bun handles TypeScript natively and this avoids
+# CJS/ESM interop issues with ESM-only dependencies (e.g. pi-coding-agent).
+activate_nix_env "bun run src/index.ts"
