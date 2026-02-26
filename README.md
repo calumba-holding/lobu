@@ -1,17 +1,10 @@
 # Lobu
 
-![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)
+[![Strategy Call](https://img.shields.io/badge/Strategy_Call-Book_Now-success?style=for-the-badge&logo=googlecalendar&logoColor=white)](https://calendar.app.google/LwAk3ecptkJQaYr87)
 
 **Lobu** is a platform for deploying **persistent, autonomous agents**. It provides a unified gateway for programmatic agent creation and multi-platform access (Slack, Telegram, WhatsApp), backed by a hardened, sandboxed execution environment.
 
 **Batteries included.** Lobu bundles sandboxed execution, MCP proxy with OAuth, and network isolation — no external sandbox providers, no third-party MCP gateways. One deployment, everything included.
-
----
-
-> [!TIP]
-> **Launch your agents with the Lobu team.** Whether you're looking to automate support, empower your employees with persistent AI, or need enterprise-grade infrastructure maintenance, we can help. [🗓️ **Book an Agent Strategy Call**](https://calendar.app.google/LwAk3ecptkJQaYr87)
-
----
 
 ## Messaging & API
 
@@ -138,10 +131,6 @@ This project started in **July 2025** and was first published under [peerbot.ai]
 - **Defense-in-depth on K8s** — NetworkPolicies, RBAC, optional gVisor/Kata runtimes ([details](docs/SECURITY.md#kubernetes))
 - **Nix system packages** — per-agent reproducible tooling via settings page ([details](docs/SECURITY.md#skills-and-policy))
 - **Skills policy enforcement** ([details](docs/SECURITY.md#skills-and-policy))
-
-## License
-
-Business Source License 1.1 (`BUSL-1.1`). See [LICENSE](LICENSE).
 
 ---
 
