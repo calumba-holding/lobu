@@ -100,8 +100,13 @@ export interface ModelProviderModule extends OrchestratorModule {
   hasCredentials(agentId: string): Promise<boolean>;
   /** Check if a system-level key is available (e.g. from process.env) */
   hasSystemKey(): boolean;
-  /** Return env var mappings for routing SDK traffic through the proxy */
-  getProxyBaseUrlMappings(proxyUrl: string): Record<string, string>;
+  /** Return env var mappings for routing SDK traffic through the proxy.
+   * When agentId is provided, the proxy URL includes /a/{agentId} so the
+   * proxy can resolve credentials without inspecting the Authorization header. */
+  getProxyBaseUrlMappings(
+    proxyUrl: string,
+    agentId?: string
+  ): Record<string, string>;
   /** Inject system key as fallback if no per-agent credentials are set */
   injectSystemKeyFallback(
     envVars: Record<string, string>

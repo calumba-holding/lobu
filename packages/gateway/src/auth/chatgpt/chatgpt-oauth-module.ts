@@ -81,8 +81,12 @@ export class ChatGPTOAuthModule
     return !!process.env.OPENAI_API_KEY;
   }
 
-  getProxyBaseUrlMappings(proxyUrl: string): Record<string, string> {
-    return { OPENAI_BASE_URL: `${proxyUrl}/openai-codex` };
+  getProxyBaseUrlMappings(
+    proxyUrl: string,
+    agentId?: string
+  ): Record<string, string> {
+    const base = `${proxyUrl}/openai-codex`;
+    return { OPENAI_BASE_URL: agentId ? `${base}/a/${agentId}` : base };
   }
 
   getCliBackendConfig() {

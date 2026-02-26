@@ -16,12 +16,44 @@ interface McpStatus {
   configured: boolean;
 }
 
+export interface ProviderConfig {
+  credentialEnvVarName?: string;
+  defaultProvider?: string;
+  defaultModel?: string;
+  cliBackends?: Array<{
+    providerId: string;
+    name: string;
+    command: string;
+    args?: string[];
+    env?: Record<string, string>;
+    modelArg?: string;
+    sessionArg?: string;
+  }>;
+  providerBaseUrlMappings?: Record<string, string>;
+}
+
 interface SessionContextResponse {
   platformInstructions: string;
   networkInstructions: string;
   skillsInstructions: string;
   mcpStatus: McpStatus[];
   mcpTools?: Record<string, McpToolDef[]>;
+  providerConfig?: ProviderConfig;
+}
+
+// Module-level cache for session context
+let cachedResult: {
+  gatewayInstructions: string;
+  providerConfig: ProviderConfig;
+} | null = null;
+
+/**
+ * Invalidate the session context cache.
+ * Called by the SSE client when a config_changed event is received.
+ */
+export function invalidateSessionContextCache(): void {
+  cachedResult = null;
+  logger.info("Session context cache invalidated");
 }
 
 function buildMcpInstructions(mcpStatus: McpStatus[]): string {
@@ -60,18 +92,25 @@ function buildMcpInstructions(mcpStatus: McpStatus[]): string {
 
 /**
  * Fetch session context from gateway for OpenClaw worker.
- * Returns gateway instructions.
+ * Returns gateway instructions and dynamic provider configuration.
+ * Caches the result until invalidated by a config_changed SSE event.
  * Skips MCP server config (OpenClaw doesn't use Claude SDK's MCP format).
  */
 export async function getOpenClawSessionContext(): Promise<{
   gatewayInstructions: string;
+  providerConfig: ProviderConfig;
 }> {
+  if (cachedResult) {
+    logger.debug("Returning cached session context");
+    return cachedResult;
+  }
+
   const dispatcherUrl = process.env.DISPATCHER_URL;
   const workerToken = process.env.WORKER_TOKEN;
 
   if (!dispatcherUrl || !workerToken) {
     logger.warn("Missing dispatcher URL or worker token for session context");
-    return { gatewayInstructions: "" };
+    return { gatewayInstructions: "", providerConfig: {} };
   }
 
   try {
@@ -89,13 +128,13 @@ export async function getOpenClawSessionContext(): Promise<{
       logger.warn("Gateway returned non-success status for session context", {
         status: response.status,
       });
-      return { gatewayInstructions: "" };
+      return { gatewayInstructions: "", providerConfig: {} };
     }
 
     const data = (await response.json()) as SessionContextResponse;
 
     logger.info(
-      `Received session context: ${data.platformInstructions.length} chars platform instructions, ${data.mcpStatus.length} MCP status entries`
+      `Received session context: ${data.platformInstructions.length} chars platform instructions, ${data.mcpStatus.length} MCP status entries, provider: ${data.providerConfig?.defaultProvider || "none"}`
     );
 
     const mcpInstructions = buildMcpInstructions(data.mcpStatus);
@@ -118,9 +157,14 @@ export async function getOpenClawSessionContext(): Promise<{
       `Built gateway instructions: platform (${data.platformInstructions.length} chars) + network (${data.networkInstructions.length} chars) + skills (${(data.skillsInstructions || "").length} chars) + MCP (${mcpInstructions.length} chars)`
     );
 
-    return { gatewayInstructions };
+    const result = {
+      gatewayInstructions,
+      providerConfig: data.providerConfig || {},
+    };
+    cachedResult = result;
+    return result;
   } catch (error) {
     logger.error("Failed to fetch session context from gateway", { error });
-    return { gatewayInstructions: "" };
+    return { gatewayInstructions: "", providerConfig: {} };
   }
 }

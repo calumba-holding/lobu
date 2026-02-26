@@ -380,23 +380,6 @@ export class OpenClawWorker implements WorkerExecutor {
       }
     }
 
-    const authStorage = new AuthStorage();
-
-    // Generic credential injection
-    const credEnvVar = process.env.CREDENTIAL_ENV_VAR_NAME || null;
-    if (credEnvVar && process.env[credEnvVar]) {
-      authStorage.setRuntimeApiKey(provider, process.env[credEnvVar]!);
-      logger.info(`Set runtime API key for ${provider} from ${credEnvVar}`);
-    } else {
-      const fallbackEnvVar = getApiKeyEnvVarForProvider(provider);
-      if (process.env[fallbackEnvVar]) {
-        authStorage.setRuntimeApiKey(provider, process.env[fallbackEnvVar]!);
-        logger.info(
-          `Set runtime API key for ${provider} from fallback ${fallbackEnvVar}`
-        );
-      }
-    }
-
     const baseModel = getModel(provider as any, modelId as any) as any;
     if (!baseModel) {
       logger.error(
@@ -410,6 +393,55 @@ export class OpenClawWorker implements WorkerExecutor {
     const workspaceDir = this.getWorkingDirectory();
     await fs.mkdir(path.join(workspaceDir, ".openclaw"), { recursive: true });
     const sessionFile = path.join(workspaceDir, ".openclaw", "session.jsonl");
+    const providerStateFile = path.join(
+      workspaceDir,
+      ".openclaw",
+      "provider.json"
+    );
+
+    // Detect provider change and reset session if needed
+    let sessionSummary: string | undefined;
+    try {
+      const raw = await fs.readFile(providerStateFile, "utf-8");
+      const prevState = JSON.parse(raw) as {
+        provider: string;
+        modelId: string;
+      };
+      if (prevState.provider && prevState.provider !== provider) {
+        logger.info(
+          `Provider changed from ${prevState.provider} to ${provider}, resetting session`
+        );
+
+        // Read old session content for summary context
+        try {
+          const sessionContent = await fs.readFile(sessionFile, "utf-8");
+          const lineCount = sessionContent.split("\n").filter(Boolean).length;
+          if (lineCount > 0) {
+            // Provide a brief context note instead of a full summary
+            // to avoid an expensive API call to the new model
+            sessionSummary = `[System note: The AI provider was just changed from ${prevState.provider} to ${provider}. Previous conversation history (${lineCount} turns) has been cleared. Continue helping the user from this point forward.]`;
+          }
+        } catch {
+          // No existing session file
+        }
+
+        // Delete old session file to start fresh
+        try {
+          await fs.unlink(sessionFile);
+        } catch {
+          // File may not exist
+        }
+      }
+    } catch {
+      // No previous provider state file - first run
+    }
+
+    // Persist current provider state
+    await fs.writeFile(
+      providerStateFile,
+      JSON.stringify({ provider, modelId }),
+      "utf-8"
+    );
 
     const sessionManager = await openOrCreateSessionManager(
       sessionFile,
@@ -455,19 +487,65 @@ export class OpenClawWorker implements WorkerExecutor {
     const gatewayUrl = process.env.DISPATCHER_URL ?? "";
     const workerToken = process.env.WORKER_TOKEN ?? "";
 
-    // Fetch session context from gateway
+    // Fetch session context from gateway (includes dynamic provider config)
     const context = await getOpenClawSessionContext();
+
+    // Apply dynamic provider config from session context to process.env
+    // so that existing code paths (resolveModelRef, credential injection) work.
+    const pc = context.providerConfig;
+    if (pc.credentialEnvVarName) {
+      process.env.CREDENTIAL_ENV_VAR_NAME = pc.credentialEnvVarName;
+    }
+    if (pc.defaultProvider) {
+      process.env.AGENT_DEFAULT_PROVIDER = pc.defaultProvider;
+    }
+    if (pc.defaultModel) {
+      process.env.AGENT_DEFAULT_MODEL = pc.defaultModel;
+    }
+    if (pc.providerBaseUrlMappings) {
+      for (const [envVar, url] of Object.entries(pc.providerBaseUrlMappings)) {
+        process.env[envVar] = url;
+      }
+    }
+
+    // Credential injection — must happen AFTER session context applies
+    // CREDENTIAL_ENV_VAR_NAME to process.env (above).
+    const authStorage = new AuthStorage();
+    const credEnvVar = process.env.CREDENTIAL_ENV_VAR_NAME || null;
+    if (credEnvVar && process.env[credEnvVar]) {
+      authStorage.setRuntimeApiKey(provider, process.env[credEnvVar]!);
+      logger.info(`Set runtime API key for ${provider} from ${credEnvVar}`);
+    } else {
+      const fallbackEnvVar = getApiKeyEnvVarForProvider(provider);
+      if (process.env[fallbackEnvVar]) {
+        authStorage.setRuntimeApiKey(provider, process.env[fallbackEnvVar]!);
+        logger.info(
+          `Set runtime API key for ${provider} from fallback ${fallbackEnvVar}`
+        );
+      }
+    }
+
+    // Re-resolve provider base URL after session context may have updated mappings
+    if (!providerBaseUrl) {
+      const baseUrlEnvVar = DEFAULT_PROVIDER_BASE_URL_ENV[rawProvider];
+      if (baseUrlEnvVar && process.env[baseUrlEnvVar]) {
+        providerBaseUrl = process.env[baseUrlEnvVar];
+      }
+    }
 
     // Merge gateway instructions into custom instructions
     const instructionParts = [context.gatewayInstructions, customInstructions];
 
-    const cliBackends = process.env.CLI_BACKENDS
-      ? (JSON.parse(process.env.CLI_BACKENDS) as Array<{
-          name: string;
-          command: string;
-          args?: string[];
-        }>)
-      : undefined;
+    // Prefer CLI backends from dynamic session context, fall back to env var
+    const cliBackends = pc.cliBackends?.length
+      ? pc.cliBackends
+      : process.env.CLI_BACKENDS
+        ? (JSON.parse(process.env.CLI_BACKENDS) as Array<{
+            name: string;
+            command: string;
+            args?: string[];
+          }>)
+        : undefined;
     if (cliBackends?.length) {
       const agentList = cliBackends
         .map(
@@ -627,7 +705,10 @@ Use it when the user references past discussions or you need context.`);
         });
       }, HEARTBEAT_INTERVAL_MS);
 
-      await session.prompt(userPrompt);
+      const effectivePrompt = sessionSummary
+        ? `${sessionSummary}\n\n${userPrompt}`
+        : userPrompt;
+      await session.prompt(effectivePrompt);
       await done;
       session.dispose();
 

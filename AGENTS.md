@@ -29,6 +29,7 @@ Settings page provider order is drag-sortable via handle, with per-provider mode
 #### Orchestration
 - **Deployment modes**: Kubernetes (production), Docker (development)
 - All workers are sandboxed with your settings.
+- **Workers must NEVER see real credentials.** Provider credentials are resolved by the gateway proxy using agentId from the URL path (`/api/proxy/{slug}/a/{agentId}/...`). Workers only receive opaque placeholders in env vars.
 
 #### MCP
 - Users pass the LOBU_MCP_SERVERS_URL env (pointing to `.lobu/mcp.config.json`) to enable MCP proxy in the gateway.
@@ -91,7 +92,7 @@ File attachments are fully supported in all message contexts (DM, app mentions, 
 ./scripts/setup-dev.sh
 ```
 
-### Starting Development
+### Starting Development (Local Gateway — Recommended)
 ```bash
 # Terminal 1: Start Redis
 redis-server
@@ -103,10 +104,14 @@ make watch-packages
 cd packages/gateway && bun run dev
 ```
 
-Or use Docker Compose for a simpler setup:
+This runs the gateway locally with `bun --watch` for instant restarts on source changes. Workers are still spawned as Docker containers (DEPLOYMENT_MODE=docker). The gateway reads `.env` from the project root automatically.
+
+### Starting Development (Docker Compose — Alternative)
 ```bash
 docker compose -f docker/docker-compose.yml up
 ```
+
+Use Docker Compose when you need to test the full containerized setup. Note: source changes require image rebuilds or `docker compose watch` (`make dev`).
 
 ### Hot Reload
 - **Gateway**: Runs with `bun --watch`, auto-restarts on source changes
@@ -118,9 +123,7 @@ docker compose -f docker/docker-compose.yml up
 ./scripts/test-bot.sh "@me test prompt"
 ```
 
-## Deployment Instructions
-
-When making changes to the Slack bot:
+### Deployment
 1. **Development**: Start gateway with `cd packages/gateway && bun run dev`
 2. **Kubernetes deployment**: Use `make deploy` for production deployment
 

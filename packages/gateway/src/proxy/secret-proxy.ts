@@ -2,6 +2,7 @@ import { createLogger, type ProviderUpstreamConfig } from "@lobu/core";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import type Redis from "ioredis";
+import type { AuthProfilesManager } from "../auth/settings/auth-profiles-manager";
 
 const logger = createLogger("secret-proxy");
 
@@ -35,6 +36,8 @@ export class SecretProxy {
   private redis!: Redis;
   private config: SecretProxyConfig;
   private slugMap: Map<string, string>;
+  private slugToProviderId: Map<string, string> = new Map();
+  private authProfilesManager?: AuthProfilesManager;
 
   constructor(config: SecretProxyConfig) {
     this.config = config;
@@ -53,14 +56,24 @@ export class SecretProxy {
     this.redis = redis;
   }
 
+  setAuthProfilesManager(manager: AuthProfilesManager): void {
+    this.authProfilesManager = manager;
+  }
+
   /**
    * Register a provider upstream for slug-based routing.
    * Called after provider modules are initialized.
    */
-  registerUpstream(upstream: ProviderUpstreamConfig): void {
+  registerUpstream(
+    upstream: ProviderUpstreamConfig,
+    providerId?: string
+  ): void {
     this.slugMap.set(upstream.slug, upstream.upstreamBaseUrl);
+    if (providerId) {
+      this.slugToProviderId.set(upstream.slug, providerId);
+    }
     logger.info(
-      `Registered provider upstream: ${upstream.slug} -> ${upstream.upstreamBaseUrl}`
+      `Registered provider upstream: ${upstream.slug} -> ${upstream.upstreamBaseUrl}${providerId ? ` (providerId: ${providerId})` : ""}`
     );
   }
 
@@ -110,17 +123,20 @@ export class SecretProxy {
   }
 
   /**
-   * If the value contains the placeholder prefix, swap it for the real secret.
-   * Returns the value unchanged if it's not a placeholder.
+   * If the value contains a UUID placeholder prefix, resolve the real secret.
+   * Returns the value unchanged if it's not a recognized pattern.
    */
   private async swap(value: string): Promise<string> {
-    if (!value.includes(PLACEHOLDER_PREFIX)) return value;
-    const resolved = await this.resolveSecret(value);
-    if (!resolved) {
-      logger.warn("Failed to resolve secret placeholder");
-      return value;
+    if (value.includes(PLACEHOLDER_PREFIX)) {
+      const resolved = await this.resolveSecret(value);
+      if (!resolved) {
+        logger.warn("Failed to resolve secret placeholder");
+        return value;
+      }
+      return resolved;
     }
-    return resolved;
+
+    return value;
   }
 
   private async forward(c: Context): Promise<Response> {
@@ -131,6 +147,8 @@ export class SecretProxy {
     // Try slug-based routing: /api/proxy/{slug}/rest/of/path
     let upstreamBaseUrl = this.config.defaultUpstreamUrl;
     let forwardPath = rawPath;
+    let resolvedSlug: string | undefined;
+    let urlAgentId: string | undefined;
     const slugMatch = rawPath.match(/^\/([^/]+)(\/.*)?$/);
     if (slugMatch) {
       const candidateSlug = slugMatch[1]!;
@@ -138,6 +156,15 @@ export class SecretProxy {
       if (resolved) {
         upstreamBaseUrl = resolved;
         forwardPath = slugMatch[2] || "";
+        resolvedSlug = candidateSlug;
+
+        // Extract agentId from /a/{agentId} path segment if present.
+        // URL format: /api/proxy/{slug}/a/{agentId}/v1/chat/completions
+        const agentMatch = forwardPath.match(/^\/a\/([^/]+)(\/.*)?$/);
+        if (agentMatch) {
+          urlAgentId = agentMatch[1];
+          forwardPath = agentMatch[2] || "";
+        }
       }
     }
 
@@ -161,21 +188,42 @@ export class SecretProxy {
       }
     }
 
-    // Swap secrets in auth headers
-    const apiKey = headers["x-api-key"];
-    if (apiKey) {
-      headers["x-api-key"] = await this.swap(apiKey);
-    }
+    // Resolve credentials: prefer URL-based agentId (no header parsing needed),
+    // fall back to marker/placeholder swap for backward compatibility.
+    if (urlAgentId && resolvedSlug && this.authProfilesManager) {
+      const providerId = this.slugToProviderId.get(resolvedSlug);
+      if (providerId) {
+        const profile = await this.authProfilesManager.getBestProfile(
+          urlAgentId,
+          providerId
+        );
+        if (profile?.credential) {
+          headers.authorization = `Bearer ${profile.credential}`;
+        } else {
+          logger.warn(
+            `No auth profile for agent ${urlAgentId}, provider ${providerId}`
+          );
+        }
+      } else {
+        logger.warn(`No providerId mapping for slug "${resolvedSlug}"`);
+      }
+    } else {
+      // Legacy path: swap UUID placeholders in auth headers (non-provider secrets)
+      const apiKey = headers["x-api-key"];
+      if (apiKey) {
+        headers["x-api-key"] = await this.swap(apiKey);
+      }
 
-    const auth = headers.authorization || headers.Authorization;
-    if (auth) {
-      const parts = auth.split(" ");
-      if (parts.length === 2 && parts[0]!.toLowerCase() === "bearer") {
-        const swapped = await this.swap(parts[1]!);
-        const headerName = headers.authorization
-          ? "authorization"
-          : "Authorization";
-        headers[headerName] = `Bearer ${swapped}`;
+      const auth = headers.authorization || headers.Authorization;
+      if (auth) {
+        const parts = auth.split(" ");
+        if (parts.length === 2 && parts[0]!.toLowerCase() === "bearer") {
+          const swapped = await this.swap(parts[1]!);
+          const headerName = headers.authorization
+            ? "authorization"
+            : "Authorization";
+          headers[headerName] = `Bearer ${swapped}`;
+        }
       }
     }
 
@@ -288,53 +336,9 @@ export async function deleteSecretMappings(
 }
 
 /**
- * Update the real value for all active placeholder mappings that reference
- * a given agentId + envVarName. Used by the token refresh job.
- */
-export async function updateSecretValue(
-  redis: Redis,
-  agentId: string,
-  envVarName: string,
-  newValue: string
-): Promise<number> {
-  const pattern = `${REDIS_KEY_PREFIX}*`;
-  let cursor = "0";
-  let updated = 0;
-  do {
-    const [next, keys] = await redis.scan(
-      cursor,
-      "MATCH",
-      pattern,
-      "COUNT",
-      100
-    );
-    cursor = next;
-    for (const key of keys) {
-      try {
-        const raw = await redis.get(key);
-        if (!raw) continue;
-        const mapping: SecretMapping = JSON.parse(raw);
-        if (mapping.agentId === agentId && mapping.envVarName === envVarName) {
-          mapping.value = newValue;
-          const ttl = await redis.ttl(key);
-          if (ttl > 0) {
-            await redis.set(key, JSON.stringify(mapping), "EX", ttl);
-          } else {
-            await redis.set(key, JSON.stringify(mapping));
-          }
-          updated++;
-        }
-      } catch {
-        // Skip malformed entries
-      }
-    }
-  } while (cursor !== "0");
-  return updated;
-}
-
-/**
- * Generate a placeholder token and store its mapping.
+ * Generate a UUID placeholder token and store its mapping in Redis.
  * Returns the placeholder string to pass to the worker.
+ * Used for non-provider secrets (custom env vars with _KEY/_TOKEN/_SECRET patterns).
  */
 export async function generatePlaceholder(
   redis: Redis,

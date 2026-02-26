@@ -348,6 +348,9 @@ function setupServer(
         githubAuth,
         githubAppInstallUrl,
         githubOAuthClientId: process.env.GITHUB_CLIENT_ID,
+        connectionManager: coreServices
+          .getWorkerGateway()
+          ?.getConnectionManager(),
       });
       app.route("/api/v1/agents/:agentId/config", agentConfigRouter);
       logger.info(

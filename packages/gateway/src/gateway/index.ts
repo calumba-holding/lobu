@@ -8,6 +8,8 @@ import { stream } from "hono/streaming";
 import type { McpConfigService } from "../auth/mcp/config-service";
 import type { McpProxy } from "../auth/mcp/proxy";
 import type { McpTool } from "../auth/mcp/tool-cache";
+import type { ProviderCatalogService } from "../auth/provider-catalog";
+import type { AgentSettingsStore } from "../auth/settings/agent-settings-store";
 import type { IMessageQueue } from "../infrastructure/queue";
 import type { InstructionService } from "../services/instruction-service";
 import type { ISessionManager } from "../session";
@@ -30,6 +32,8 @@ export class WorkerGateway {
   private instructionService: InstructionService;
   private publicGatewayUrl: string;
   private mcpProxy?: McpProxy;
+  private providerCatalogService?: ProviderCatalogService;
+  private agentSettingsStore?: AgentSettingsStore;
 
   constructor(
     queue: IMessageQueue,
@@ -37,7 +41,9 @@ export class WorkerGateway {
     sessionManager: ISessionManager,
     mcpConfigService: McpConfigService,
     instructionService: InstructionService,
-    mcpProxy?: McpProxy
+    mcpProxy?: McpProxy,
+    providerCatalogService?: ProviderCatalogService,
+    agentSettingsStore?: AgentSettingsStore
   ) {
     this.queue = queue;
     this.publicGatewayUrl = publicGatewayUrl;
@@ -50,6 +56,8 @@ export class WorkerGateway {
     this.mcpConfigService = mcpConfigService;
     this.instructionService = instructionService;
     this.mcpProxy = mcpProxy;
+    this.providerCatalogService = providerCatalogService;
+    this.agentSettingsStore = agentSettingsStore;
 
     // Setup Hono app
     this.app = new Hono();
@@ -61,6 +69,13 @@ export class WorkerGateway {
    */
   getApp(): Hono {
     return this.app;
+  }
+
+  /**
+   * Get the connection manager (for sending SSE notifications from external routes)
+   */
+  getConnectionManager(): WorkerConnectionManager {
+    return this.connectionManager;
   }
 
   /**
@@ -91,7 +106,8 @@ export class WorkerGateway {
       return c.json({ error: "Invalid token" }, 401);
     }
 
-    const { deploymentName, userId, conversationId } = auth.tokenData as any;
+    const { deploymentName, userId, conversationId, agentId } =
+      auth.tokenData as any;
     if (!conversationId) {
       return c.json({ error: "Invalid token (missing conversationId)" }, 401);
     }
@@ -132,6 +148,7 @@ export class WorkerGateway {
         deploymentName,
         userId,
         conversationId,
+        agentId || "",
         sseWriter
       );
 
@@ -273,13 +290,22 @@ export class WorkerGateway {
         }
       }
 
+      // Resolve dynamic provider configuration
+      const providerConfig = await this.resolveProviderConfig(
+        agentId || "",
+        this.agentSettingsStore
+          ? (await this.agentSettingsStore.getSettings(agentId || ""))?.model
+          : undefined,
+        baseUrl
+      );
+
       const wsFileCount = [
         contextData.workspaceFiles.identityMd,
         contextData.workspaceFiles.soulMd,
         contextData.workspaceFiles.userMd,
       ].filter(Boolean).length;
       logger.info(
-        `Session context for ${userId}: ${Object.keys(mcpConfig.mcpServers || {}).length} MCPs, ${contextData.platformInstructions.length} chars platform instructions, ${contextData.networkInstructions.length} chars network instructions, ${wsFileCount} workspace files, ${contextData.enabledSkills.length} enabled skills, ${contextData.skillsInstructions.length} chars skills instructions, ${contextData.mcpStatus.length} MCP status entries, ${Object.keys(mcpTools).length} MCP tool lists`
+        `Session context for ${userId}: ${Object.keys(mcpConfig.mcpServers || {}).length} MCPs, ${contextData.platformInstructions.length} chars platform instructions, ${contextData.networkInstructions.length} chars network instructions, ${wsFileCount} workspace files, ${contextData.enabledSkills.length} enabled skills, ${contextData.skillsInstructions.length} chars skills instructions, ${contextData.mcpStatus.length} MCP status entries, ${Object.keys(mcpTools).length} MCP tool lists, provider: ${providerConfig.defaultProvider || "none"}`
       );
 
       return c.json({
@@ -291,6 +317,7 @@ export class WorkerGateway {
         skillsInstructions: contextData.skillsInstructions,
         mcpStatus: contextData.mcpStatus,
         mcpTools,
+        providerConfig,
       });
     } catch (error) {
       logger.error("Failed to generate session context", { error });
@@ -336,6 +363,119 @@ export class WorkerGateway {
    */
   getActiveConnections(): string[] {
     return this.connectionManager.getActiveConnections();
+  }
+
+  /**
+   * Resolve dynamic provider configuration for a given agent.
+   * Mirrors the provider resolution logic in base-deployment-manager's
+   * generateEnvironmentVariables() but returns config values instead of env vars.
+   */
+  private async resolveProviderConfig(
+    agentId: string,
+    agentModel?: string,
+    requestBaseUrl?: string
+  ): Promise<{
+    credentialEnvVarName?: string;
+    defaultProvider?: string;
+    defaultModel?: string;
+    cliBackends?: Array<{
+      providerId: string;
+      name: string;
+      command: string;
+      args?: string[];
+      env?: Record<string, string>;
+      modelArg?: string;
+      sessionArg?: string;
+    }>;
+    providerBaseUrlMappings?: Record<string, string>;
+  }> {
+    if (!this.providerCatalogService || !agentId) {
+      return {};
+    }
+
+    const effectiveProviders =
+      await this.providerCatalogService.getInstalledModules(agentId);
+    if (effectiveProviders.length === 0) {
+      return {};
+    }
+
+    // Determine primary provider
+    let primaryProvider = agentModel
+      ? await this.providerCatalogService.findProviderForModel(
+          agentModel,
+          effectiveProviders
+        )
+      : undefined;
+
+    if (!primaryProvider) {
+      for (const candidate of effectiveProviders) {
+        if (
+          candidate.hasSystemKey() ||
+          (await candidate.hasCredentials(agentId))
+        ) {
+          primaryProvider = candidate;
+          break;
+        }
+      }
+    }
+
+    // Build proxy base URL mappings for all installed providers
+    // Use the request base URL (the worker's DISPATCHER_URL) for internal routing
+    const proxyBaseUrl = `${requestBaseUrl || this.publicGatewayUrl}/api/proxy`;
+    const providerBaseUrlMappings: Record<string, string> = {};
+    for (const provider of effectiveProviders) {
+      Object.assign(
+        providerBaseUrlMappings,
+        provider.getProxyBaseUrlMappings(proxyBaseUrl, agentId)
+      );
+    }
+
+    // Build CLI backend configs
+    const cliBackends: Array<{
+      providerId: string;
+      name: string;
+      command: string;
+      args?: string[];
+      env?: Record<string, string>;
+      modelArg?: string;
+      sessionArg?: string;
+    }> = [];
+    for (const provider of effectiveProviders) {
+      const config = provider.getCliBackendConfig?.();
+      if (config) {
+        cliBackends.push({ providerId: provider.providerId, ...config });
+      }
+    }
+
+    const result: {
+      credentialEnvVarName?: string;
+      defaultProvider?: string;
+      defaultModel?: string;
+      cliBackends?: typeof cliBackends;
+      providerBaseUrlMappings?: Record<string, string>;
+    } = {};
+
+    if (primaryProvider) {
+      result.credentialEnvVarName = primaryProvider.getCredentialEnvVarName();
+      const upstream = primaryProvider.getUpstreamConfig?.();
+      if (upstream?.slug) {
+        result.defaultProvider = upstream.slug;
+      }
+    }
+
+    if (agentModel) {
+      result.defaultModel = agentModel;
+    }
+
+    if (Object.keys(providerBaseUrlMappings).length > 0) {
+      result.providerBaseUrlMappings = providerBaseUrlMappings;
+    }
+
+    if (cliBackends.length > 0) {
+      result.cliBackends = cliBackends;
+    }
+
+    return result;
   }
 
   /**

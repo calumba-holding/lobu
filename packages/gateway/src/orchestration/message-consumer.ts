@@ -250,6 +250,10 @@ export class MessageConsumer {
           data.agentId,
         ].join(":");
 
+        // Reset suppression so each new user message re-triggers the auth prompt
+        // (the lock still prevents concurrent sends within lockTtlSeconds)
+        await this.queue.getRedisClient().del(`lobu:sysmsg:sent:${dedupeKey}`);
+
         let didSend = false;
         try {
           didSend = await this.getSystemMessageLimiter().sendOnce(

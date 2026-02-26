@@ -4,7 +4,9 @@ services:
   # Redis for queue and state management
   redis:
     image: redis:7-alpine
-    command: redis-server --maxmemory 256mb --maxmemory-policy noeviction
+    command: redis-server --maxmemory 256mb --maxmemory-policy noeviction --save 60 1 --dir /data
+    volumes:
+      - redis-data:/data
     networks:
       - lobu-internal
     restart: unless-stopped
@@ -75,6 +77,9 @@ services:
           path: ../packages/gateway/package.json
         - action: rebuild
           path: ../packages/core/package.json
+
+volumes:
+  redis-data:
 
 networks:
   # Public network with internet access (gateway only)

@@ -128,12 +128,18 @@ describe("SystemMessageLimiter", () => {
     };
 
     await expect(
-      limiter.sendOnce("k3", sendFn, { sentTtlSeconds: 60, lockTtlSeconds: 30 })
+      limiter.sendOnce("k3", sendFn, {
+        sentTtlSeconds: 60,
+        lockTtlSeconds: 30,
+      })
     ).rejects.toThrow("fail");
 
     // Next call should try again (not suppressed).
     await expect(
-      limiter.sendOnce("k3", sendFn, { sentTtlSeconds: 60, lockTtlSeconds: 30 })
+      limiter.sendOnce("k3", sendFn, {
+        sentTtlSeconds: 60,
+        lockTtlSeconds: 30,
+      })
     ).rejects.toThrow("fail");
 
     expect(attempts).toBe(2);

@@ -10,7 +10,6 @@ import type { ThreadResponsePayload } from "../infrastructure/queue";
 import type { ResponseRenderer } from "../platform/response-renderer";
 import type { TelegramConfig } from "./config";
 import { convertMarkdownToTelegramHtml } from "./converters/markdown";
-import { generateAgentSelectorToken } from "../routes/public/agent-selector-page";
 
 const logger = createLogger("telegram-response-renderer");
 
@@ -234,61 +233,16 @@ export class TelegramResponseRenderer implements ResponseRenderer {
     traceId?: string
   ): Promise<void> {
     const html = convertMarkdownToTelegramHtml(stream.buffer);
-    const publicGatewayUrl =
-      process.env.PUBLIC_GATEWAY_URL || "http://localhost:8080";
-    const token = generateAgentSelectorToken(
-      stream.userId,
-      "telegram",
-      String(stream.chatId)
-    );
-    const configUrl = `${publicGatewayUrl}/agent-selector?token=${encodeURIComponent(token)}`;
 
-    // Telegram rejects inline keyboard URLs like http://localhost:...; fall back to plain text in that case.
-    let includeButton = true;
-    try {
-      const u = new URL(configUrl);
-      if (
-        u.hostname === "localhost" ||
-        u.hostname === "127.0.0.1" ||
-        u.hostname === "::1"
-      ) {
-        includeButton = false;
-      }
-    } catch {
-      includeButton = false;
-    }
-
-    const reply_markup = includeButton
-      ? {
-          inline_keyboard: [
-            [
-              {
-                text: "Configure Agent",
-                url: configUrl,
-              },
-            ],
-          ],
-        }
-      : undefined;
-
-    let finalHtml = html;
-    let finalBuffer = stream.buffer;
-    if (!includeButton) {
-      const linkText = `\n\nConfigure Agent: ${configUrl}`;
-      finalHtml += linkText;
-      finalBuffer += linkText;
-    }
-
-    if (finalHtml.length <= this.config.messageChunkSize) {
+    if (html.length <= this.config.messageChunkSize) {
       // Single chunk - edit existing message
       try {
         await this.bot.api.editMessageText(
           stream.chatId,
           stream.messageId,
-          finalHtml,
+          html,
           {
             parse_mode: "HTML",
-            reply_markup,
           }
         );
       } catch (err) {
@@ -299,10 +253,7 @@ export class TelegramResponseRenderer implements ResponseRenderer {
             await this.bot.api.editMessageText(
               stream.chatId,
               stream.messageId,
-              finalBuffer,
-              {
-                reply_markup,
-              }
+              stream.buffer
             );
           } catch {
             logger.error({ traceId, error: errStr }, "Failed final edit");
@@ -315,7 +266,7 @@ export class TelegramResponseRenderer implements ResponseRenderer {
     // If HTML is too long, fall back to chunked plain text to avoid splitting
     // HTML tags across messages (Telegram requires well-formed HTML per message).
     const plainChunks = this.chunkMessage(
-      finalBuffer,
+      stream.buffer,
       this.config.messageChunkSize
     );
     if (plainChunks.length === 0) {
@@ -326,10 +277,7 @@ export class TelegramResponseRenderer implements ResponseRenderer {
       await this.bot.api.editMessageText(
         stream.chatId,
         stream.messageId,
-        plainChunks[0]!,
-        {
-          reply_markup,
-        }
+        plainChunks[0]!
       );
     } catch (err) {
       logger.debug(
@@ -340,10 +288,7 @@ export class TelegramResponseRenderer implements ResponseRenderer {
 
     for (let i = 1; i < plainChunks.length; i++) {
       try {
-        const isLastChunk = i === plainChunks.length - 1;
-        await this.bot.api.sendMessage(stream.chatId, plainChunks[i]!, {
-          reply_markup: isLastChunk ? reply_markup : undefined,
-        });
+        await this.bot.api.sendMessage(stream.chatId, plainChunks[i]!);
       } catch (err) {
         logger.debug(
           { traceId, error: String(err), chatId: stream.chatId },
@@ -375,52 +320,8 @@ export class TelegramResponseRenderer implements ResponseRenderer {
 
     const errorMessage = `Error: ${payload.error}`;
 
-    const publicGatewayUrl =
-      process.env.PUBLIC_GATEWAY_URL || "http://localhost:8080";
-    const token = generateAgentSelectorToken(
-      payload.userId,
-      "telegram",
-      String(chatId)
-    );
-    const configUrl = `${publicGatewayUrl}/agent-selector?token=${encodeURIComponent(token)}`;
-
-    // Telegram rejects inline keyboard URLs like http://localhost:...; fall back to plain text in that case.
-    let includeButton = true;
     try {
-      const u = new URL(configUrl);
-      if (
-        u.hostname === "localhost" ||
-        u.hostname === "127.0.0.1" ||
-        u.hostname === "::1"
-      ) {
-        includeButton = false;
-      }
-    } catch {
-      includeButton = false;
-    }
-
-    const reply_markup = includeButton
-      ? {
-          inline_keyboard: [
-            [
-              {
-                text: "Configure Agent",
-                url: configUrl,
-              },
-            ],
-          ],
-        }
-      : undefined;
-
-    let finalErrorMessage = errorMessage;
-    if (!includeButton) {
-      finalErrorMessage += `\n\nConfigure Agent: ${configUrl}`;
-    }
-
-    try {
-      await this.bot.api.sendMessage(chatId, finalErrorMessage, {
-        reply_markup,
-      });
+      await this.bot.api.sendMessage(chatId, errorMessage);
     } catch (err) {
       logger.error(
         { traceId, error: String(err), chatId },

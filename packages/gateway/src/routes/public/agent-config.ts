@@ -10,6 +10,7 @@ import type { ProviderCatalogService } from "../../auth/provider-catalog";
 import type { ProviderStatus } from "../../auth/provider-status";
 import type { AgentSettings, AgentSettingsStore } from "../../auth/settings";
 import { verifySettingsToken } from "../../auth/settings/token-service";
+import type { WorkerConnectionManager } from "../../gateway/connection-manager";
 import type { IMessageQueue } from "../../infrastructure/queue";
 import type { GitHubAppAuth } from "../../modules/git-filesystem/github-app";
 import { collectModelValues } from "../../auth/provider-model-options";
@@ -182,6 +183,7 @@ export interface AgentConfigRoutesConfig {
   githubAppInstallUrl?: string;
   githubOAuthClientId?: string;
   queue?: IMessageQueue;
+  connectionManager?: WorkerConnectionManager;
 }
 
 export function createAgentConfigRoutes(
@@ -327,6 +329,9 @@ export function createAgentConfigRoutes(
 
       if (Object.keys(updates).length > 0) {
         await config.agentSettingsStore.updateSettings(agentId, updates);
+
+        // Notify active workers of config changes
+        config.connectionManager?.notifyAgent(agentId, "config_changed", {});
       }
 
       if (body.mcpServers && config.queue && payload.sourceContext) {
@@ -403,6 +408,7 @@ export function createAgentConfigRoutes(
         providerId.trim(),
         providerConfig
       );
+      config.connectionManager?.notifyAgent(agentId, "config_changed", {});
       return c.json({ success: true, agentId });
     } catch (e) {
       return c.json(
@@ -434,6 +440,7 @@ export function createAgentConfigRoutes(
         agentId,
         providerId.trim()
       );
+      config.connectionManager?.notifyAgent(agentId, "config_changed", {});
       return c.json({ success: true, agentId });
     } catch (e) {
       return c.json(
@@ -465,6 +472,7 @@ export function createAgentConfigRoutes(
         agentId,
         providerIds.filter((id): id is string => typeof id === "string")
       );
+      config.connectionManager?.notifyAgent(agentId, "config_changed", {});
       return c.json({ success: true, agentId });
     } catch (e) {
       return c.json(

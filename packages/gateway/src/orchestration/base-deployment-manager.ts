@@ -279,20 +279,10 @@ export abstract class BaseDeploymentManager {
       );
 
       if (existingDeployment) {
-        if (existingDeployment.replicas > 0) {
-          // Worker is already running - ensure it's ready (handles crash recovery)
-          await this.scaleDeployment(deploymentName, 1);
-          return;
-        }
-
-        // Worker is scaled down - delete and recreate with fresh env vars.
-        // Provider settings, credentials, and CLI backends may have changed
-        // since the deployment was originally created.
-        logger.info(
-          `Recreating scaled-down deployment ${deploymentName} with fresh settings`
-        );
-        await this.deleteDeployment(deploymentName);
-        // Fall through to createDeployment below
+        // Scale up the existing deployment. Provider config is now delivered
+        // dynamically via session context, so no need to recreate.
+        await this.scaleDeployment(deploymentName, 1);
+        return;
       }
 
       // Check if we would exceed max deployments limit
@@ -514,8 +504,13 @@ export abstract class BaseDeploymentManager {
   }
 
   /**
-   * Replace secret env var values with short-lived placeholders and route
-   * provider SDKs through the secret proxy.
+   * Replace secret env var values with opaque placeholders before passing to workers.
+   *
+   * Provider credential env vars are set to `"lobu-proxy"` — the proxy resolves
+   * the real credential at request time using agentId from the URL path
+   * (`/a/{agentId}`) and the provider slug.
+   *
+   * Non-provider secrets use UUID placeholders stored in Redis.
    */
   private async injectSecretPlaceholders(
     envVars: Record<string, string>,
@@ -524,35 +519,52 @@ export abstract class BaseDeploymentManager {
   ): Promise<Record<string, string>> {
     if (!this.redisClient) return envVars;
 
+    // Collect credential env var names from all providers
+    const providerCredentialVars = new Set<string>();
+    for (const provider of this.providerModules) {
+      providerCredentialVars.add(provider.getCredentialEnvVarName());
+    }
+
     let hasSecrets = false;
     for (const [key, value] of Object.entries(envVars)) {
       if (!value || !isSecretEnvVar(key, this.providerModules)) continue;
       if (key === "WORKER_TOKEN") continue;
-      try {
-        let placeholder = await generatePlaceholder(
-          this.redisClient,
-          agentId,
-          key,
-          value,
-          deploymentName
-        );
-        // Prefix OAuth placeholders so the agent runtime detects OAuth mode
-        // from the token format (sk-ant-oat01-*) and adds the correct headers,
-        // while the proxy still swaps the placeholder for the real token.
-        if (/OAUTH_TOKEN/i.test(key)) {
-          placeholder = `sk-ant-oat01-${placeholder}`;
-        }
-        envVars[key] = placeholder;
+
+      if (providerCredentialVars.has(key)) {
+        // Provider credentials use a proxy placeholder. The worker never
+        // sees real credentials. The proxy resolves the real credential
+        // using agentId from the URL path (/a/{agentId}) and the provider
+        // slug, then overrides the Authorization header before forwarding.
+        envVars[key] = "lobu-proxy";
         hasSecrets = true;
-      } catch (error) {
-        logger.warn(`Failed to generate placeholder for ${key}:`, error);
+      } else {
+        // Use UUID placeholder for non-provider secrets (legacy path)
+        try {
+          let placeholder = await generatePlaceholder(
+            this.redisClient,
+            agentId,
+            key,
+            value,
+            deploymentName
+          );
+          if (/OAUTH_TOKEN/i.test(key)) {
+            placeholder = `sk-ant-oat01-${placeholder}`;
+          }
+          envVars[key] = placeholder;
+          hasSecrets = true;
+        } catch (error) {
+          logger.warn(`Failed to generate placeholder for ${key}:`, error);
+        }
       }
     }
 
     if (hasSecrets) {
       const proxyUrl = `${this.getDispatcherUrl()}/api/proxy`;
       for (const provider of this.providerModules) {
-        Object.assign(envVars, provider.getProxyBaseUrlMappings(proxyUrl));
+        Object.assign(
+          envVars,
+          provider.getProxyBaseUrlMappings(proxyUrl, agentId)
+        );
       }
       logger.info(
         `🔐 Generated secret placeholders for ${deploymentName}, routing through proxy`
@@ -712,7 +724,10 @@ export abstract class BaseDeploymentManager {
       }
 
       const proxyBaseUrl = `${this.getDispatcherUrl()}/api/proxy`;
-      const mappings = primaryProvider.getProxyBaseUrlMappings(proxyBaseUrl);
+      const mappings = primaryProvider.getProxyBaseUrlMappings(
+        proxyBaseUrl,
+        agentId
+      );
       const providerBaseUrl = Object.values(mappings)[0];
       if (providerBaseUrl) {
         validated.agentOptions = {
@@ -720,24 +735,17 @@ export abstract class BaseDeploymentManager {
           providerBaseUrl,
         };
       }
-      // Pass credential env var name as a container env var so the worker
-      // can read it from process.env (agentOptions in job payload is separate
-      // from the env vars set on the container).
-      envVars.CREDENTIAL_ENV_VAR_NAME =
-        primaryProvider.getCredentialEnvVarName();
 
-      // Set default provider slug so the worker can resolve models in auto mode
-      const upstream = primaryProvider.getUpstreamConfig?.();
-      if (upstream?.slug) {
-        envVars.AGENT_DEFAULT_PROVIDER = upstream.slug;
-      }
+      // CREDENTIAL_ENV_VAR_NAME and AGENT_DEFAULT_PROVIDER are now
+      // delivered dynamically via session context endpoint. No longer
+      // set as static container env vars.
     }
 
     // Build full provider base URL mappings for all installed providers
     const proxyBaseUrl = `${this.getDispatcherUrl()}/api/proxy`;
     const providerBaseUrlMappings: Record<string, string> = {};
     for (const provider of effectiveProviders) {
-      const mappings = provider.getProxyBaseUrlMappings(proxyBaseUrl);
+      const mappings = provider.getProxyBaseUrlMappings(proxyBaseUrl, agentId);
       Object.assign(providerBaseUrlMappings, mappings);
     }
     if (Object.keys(providerBaseUrlMappings).length > 0) {
@@ -747,28 +755,12 @@ export abstract class BaseDeploymentManager {
       };
     }
 
-    // Build CLI backend configs from installed providers and pass as env var
-    // (agentOptions in the job payload is sent via SSE before this method runs,
-    // so we must use a container env var for the worker to pick it up)
-    const cliBackends: Array<{
-      providerId: string;
-      name: string;
-      command: string;
-      args?: string[];
-      env?: Record<string, string>;
-      modelArg?: string;
-      sessionArg?: string;
-    }> = [];
-    for (const provider of effectiveProviders) {
-      const config = provider.getCliBackendConfig?.();
-      if (config) {
-        cliBackends.push({ providerId: provider.providerId, ...config });
-      }
-    }
-    if (cliBackends.length > 0) {
-      envVars.CLI_BACKENDS = JSON.stringify(cliBackends);
-
-      // Auto-add npm registry domains so npx can download CLI packages
+    // CLI_BACKENDS is now delivered dynamically via session context.
+    // Still need to auto-add npm registry domains for npx at deploy time.
+    const hasCliBackendProviders = effectiveProviders.some((p) =>
+      p.getCliBackendConfig?.()
+    );
+    if (hasCliBackendProviders) {
       const NPM_DOMAINS = ["registry.npmjs.org", "registry.npmmirror.com"];
       const currentConfig =
         (await networkConfigStore.get(deploymentName)) ?? {};

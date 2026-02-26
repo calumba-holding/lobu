@@ -417,10 +417,11 @@ export class CoreServices {
 
     // Register provider upstream configs with the secret proxy for path-based routing
     if (this.secretProxy) {
+      this.secretProxy.setAuthProfilesManager(this.authProfilesManager);
       for (const provider of moduleRegistry.getModelProviderModules()) {
         const upstream = provider.getUpstreamConfig?.();
         if (upstream) {
-          this.secretProxy.registerUpstream(upstream);
+          this.secretProxy.registerUpstream(upstream, provider.providerId);
         }
       }
       logger.info("✅ Provider upstreams registered with secret proxy");
@@ -515,7 +516,9 @@ export class CoreServices {
       this.sessionManager,
       this.mcpConfigService,
       this.instructionService,
-      this.mcpProxy
+      this.mcpProxy,
+      this.providerCatalogService,
+      this.agentSettingsStore
     );
     logger.info("Worker gateway initialized");
 

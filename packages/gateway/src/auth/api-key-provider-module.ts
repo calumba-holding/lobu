@@ -105,9 +105,15 @@ export class ApiKeyProviderModule
     return !!process.env[this.systemEnvVarName];
   }
 
-  getProxyBaseUrlMappings(proxyUrl: string): Record<string, string> {
+  getProxyBaseUrlMappings(
+    proxyUrl: string,
+    agentId?: string
+  ): Record<string, string> {
     if (!this.slug) return {};
-    return { [this.baseUrlEnvVarName]: `${proxyUrl}/${this.slug}` };
+    const base = `${proxyUrl}/${this.slug}`;
+    return {
+      [this.baseUrlEnvVarName]: agentId ? `${base}/a/${agentId}` : base,
+    };
   }
 
   injectSystemKeyFallback(

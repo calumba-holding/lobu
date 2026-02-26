@@ -314,6 +314,17 @@ export class GatewayClient {
         return;
       }
 
+      if (eventType === "config_changed") {
+        logger.info(
+          "Received config_changed event from gateway, invalidating session context cache"
+        );
+        const { invalidateSessionContextCache } = await import(
+          "../openclaw/session-context"
+        );
+        invalidateSessionContextCache();
+        return;
+      }
+
       if (eventType === "job") {
         try {
           const parsedData = JSON.parse(data);

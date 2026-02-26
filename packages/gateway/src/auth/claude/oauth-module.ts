@@ -106,8 +106,12 @@ export class ClaudeOAuthModule
     );
   }
 
-  getProxyBaseUrlMappings(proxyUrl: string): Record<string, string> {
-    return { ANTHROPIC_BASE_URL: `${proxyUrl}/anthropic` };
+  getProxyBaseUrlMappings(
+    proxyUrl: string,
+    agentId?: string
+  ): Record<string, string> {
+    const base = `${proxyUrl}/anthropic`;
+    return { ANTHROPIC_BASE_URL: agentId ? `${base}/a/${agentId}` : base };
   }
 
   catalogDescription = "Anthropic's Claude AI with OAuth authentication";

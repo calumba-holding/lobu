@@ -17,6 +17,7 @@ interface WorkerConnection {
   deploymentName: string;
   userId: string;
   conversationId: string;
+  agentId: string;
   writer: SSEWriter;
   lastActivity: number;
   lastPing: number;
@@ -28,6 +29,7 @@ interface WorkerConnection {
  */
 export class WorkerConnectionManager {
   private connections: Map<string, WorkerConnection> = new Map();
+  private agentDeployments: Map<string, Set<string>> = new Map();
   private heartbeatInterval: NodeJS.Timeout;
   private cleanupInterval: NodeJS.Timeout;
 
@@ -49,18 +51,26 @@ export class WorkerConnectionManager {
     deploymentName: string,
     userId: string,
     conversationId: string,
+    agentId: string,
     writer: SSEWriter
   ): void {
     const connection: WorkerConnection = {
       deploymentName,
       userId,
       conversationId,
+      agentId,
       writer,
       lastActivity: Date.now(),
       lastPing: Date.now(),
     };
 
     this.connections.set(deploymentName, connection);
+
+    // Maintain agentId → deployments reverse index
+    if (!this.agentDeployments.has(agentId)) {
+      this.agentDeployments.set(agentId, new Set());
+    }
+    this.agentDeployments.get(agentId)!.add(deploymentName);
 
     // Send initial connection event
     this.sendSSE(writer, "connected", {
@@ -70,7 +80,7 @@ export class WorkerConnectionManager {
     });
 
     logger.info(
-      `Worker ${deploymentName} connected (user: ${userId}, conversation: ${conversationId})`
+      `Worker ${deploymentName} connected (user: ${userId}, agent: ${agentId}, conversation: ${conversationId})`
     );
   }
 
@@ -80,6 +90,15 @@ export class WorkerConnectionManager {
   removeConnection(deploymentName: string): void {
     const connection = this.connections.get(deploymentName);
     if (connection) {
+      // Clean up reverse index
+      const deployments = this.agentDeployments.get(connection.agentId);
+      if (deployments) {
+        deployments.delete(deploymentName);
+        if (deployments.size === 0) {
+          this.agentDeployments.delete(connection.agentId);
+        }
+      }
+
       try {
         connection.writer.end();
       } catch (error) {
@@ -181,6 +200,38 @@ export class WorkerConnectionManager {
           `Cleaning up stale connection: ${deploymentName} (no activity for ${Math.round((now - connection.lastActivity) / 1000)}s)`
         );
         this.removeConnection(deploymentName);
+      }
+    }
+  }
+
+  /**
+   * Get all deployment names for a given agentId
+   */
+  getDeploymentsForAgent(agentId: string): string[] {
+    const deployments = this.agentDeployments.get(agentId);
+    return deployments ? Array.from(deployments) : [];
+  }
+
+  /**
+   * Send an SSE event to all connected workers for a given agentId.
+   * Partial failures are logged but don't block.
+   */
+  notifyAgent(agentId: string, event: string, data: unknown): void {
+    const deployments = this.getDeploymentsForAgent(agentId);
+    if (deployments.length === 0) {
+      logger.debug(
+        `No active deployments for agent ${agentId}, skipping ${event} notification`
+      );
+      return;
+    }
+
+    logger.info(
+      `Sending ${event} to ${deployments.length} deployment(s) for agent ${agentId}`
+    );
+    for (const deploymentName of deployments) {
+      const connection = this.connections.get(deploymentName);
+      if (connection) {
+        this.sendSSE(connection.writer, event, data);
       }
     }
   }

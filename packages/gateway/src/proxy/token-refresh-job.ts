@@ -2,7 +2,6 @@ import { createLogger } from "@lobu/core";
 import type Redis from "ioredis";
 import { ClaudeOAuthClient } from "../auth/oauth/claude-client";
 import type { AuthProfilesManager } from "../auth/settings/auth-profiles-manager";
-import { updateSecretValue } from "./secret-proxy";
 
 const logger = createLogger("token-refresh-job");
 
@@ -16,7 +15,10 @@ const EXPIRY_BUFFER_MS = 5 * 60 * 1000; // Refresh tokens expiring within 5 minu
  * 1. Scans authProfiles for Claude OAuth tokens expiring soon
  * 2. Refreshes via Claude OAuth client
  * 3. Updates authProfiles with new credentials
- * 4. Updates active Redis placeholder mappings so the proxy serves fresh tokens
+ *
+ * With stable agent markers, the proxy resolves credentials from auth profiles
+ * at request time, so updating the profile is sufficient — no need to update
+ * Redis placeholder mappings.
  *
  * TODO: Generalize to all OAuth providers when more providers support refresh tokens.
  */
@@ -128,16 +130,9 @@ export class TokenRefreshJob {
         makePrimary: false,
       });
 
-      const updated = await updateSecretValue(
-        this.redis,
-        agentId,
-        "CLAUDE_CODE_OAUTH_TOKEN",
-        newCredentials.accessToken
-      );
-
-      logger.info(`Token refreshed for agent ${agentId} (claude)`, {
-        updatedPlaceholders: updated,
-      });
+      // With stable agent markers, updating the auth profile is sufficient.
+      // The proxy resolves credentials from auth profiles at request time.
+      logger.info(`Token refreshed for agent ${agentId} (claude)`);
     } catch (error) {
       logger.error(`Failed to refresh Claude token for agent ${agentId}`, {
         error,
