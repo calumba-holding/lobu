@@ -83,7 +83,11 @@ Every Lobu agent comes equipped with a suite of tools for autonomous execution a
 | **Managed MCP Proxy** | Securely connect to any MCP server with OAuth. | [MCP Proxy](docs/SECURITY.md#mcp-oauth-and-credentials) |
 | **Advanced Capabilities** | Extend agent abilities with web browsing, headless UI interaction, and specialized utilities via Nix packages or external MCP servers. | `bash` (Nix), `SearchExtensions`, `InstallExtension` (MCP) |
 
-### Key Concepts
+### Popular MCP Integrations
+Lobu's gateway handles OAuth and secret injection for any MCP server, including:
+- **Productivity:** Google Calendar, Slack, Jira, Notion
+- **Development:** GitHub, GitLab, Postgres, Docker
+- **Knowledge:** Wikipedia, Brave Search, YouTube, PDF Search
 
 **Gateway as single egress.** All worker traffic — internet and MCP — routes through the gateway. Workers have no direct network access. Domain filtering controls which external services workers can reach.
 
@@ -95,35 +99,16 @@ Every Lobu agent comes equipped with a suite of tools for autonomous execution a
 
 **Multi-provider auth.** Claude (OAuth), ChatGPT (device-code flow), and API-key providers (Gemini, NVIDIA, etc.) via pluggable `ModelProviderModule`.
 
-## Support & Consultancy
-
-Lobu is designed for high-stakes, persistent agents. While the platform is open-source, the true value of an agent lies in its **soul, identity, and integration**.
-
-If you want to deploy agents for your organization but need expert implementation and infrastructure maintenance, we provide end-to-end support for:
-
-*   **Employee AI Assistants** — Deploy persistent, sandboxed agents across Slack/Telegram that have access to your internal tools and documentation.
-*   **Automated Customer Support** — Build agents that handle complex, multi-step support tickets autonomously while keeping a human in the loop.
-*   **Autonomous Workflows** — Use Lobu to automate background tasks that require persistent state, long-running execution, and scheduled cron jobs.
-*   **Infrastructure Maintenance** — Let us manage your private Lobu deployment on your own Kubernetes cluster, ensuring 99.9% uptime, security updates, and automated scaling.
-*   **Custom Tooling & Skills** — I build specialized MCP servers, Nix-powered runtimes, and OpenClaw skills tailored to your business needs.
-
----
-
-**Expert Implementation.** I'm a second-time technical founder. Previously, I founded [rakam.io](https://rakam.io), an enterprise analytics PaaS acquired by [LiveRamp](https://liveramp.com) (NYSE: RAMP). I help organizations move beyond chatbots by building the secure, scalable infrastructure required for production-grade autonomous agents.
-
-> [!TIP]
-> **Interested in launching persistent agents for your team or customers?** I'm happy to help you architect a reliable deployment for your specific use case. [🗓️ **Talk to Founder**](https://calendar.app.google/LwAk3ecptkJQaYr87) or [reach out on **X/Twitter**](https://x.com/bu7emba).
-
 ## How Lobu Differs
 
-Lobu provides a hardened gateway and orchestration layer for the [OpenClaw](https://openclaw.ai/) runtime.
+Lobu is the **infrastructure layer** for autonomous agents. Unlike frameworks (LangChain, CrewAI) that help you *write* agent logic, Lobu is the **delivery mechanism** that runs those agents at scale — handling the sandboxing, persistence, and messaging connectivity.
 
 | | Lobu | OpenClaw |
 |---|---|---|
 | **Scale to zero** | Workers scale down when idle | Requires always-on computer |
 | **Multi-tenant** | Single bot, per-channel/DM isolation | One instance per setup |
 | **Multi-platform** | Slack, Telegram, WhatsApp, REST API | [15+ chat platforms](https://openclaw.ai/integrations) |
-| **Runtime** | OpenClaw Pi Agent via gateway | OpenClaw standalone |
+| **Runtime** | OpenClaw engine (sandboxed/proxied) | Native OpenClaw runtime |
 | **User onboarding** | Configure page with OAuth login per provider | CLI setup required |
 | **MCP access** | Proxied through gateway, secrets isolated | Direct from agent |
 | **Network isolation** | Workers sandboxed, domain-filtered egress | No built-in isolation |
@@ -135,3 +120,22 @@ Lobu provides a hardened gateway and orchestration layer for the [OpenClaw](http
 - [**Secrets stay in gateway**](docs/SECURITY.md#mcp-oauth-and-credentials) — MCP OAuth, provider credentials, and `${env:}` substitution.
 - [**Defense-in-depth on K8s**](docs/SECURITY.md#kubernetes) — NetworkPolicies, RBAC, and optional gVisor/Kata runtimes.
 - [**Nix system packages**](docs/SECURITY.md#skills-and-policy) — per-agent reproducible tooling and skills policy enforcement.
+
+## Support & Consultancy
+
+Lobu is designed for high-stakes, persistent agents. While the platform is open-source, the true value of an agent lies in its **soul, identity, and integration**.
+
+If you want to deploy agents for your organization but need expert implementation and infrastructure maintenance, I provide end-to-end support for:
+
+*   **Employee AI Assistants** — Deploy persistent, sandboxed agents across Slack/Telegram that have access to your internal tools and documentation.
+*   **Automated Customer Support** — Build agents that handle complex, multi-step support tickets autonomously while keeping a human in the loop.
+*   **Autonomous Workflows** — Use Lobu to automate background tasks that require persistent state, long-running execution, and scheduled cron jobs.
+*   **Infrastructure Maintenance** — Let me manage your private Lobu deployment on your own Kubernetes cluster, ensuring 99.9% uptime, security updates, and automated scaling.
+*   **Custom Tooling & Skills** — I build specialized MCP servers, Nix-powered runtimes, and OpenClaw skills tailored to your business needs.
+
+---
+
+**Expert Implementation.** I'm a second-time technical founder. Previously, I founded [rakam.io](https://rakam.io), an enterprise analytics PaaS acquired by [LiveRamp](https://liveramp.com) (NYSE: RAMP). I help organizations move beyond chatbots by building the secure, scalable infrastructure required for production-grade autonomous agents.
+
+> [!TIP]
+> **Interested in launching persistent agents for your team or customers?** I'm happy to help you architect a reliable deployment for your specific use case. [🗓️ **Talk to Founder**](https://calendar.app.google/LwAk3ecptkJQaYr87) or [reach out on **X/Twitter**](https://x.com/bu7emba).
