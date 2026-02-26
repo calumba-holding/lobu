@@ -26,7 +26,8 @@ export class ChatGPTOAuthModule
   name = "chatgpt-oauth";
   providerId = "chatgpt";
   providerDisplayName = "ChatGPT";
-  providerIconUrl = "https://chatgpt.com/favicon.ico";
+  providerIconUrl =
+    "https://www.google.com/s2/favicons?domain=chatgpt.com&sz=128";
   authType = "device-code" as const;
   supportedAuthTypes: ("oauth" | "device-code" | "api-key")[] = [
     "device-code",

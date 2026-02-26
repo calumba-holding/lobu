@@ -35,7 +35,8 @@ export class ClaudeOAuthModule
   name = "claude-oauth";
   providerId = "claude";
   providerDisplayName = "Claude";
-  providerIconUrl = "https://www.anthropic.com/favicon.ico";
+  providerIconUrl =
+    "https://www.google.com/s2/favicons?domain=anthropic.com&sz=128";
   authType = "oauth" as const;
   supportedAuthTypes: ("oauth" | "device-code" | "api-key")[] = [
     "oauth",

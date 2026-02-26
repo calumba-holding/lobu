@@ -316,7 +316,8 @@ export class CoreServices {
     const nvidiaModule = new ApiKeyProviderModule({
       providerId: "nvidia",
       providerDisplayName: "NVIDIA NIM (free)",
-      providerIconUrl: "https://www.nvidia.com/favicon.ico",
+      providerIconUrl:
+        "https://www.google.com/s2/favicons?domain=nvidia.com&sz=128",
       envVarName: "NVIDIA_API_KEY",
       slug: "nvidia",
       upstreamBaseUrl: "https://integrate.api.nvidia.com",
@@ -356,7 +357,7 @@ export class CoreServices {
       providerId: "gemini",
       providerDisplayName: "Google Gemini",
       providerIconUrl:
-        "https://www.gstatic.com/lamda/images/gemini_favicon_f069958c85030456e93de685481c559f160ea06b.png",
+        "https://www.google.com/s2/favicons?domain=gemini.google.com&sz=128",
       envVarName: "GEMINI_API_KEY",
       slug: "gemini",
       upstreamBaseUrl: "https://generativelanguage.googleapis.com",
@@ -374,12 +375,12 @@ export class CoreServices {
     const zaiModule = new ApiKeyProviderModule({
       providerId: "z-ai",
       providerDisplayName: "z.ai",
-      providerIconUrl: "https://z.ai/apple-touch-icon.png",
+      providerIconUrl: "https://www.google.com/s2/favicons?domain=z.ai&sz=128",
       envVarName: "Z_AI_API_KEY",
       slug: "z-ai",
       upstreamBaseUrl: "https://api.z.ai",
       apiKeyInstructions:
-        'Get your API key from <a href="https://z.ai" target="_blank" class="text-slate-600 hover:underline">z.ai</a>',
+        'Get your API key from <a href="https://z.ai/manage-apikey/apikey-list" target="_blank" class="text-slate-600 hover:underline">z.ai</a>',
       apiKeyPlaceholder: "zai-...",
       agentSettingsStore: this.agentSettingsStore,
     });
@@ -392,7 +393,8 @@ export class CoreServices {
     const elevenlabsModule = new ApiKeyProviderModule({
       providerId: "elevenlabs",
       providerDisplayName: "ElevenLabs",
-      providerIconUrl: "https://elevenlabs.io/favicon.ico",
+      providerIconUrl:
+        "https://www.google.com/s2/favicons?domain=elevenlabs.io&sz=128",
       envVarName: "ELEVENLABS_API_KEY",
       slug: "elevenlabs",
       upstreamBaseUrl: "https://api.elevenlabs.io",

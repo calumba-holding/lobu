@@ -279,8 +279,20 @@ export abstract class BaseDeploymentManager {
       );
 
       if (existingDeployment) {
-        await this.scaleDeployment(deploymentName, 1);
-        return;
+        if (existingDeployment.replicas > 0) {
+          // Worker is already running - ensure it's ready (handles crash recovery)
+          await this.scaleDeployment(deploymentName, 1);
+          return;
+        }
+
+        // Worker is scaled down - delete and recreate with fresh env vars.
+        // Provider settings, credentials, and CLI backends may have changed
+        // since the deployment was originally created.
+        logger.info(
+          `Recreating scaled-down deployment ${deploymentName} with fresh settings`
+        );
+        await this.deleteDeployment(deploymentName);
+        // Fall through to createDeployment below
       }
 
       // Check if we would exceed max deployments limit
