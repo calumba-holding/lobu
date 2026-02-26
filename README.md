@@ -1,10 +1,17 @@
 # Lobu
 
-![License: BUSL-1.1](https://img.shields.io/badge/license-BUSL--1.1-blue)
+![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)
 
 **Lobu** is a platform for deploying **persistent, autonomous agents**. It provides a unified gateway for programmatic agent creation and multi-platform access (Slack, Telegram, WhatsApp), backed by a hardened, sandboxed execution environment.
 
 **Batteries included.** Lobu bundles sandboxed execution, MCP proxy with OAuth, and network isolation — no external sandbox providers, no third-party MCP gateways. One deployment, everything included.
+
+---
+
+> [!TIP]
+> **Launch your agents with the Lobu team.** Whether you're looking to automate support, empower your employees with persistent AI, or need enterprise-grade infrastructure maintenance, we can help. [🗓️ **Book an Agent Strategy Call**](https://cal.com/lobu-ai/strategy)
+
+---
 
 ## Messaging & API
 
@@ -93,6 +100,21 @@ Every Lobu agent comes equipped with a suite of tools for autonomous execution a
 **OpenClaw runtime.** Workers run [OpenClaw Pi Agent](https://openclaw.ai/), with per-agent model selection via the settings page. Supports OpenClaw skills, `IDENTITY.md`, `SOUL.md`, and `USER.md` workspace files.
 
 **Multi-provider auth.** Claude (OAuth), ChatGPT (device-code flow), and API-key providers (Gemini, NVIDIA, etc.) via pluggable `ModelProviderModule`.
+
+## Enterprise & Implementation
+
+Lobu is designed for high-stakes, persistent agents. While the platform is open-source, the true value of an agent lies in its **soul, identity, and integration**.
+
+If you want to deploy agents for your organization but need expert implementation and infrastructure maintenance, we provide end-to-end support for:
+
+*   **Employee AI Assistants** — Deploy persistent, sandboxed agents across Slack/Telegram that have access to your internal tools and documentation.
+*   **Automated Customer Support** — Build agents that handle complex, multi-step support tickets autonomously while keeping a human in the loop.
+*   **Autonomous Workflows** — Use Lobu to automate background tasks that require persistent state, long-running execution, and scheduled cron jobs.
+*   **Infrastructure Maintenance** — Let us manage your private Lobu deployment on your own Kubernetes cluster, ensuring 99.9% uptime, security updates, and automated scaling.
+*   **Custom Tooling & Skills** — We build specialized MCP servers, Nix-powered runtimes, and OpenClaw skills tailored to your business needs.
+
+> [!TIP]
+> **Need help architecting your agent workforce?** [🗓️ **Book a Strategy Call**](https://cal.com/lobu-ai/strategy)
 
 ## How Lobu Differs
 
