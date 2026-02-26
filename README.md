@@ -108,14 +108,14 @@ If you want to deploy agents for your organization but need expert implementatio
 
 ---
 
-**Built by Experts.** Lobu is created by Burak Emre, a second-time technical founder. Previously, I founded [rakam.io](https://rakam.io), an enterprise analytics PaaS acquired by [LiveRamp](https://liveramp.com) (NYSE: RAMP). I bring years of experience building secure, scalable enterprise infrastructure to the world of autonomous agents.
+**Expert Implementation.** I'm a second-time technical founder. Previously, I founded [rakam.io](https://rakam.io), an enterprise analytics PaaS acquired by [LiveRamp](https://liveramp.com) (NYSE: RAMP). I bring years of experience building secure, scalable enterprise infrastructure to the world of autonomous agents.
 
 > [!TIP]
 > **Need help architecting your agent workforce?** [🗓️ **Book a Strategy Call**](https://calendar.app.google/LwAk3ecptkJQaYr87)
 
 ## How Lobu Differs
 
-This project started in **July 2025** and was first published under [peerbot.ai](https://peerbot.ai). After OpenClaw was released, I added its runtime as the primary agent runtime — Lobu has its own gateway system that replaces the OpenClaw gateway.
+Lobu provides a hardened gateway and orchestration layer for the [OpenClaw](https://openclaw.ai/) runtime.
 
 | | Lobu | OpenClaw |
 |---|---|---|
