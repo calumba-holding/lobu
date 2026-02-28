@@ -75,7 +75,13 @@ export function verifyWorkerToken(token: string): WorkerTokenData | null {
       return null;
     }
 
-    // No expiration check - workers are ephemeral and short-lived
+    // Check token expiration (default 24h)
+    const ttl = Number(process.env.WORKER_TOKEN_TTL_MS) || 86400000;
+    if (Date.now() - data.timestamp > ttl) {
+      logger.error("Worker token rejected: expired");
+      return null;
+    }
+
     return data;
   } catch (error) {
     logger.error("Error verifying token:", error);

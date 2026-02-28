@@ -7,6 +7,7 @@ import { OpenAPIHono } from "@hono/zod-openapi";
 import { createLogger } from "@lobu/core";
 import { apiReference } from "@scalar/hono-api-reference";
 import { cors } from "hono/cors";
+import { secureHeaders } from "hono/secure-headers";
 import type { GatewayConfig } from "../config";
 import {
   getAllRoutes,
@@ -39,7 +40,36 @@ function setupServer(
   const app = new OpenAPIHono();
 
   // Global middleware
-  app.use("*", cors());
+  app.use(
+    "*",
+    secureHeaders({
+      xFrameOptions: "DENY",
+      xContentTypeOptions: "nosniff",
+      referrerPolicy: "strict-origin-when-cross-origin",
+      strictTransportSecurity: "max-age=63072000; includeSubDomains",
+      contentSecurityPolicy: {
+        defaultSrc: ["'self'"],
+        scriptSrc: [
+          "'self'",
+          "'unsafe-inline'",
+          "'unsafe-eval'",
+          "https://cdn.jsdelivr.net",
+        ],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:", "https:"],
+        connectSrc: ["'self'", "ws:", "wss:"],
+        fontSrc: ["'self'", "https://fonts.gstatic.com"],
+      },
+    })
+  );
+  app.use(
+    "*",
+    cors({
+      origin: process.env.ALLOWED_ORIGINS
+        ? process.env.ALLOWED_ORIGINS.split(",")
+        : "*",
+    })
+  );
 
   // Health endpoints
   app.get("/health", (c) => {
@@ -68,6 +98,13 @@ function setupServer(
 
   // Prometheus metrics endpoint
   app.get("/metrics", async (c) => {
+    const metricsAuthToken = process.env.METRICS_AUTH_TOKEN;
+    if (metricsAuthToken) {
+      const authHeader = c.req.header("Authorization");
+      if (authHeader !== `Bearer ${metricsAuthToken}`) {
+        return c.text("Unauthorized", 401);
+      }
+    }
     const { getMetricsText } = await import("../metrics/prometheus");
     c.header("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
     return c.text(getMetricsText());

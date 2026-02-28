@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import crypto, { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { createRoute, OpenAPIHono } from "@hono/zod-openapi";
@@ -574,7 +574,12 @@ export function createAgentApi(
     const apiKey = process.env.LOBU_API_KEY;
     if (!apiKey) return true;
     const providedKey = c.req.header("X-API-Key");
-    return providedKey === apiKey;
+    if (!providedKey) return false;
+    if (providedKey.length !== apiKey.length) return false;
+    return crypto.timingSafeEqual(
+      Buffer.from(providedKey),
+      Buffer.from(apiKey)
+    );
   };
 
   // =============================================================================

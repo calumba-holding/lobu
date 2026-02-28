@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import * as http from "node:http";
 import * as net from "node:net";
 import { URL } from "node:url";
@@ -95,7 +96,13 @@ function validateProxyAuth(req: http.IncomingMessage): ValidatedProxy | null {
     return null;
   }
 
-  if (tokenData.deploymentName !== creds.deploymentName) {
+  const deploymentMatch =
+    tokenData.deploymentName.length === creds.deploymentName.length &&
+    crypto.timingSafeEqual(
+      Buffer.from(tokenData.deploymentName),
+      Buffer.from(creds.deploymentName)
+    );
+  if (!deploymentMatch) {
     logger.warn(
       `Proxy auth failed: deployment mismatch (claimed: ${creds.deploymentName}, token: ${tokenData.deploymentName})`
     );
