@@ -40,20 +40,49 @@ export class TelegramAuthAdapter implements PlatformAuthAdapter {
     const settingsUrl = buildSettingsUrl(token);
     const ttlLabel = formatSettingsTokenTtl();
 
-    const message = [
-      "<b>Setup Required</b>",
-      "",
-      "You need to add a model provider to use this bot.",
-      "Configure it using this link:",
-      "",
-      settingsUrl,
-      "",
-      `<i>Link expires in ${ttlLabel}.</i>`,
-    ].join("\n");
+    // Telegram rejects inline keyboard URLs for localhost; fall back to plain text
+    let includeButton = true;
+    try {
+      const u = new URL(settingsUrl);
+      if (
+        u.hostname === "localhost" ||
+        u.hostname === "127.0.0.1" ||
+        u.hostname === "::1"
+      ) {
+        includeButton = false;
+      }
+    } catch {
+      includeButton = false;
+    }
+
+    const message = includeButton
+      ? [
+          "<b>Setup Required</b>",
+          "",
+          "You need to add a model provider to use this bot.",
+          "Tap the button below to configure.",
+          "",
+          `<i>Link expires in ${ttlLabel}.</i>`,
+        ].join("\n")
+      : [
+          "<b>Setup Required</b>",
+          "",
+          "You need to add a model provider to use this bot.",
+          "Configure it using this link:",
+          "",
+          settingsUrl,
+          "",
+          `<i>Link expires in ${ttlLabel}.</i>`,
+        ].join("\n");
 
     try {
       await this.bot.api.sendMessage(chatId, message, {
         parse_mode: "HTML",
+        ...(includeButton && {
+          reply_markup: {
+            inline_keyboard: [[{ text: "Open Settings", url: settingsUrl }]],
+          },
+        }),
       });
       logger.info({ chatId, userId, agentId }, "Sent settings link");
     } catch (error) {
