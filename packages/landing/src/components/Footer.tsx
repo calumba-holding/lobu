@@ -3,10 +3,10 @@ const GITHUB_URL = "https://github.com/lobu-ai/lobu";
 export function Footer() {
   return (
     <footer
-      class="py-8 px-4"
+      class="py-8 px-8 mt-8"
       style={{ borderTop: "1px solid var(--color-page-border)" }}
     >
-      <div class="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div class="max-w-[60rem] mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
         <div
           class="flex items-center gap-2 text-sm"
           style={{ color: "var(--color-page-text-muted)" }}

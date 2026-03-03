@@ -1,0 +1,42 @@
+@import "tailwindcss";
+
+/* Scan all landing page components so their Tailwind classes are generated */
+@source "../../src/components/*.tsx";
+/* Also scan gateway settings components */
+@source "../../../gateway/src/routes/public/settings-page/**/*.tsx";
+
+/* Import the same theme tokens as globals.css */
+@theme {
+  --color-page-bg: rgb(9, 9, 11);
+  --color-page-bg-elevated: rgb(14, 14, 18);
+  --color-page-bg-overlay: rgba(9, 9, 11, 0.8);
+  --color-page-surface: rgba(18, 18, 22, 0.8);
+  --color-page-surface-dim: rgba(18, 18, 22, 0.4);
+  --color-page-border: rgba(45, 54, 67, 0.5);
+  --color-page-border-active: rgba(148, 163, 184, 0.5);
+  --color-page-text: rgb(250, 250, 250);
+  --color-page-text-muted: rgb(120, 130, 150);
+
+  --color-tg-bg: rgb(33, 33, 33);
+  --color-tg-bg-secondary: rgb(15, 15, 15);
+  --color-tg-bubble-out: #c2410c;
+  --color-tg-bubble-in: rgb(33, 33, 33);
+  --color-tg-accent: #f97316;
+  --color-tg-accent-rgb: 249, 115, 22;
+  --color-tg-border: rgb(48, 48, 48);
+  --color-tg-text: white;
+  --color-tg-meta: rgba(255, 255, 255, 0.533);
+}
+
+/* Prevent Tailwind's preflight from resetting Starlight's list styles */
+@layer base {
+  .sl-markdown-content ul {
+    list-style: disc;
+  }
+  .sl-markdown-content ol {
+    list-style: decimal;
+  }
+  .sl-markdown-content li {
+    margin: 0;
+  }
+}

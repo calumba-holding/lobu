@@ -1,11 +1,10 @@
 import type { Signal } from "@preact/signals";
 import { InstructionsSection } from "@settings/components/InstructionsSection";
-import { IntegrationsSection } from "@settings/components/IntegrationsSection";
 import { NixPackagesSection } from "@settings/components/NixPackagesSection";
 import { PermissionsSection } from "@settings/components/PermissionsSection";
 import { ProviderSection } from "@settings/components/ProviderSection";
 import { RemindersSection } from "@settings/components/RemindersSection";
-import { SecretsSection } from "@settings/components/SecretsSection";
+import { SkillsSection } from "@settings/components/SkillsSection";
 import { MockSettingsProvider } from "../settings-mock/mock-context";
 
 export function SettingsDemo({
@@ -61,11 +60,10 @@ export function SettingsDemo({
           <div class="p-3 space-y-3">
             <ProviderSection />
             <InstructionsSection />
-            <IntegrationsSection />
+            <SkillsSection />
             <RemindersSection />
             <PermissionsSection />
             <NixPackagesSection />
-            <SecretsSection />
           </div>
         </MockSettingsProvider>
       </div>

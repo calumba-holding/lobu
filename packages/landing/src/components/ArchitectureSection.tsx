@@ -115,7 +115,7 @@ function NodeColumn({ node }: { node: (typeof nodes)[0] }) {
 
 export function ArchitectureSection() {
   return (
-    <section class="py-12 px-8 relative">
+    <section id="architecture" class="py-12 px-8 relative">
       <div class="max-w-3xl mx-auto">
         <h2
           class="text-2xl sm:text-3xl font-bold text-center mb-3 tracking-tight"

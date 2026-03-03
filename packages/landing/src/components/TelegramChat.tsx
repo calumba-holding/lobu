@@ -4,46 +4,47 @@ interface Props {
   useCase: UseCase;
 }
 
-function MessageBubble({ msg }: { msg: ChatMessage }) {
+function MessageBubble({
+  msg,
+  showTimestamp,
+}: {
+  msg: ChatMessage;
+  showTimestamp: boolean;
+}) {
   const isUser = msg.role === "user";
-  const time = isUser ? "12:01" : "12:01";
 
   return (
     <div class={`flex ${isUser ? "justify-end" : "justify-start"}`}>
-      <div class="max-w-[85%]">
+      <div class="max-w-[76%]">
         <div
-          class={`px-3.5 py-2 text-[13.5px] leading-[1.35] whitespace-pre-wrap ${
-            isUser
-              ? "rounded-[15px] rounded-br-[6px]"
-              : "rounded-[15px] rounded-bl-[6px]"
-          }`}
+          class="px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap rounded-[14px]"
           style={{
             backgroundColor: isUser
-              ? "var(--color-tg-bubble-out)"
-              : "var(--color-tg-bubble-in)",
-            color: "var(--color-tg-text)",
-            border: isUser ? "none" : "1px solid var(--color-tg-border)",
+              ? "rgba(var(--color-tg-accent-rgb), 0.18)"
+              : "#171a20",
+            color: "var(--color-page-text-muted)",
+            border: isUser
+              ? "1px solid rgba(var(--color-tg-accent-rgb), 0.35)"
+              : "1px solid #2a2f38",
           }}
         >
           {msg.text}
-          <span
-            class="text-[11px] float-right mt-1.5 ml-2"
-            style={{
-              color: isUser ? "rgba(255,255,255,0.6)" : "var(--color-tg-meta)",
-            }}
-          >
-            {time}
-          </span>
+          {showTimestamp ? (
+            <span class="text-[11px] float-right mt-1 ml-1.5 text-[#8f96a3]">
+              12:01
+            </span>
+          ) : null}
         </div>
+
         {msg.buttons?.map((btn) => (
           <button
             type="button"
             key={btn.label}
-            class="w-full mt-1 py-2 text-[13px] font-medium rounded-lg cursor-default transition-colors"
+            class="mt-1.5 h-8 px-3 inline-flex items-center justify-center rounded-full text-sm font-semibold cursor-default transition-colors"
             style={{
-              backgroundColor: "rgba(var(--color-tg-accent-rgb), 0.15)",
-              color: "var(--color-tg-accent)",
-              border: "1px solid rgba(var(--color-tg-accent-rgb), 0.3)",
+              backgroundColor: "transparent",
+              color: "#ff8a3d",
+              border: "1px solid #a74f20",
             }}
           >
             {btn.label}
@@ -57,15 +58,18 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
 export function TelegramChat({ useCase }: Props) {
   return (
     <div
-      class="rounded-xl overflow-hidden w-full"
-      style={{ border: "1px solid var(--color-tg-border)" }}
+      class="rounded-[18px] overflow-hidden w-full max-w-[420px]"
+      style={{
+        border: "1px solid #23262d",
+        backgroundColor: "#0b0c0f",
+      }}
     >
       {/* Header */}
       <div
-        class="flex items-center gap-3 px-4 py-3"
-        style={{ backgroundColor: "var(--color-tg-bg-secondary)" }}
+        class="flex items-center gap-2.5 px-3.5 py-2.5"
+        style={{ backgroundColor: "#0b0c0f" }}
       >
-        <div class="flex items-center gap-3 flex-1 min-w-0">
+        <div class="flex items-center gap-2.5 flex-1 min-w-0">
           <svg
             width="20"
             height="20"
@@ -82,53 +86,24 @@ export function TelegramChat({ useCase }: Props) {
               stroke-linejoin="round"
             />
           </svg>
+
           <div
-            class="w-9 h-9 rounded-full flex items-center justify-center text-sm font-semibold shrink-0"
-            style={{
-              background: "var(--color-tg-accent)",
-            }}
+            class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold shrink-0"
+            style={{ background: "var(--color-tg-accent)" }}
           >
             L
           </div>
+
           <div class="min-w-0">
-            <div class="flex items-center gap-1.5">
-              <span class="font-semibold text-sm truncate">Lobu</span>
-              <span
-                class="text-[10px] px-1 py-0.5 rounded font-medium"
-                style={{
-                  backgroundColor: "rgba(var(--color-tg-accent-rgb), 0.2)",
-                  color: "var(--color-tg-accent)",
-                }}
-              >
-                bot
-              </span>
-            </div>
-            <div class="text-[11px]" style={{ color: "var(--color-tg-meta)" }}>
-              online
+            <div class="font-semibold text-[13px] truncate">Lobu</div>
+            <div class="text-xs font-medium flex items-center gap-1 text-[#8f96a3]">
+              <span class="w-1.5 h-1.5 rounded-full bg-[#8f96a3]" />
+              <span>online</span>
             </div>
           </div>
         </div>
-        <div class="flex gap-3 opacity-40">
-          <svg
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            aria-hidden="true"
-          >
-            <circle
-              cx="12"
-              cy="12"
-              r="3"
-              stroke="currentColor"
-              stroke-width="2"
-            />
-            <path
-              d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-              stroke="currentColor"
-              stroke-width="2"
-            />
-          </svg>
+
+        <div class="flex opacity-40">
           <svg
             width="18"
             height="18"
@@ -145,60 +120,50 @@ export function TelegramChat({ useCase }: Props) {
 
       {/* Messages */}
       <div
-        class="flex flex-col gap-2 px-3 py-4"
-        style={{
-          backgroundColor: "var(--color-tg-bg-secondary)",
-        }}
+        class="flex flex-col px-2.5 py-2.5"
+        style={{ backgroundColor: "#0b0c0f" }}
       >
-        {useCase.messages.map((msg, i) => (
-          <MessageBubble key={`${useCase.id}-${i}`} msg={msg} />
-        ))}
+        {useCase.messages.map((msg, i) => {
+          const prevMsg = i > 0 ? useCase.messages[i - 1] : undefined;
+          const nextMsg =
+            i < useCase.messages.length - 1
+              ? useCase.messages[i + 1]
+              : undefined;
+          const isSameSenderAsPrev = prevMsg?.role === msg.role;
+          const showTimestamp = nextMsg?.role !== msg.role;
+
+          return (
+            <div
+              key={`${useCase.id}-${i}`}
+              class={i === 0 ? "" : isSameSenderAsPrev ? "mt-0.5" : "mt-2"}
+            >
+              <MessageBubble msg={msg} showTimestamp={showTimestamp} />
+            </div>
+          );
+        })}
       </div>
 
       {/* Input bar */}
       <div
-        class="flex items-center gap-2 px-3 py-2.5"
+        class="flex items-center gap-1.5 px-2.5 py-2"
         style={{
-          backgroundColor: "var(--color-tg-bg-secondary)",
-          borderTop: "1px solid var(--color-tg-border)",
+          backgroundColor: "#0b0c0f",
+          borderTop: "1px solid #23262d",
         }}
       >
-        <svg
-          width="22"
-          height="22"
-          viewBox="0 0 24 24"
-          fill="none"
-          class="opacity-40 shrink-0"
-          aria-hidden="true"
-        >
-          <circle
-            cx="12"
-            cy="12"
-            r="10"
-            stroke="currentColor"
-            stroke-width="1.5"
-          />
-          <path
-            d="M8 14s1.5 2 4 2 4-2 4-2"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-          />
-          <circle cx="9" cy="10" r="1" fill="currentColor" />
-          <circle cx="15" cy="10" r="1" fill="currentColor" />
-        </svg>
         <div
-          class="flex-1 py-1.5 px-3 rounded-full text-sm"
+          class="flex-1 h-[46px] px-3 rounded-full text-[15px] leading-[46px]"
           style={{
             backgroundColor: "rgba(255,255,255,0.06)",
-            color: "var(--color-tg-meta)",
+            color: "#8f96a3",
           }}
         >
           Message
         </div>
+
         <svg
-          width="22"
-          height="22"
+          width="20"
+          height="20"
           viewBox="0 0 24 24"
           fill="none"
           class="opacity-40 shrink-0"
@@ -211,9 +176,10 @@ export function TelegramChat({ useCase }: Props) {
             stroke-linecap="round"
           />
         </svg>
+
         <svg
-          width="22"
-          height="22"
+          width="20"
+          height="20"
           viewBox="0 0 24 24"
           fill="none"
           class="opacity-40 shrink-0"

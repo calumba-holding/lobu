@@ -5,8 +5,7 @@
 import { type Signal, useSignal } from "@preact/signals";
 import type {
   CatalogProvider,
-  CuratedMcp,
-  CuratedSkill,
+  IntegrationStatusEntry,
   McpConfig,
   ModelOption,
   PermissionGrant,
@@ -15,7 +14,6 @@ import type {
   ProviderInfo,
   ProviderState,
   Schedule,
-  SecretRow,
   SettingsSnapshot,
   SettingsState,
   Skill,
@@ -57,15 +55,10 @@ export interface SettingsContextValue {
   skills: Signal<Skill[]>;
   skillsLoading: Signal<boolean>;
   skillsError: Signal<string>;
-  curatedSkills: Signal<CuratedSkill[]>;
 
   mcpServers: Signal<Record<string, McpConfig>>;
-  mcpsLoading: Signal<boolean>;
-  mcpsError: Signal<string>;
-  curatedMcps: Signal<CuratedMcp[]>;
 
-  secrets: Signal<SecretRow[]>;
-  nextSecretId: Signal<number>;
+  integrationStatus: Signal<Record<string, IntegrationStatusEntry>>;
 
   nixPackages: Signal<string[]>;
 
@@ -99,10 +92,6 @@ export interface SettingsContextValue {
   openExternal(url: string): void;
   hasPendingSettingsChanges(): boolean;
   buildSettingsSnapshot(): SettingsSnapshot;
-  addSecret(key: string, value: string): void;
-  removeSecret(id: number): void;
-  normalizeSecretKey(key: string): string;
-  buildCurrentEnvVars(): Record<string, string>;
 }
 
 // ─── Context + hook ───────────────────────────────────────────────────────
@@ -210,7 +199,6 @@ export function MockSettingsProvider({
   const skills = useSignal<Skill[]>([]);
   const skillsLoading = useSignal(false);
   const skillsError = useSignal("");
-  const curatedSkills = useSignal<CuratedSkill[]>([]);
 
   const mcpServers = useSignal<Record<string, McpConfig>>({
     gmail: {
@@ -224,25 +212,9 @@ export function MockSettingsProvider({
       description: "GitHub — repos, PRs, issues",
     },
   });
-  const mcpsLoading = useSignal(false);
-  const mcpsError = useSignal("");
-  const curatedMcps = useSignal<CuratedMcp[]>([]);
-
-  const secrets = useSignal<SecretRow[]>([
-    {
-      id: 1,
-      key: "STRIPE_API_KEY",
-      value: "sk_live_••••••••••••",
-      reveal: false,
-    },
-    {
-      id: 2,
-      key: "DATABASE_URL",
-      value: "postgres://••••••••••••",
-      reveal: false,
-    },
-  ]);
-  const nextSecretId = useSignal(3);
+  const integrationStatus = useSignal<Record<string, IntegrationStatusEntry>>(
+    {}
+  );
 
   const nixPackages = useSignal<string[]>([
     "ffmpeg",
@@ -337,15 +309,9 @@ export function MockSettingsProvider({
     skills,
     skillsLoading,
     skillsError,
-    curatedSkills,
 
     mcpServers,
-    mcpsLoading,
-    mcpsError,
-    curatedMcps,
-
-    secrets,
-    nextSecretId,
+    integrationStatus,
 
     nixPackages,
 
@@ -394,19 +360,10 @@ export function MockSettingsProvider({
       primaryProvider: "",
       providerOrder: "",
       nixPackages: "",
-      envVars: "",
       skills: "",
       mcpServers: "",
       permissions: "",
     }),
-    addSecret() {
-      /* noop */
-    },
-    removeSecret() {
-      /* noop */
-    },
-    normalizeSecretKey: (k: string) => k.trim(),
-    buildCurrentEnvVars: () => ({}),
   };
 
   return (

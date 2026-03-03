@@ -1,0 +1,57 @@
+:root {
+  --sl-color-bg: rgb(9, 9, 11);
+  --sl-color-bg-nav: rgb(14, 14, 18);
+  --sl-color-bg-sidebar: rgb(14, 14, 18);
+  --sl-color-hairline: rgba(45, 54, 67, 0.5);
+  --sl-color-hairline-light: rgba(45, 54, 67, 0.3);
+  --sl-color-text: rgb(250, 250, 250);
+  --sl-color-text-accent: #f97316;
+  --sl-color-text-invert: rgb(9, 9, 11);
+  --sl-color-white: rgb(250, 250, 250);
+  --sl-color-gray-1: rgb(200, 210, 220);
+  --sl-color-gray-2: rgb(160, 170, 180);
+  --sl-color-gray-3: rgb(120, 130, 150);
+  --sl-color-gray-4: rgba(45, 54, 67, 0.5);
+  --sl-color-gray-5: rgb(18, 18, 22);
+  --sl-color-gray-6: rgb(14, 14, 18);
+  --sl-color-black: rgb(9, 9, 11);
+  --sl-color-accent-low: rgba(249, 115, 22, 0.15);
+  --sl-color-accent: #f97316;
+  --sl-color-accent-high: #fdba74;
+  --sl-font: "Geist", system-ui, -apple-system, sans-serif;
+  --sl-font-mono:
+    ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+}
+
+/* Hide right TOC panel; keep Starlight header/sidebar */
+.right-sidebar-container {
+  display: none !important;
+}
+
+/* Use full-width docs content area inside Starlight panel */
+.main-frame {
+  width: 100%;
+}
+
+/* Let content flow naturally, centered */
+.main-pane {
+  width: 100% !important;
+  max-width: 48rem !important;
+  margin: 0 auto !important;
+}
+
+.content-panel .sl-container {
+  max-width: 100% !important;
+}
+
+/* Hide Starlight's own footer — our Footer component replaces it */
+footer.sl-flex {
+  display: none !important;
+}
+
+/* Fix: Tailwind utilities in @layer get overridden by Starlight's @layer reset
+   (* { margin: 0 } in starlight.reset beats .mx-auto in utilities layer).
+   Unlayered rules here win over all layered rules. */
+.mx-auto {
+  margin-inline: auto;
+}

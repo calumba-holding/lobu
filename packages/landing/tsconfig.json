@@ -1,18 +1,11 @@
 {
+  "extends": "astro/tsconfigs/strict",
   "compilerOptions": {
-    "target": "ES2020",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "jsx": "react-jsx",
     "jsxImportSource": "preact",
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
     "paths": {
       "@settings/*": ["../gateway/src/routes/public/settings-page/*"],
       "@settings/api": ["./src/settings-mock/mock-api.ts"]
     }
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*", "src/**/*.astro"]
 }

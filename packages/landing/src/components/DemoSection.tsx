@@ -97,7 +97,7 @@ function FeatureRow({
 
 export function DemoSection() {
   return (
-    <section class="py-14 px-8">
+    <section id="how-it-works" class="py-14 px-8">
       <div class="max-w-[60rem] mx-auto">
         <h2
           class="text-2xl sm:text-3xl font-bold text-center mb-12 tracking-tight"

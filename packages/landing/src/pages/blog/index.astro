@@ -1,0 +1,45 @@
+---
+import { getCollection } from "astro:content";
+import { Footer } from "../../components/Footer";
+import { Nav } from "../../components/Nav";
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import "../../globals.css";
+
+const posts = (await getCollection("blog", ({ data }) => !data.draft)).sort(
+  (a, b) => b.data.date.valueOf() - a.data.date.valueOf()
+);
+---
+
+<BaseLayout title="Blog - Lobu" description="Updates and insights from the Lobu team.">
+  <div class="min-h-screen grid-lines" style={{ backgroundColor: "var(--color-page-bg)" }}>
+    <Nav />
+    <main class="relative z-[1]">
+      <div class="max-w-3xl mx-auto px-6 pt-24 pb-12">
+        <h1 class="text-4xl font-bold mt-6 text-page-text">Blog</h1>
+        <p class="mt-2 text-page-text-muted">Updates and insights from the Lobu team.</p>
+      </div>
+      <div class="section-divider" />
+      <div class="max-w-3xl mx-auto px-6 py-12">
+        {posts.length === 0 && (
+          <p class="text-page-text-muted">No posts yet. Check back soon.</p>
+        )}
+        <ul class="space-y-8">
+          {posts.map((post) => (
+            <li>
+              <a href={`/blog/${post.id}`} class="group block">
+                <time class="text-sm text-page-text-muted">
+                  {post.data.date.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}
+                </time>
+                <h2 class="text-xl font-semibold text-page-text group-hover:text-tg-accent transition-colors mt-1">
+                  {post.data.title}
+                </h2>
+                <p class="text-page-text-muted mt-1">{post.data.description}</p>
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </main>
+    <Footer />
+  </div>
+</BaseLayout>
