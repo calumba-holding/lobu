@@ -1,10 +1,13 @@
 # Lobu [![Talk to Founder](https://img.shields.io/badge/-Talk%20to%20Founder-red?style=flat-square&logo=google-calendar&logoColor=white)](https://calendar.app.google/LwAk3ecptkJQaYr87)
 
-**Lobu** is a platform for deploying **persistent, autonomous agents**. It provides a unified gateway for programmatic agent creation and multi-platform access (Slack, WhatsApp), backed by a hardened, sandboxed execution environment.
+**Lobu** helps you deploy **autonomous AI agents**.
 
-**Batteries included.** Lobu bundles sandboxed execution, MCP proxy with OAuth, and network isolation — no external sandbox providers, no third-party MCP gateways. One deployment, everything included.
+Computer-use agents via REST API, on Slack, Telegram, and WhatsApp.  
+Sandboxed, persistent, powered by the OpenClaw runtime and Lobu Skills.
 
-## Messaging & API
+**Batteries included.** Lobu bundles sandboxed execution, MCP proxy with OAuth, and gateway-level network isolation. One deployment, everything included.
+
+## Channels & API
 
 **REST API** — Programmatic agent creation, control, and state management.
 
@@ -14,13 +17,15 @@
 
 [![Add to Slack](https://img.shields.io/badge/Add_to_Slack-4A154B?style=for-the-badge&logo=slack&logoColor=white)](https://community.lobu.ai/slack/install) [![Join Community](https://img.shields.io/badge/Join_Community-4A154B?style=for-the-badge&logo=slack&logoColor=white)](https://join.slack.com/t/peerbot/shared_invite/zt-391o8tyw2-iyupjTG1xHIz9Og8C7JOnw)
 
+**Telegram** — Long-polling bot integration with interactive agent workflows.
+
 **WhatsApp** — Baileys-based integration with a unique self-chat mode.
 
 ## Quick Start
 
-### Create a new bot
+### Self-host in under a minute
 
-The recommended way to start is using our CLI. It scaffolds a project with everything you need.
+The quickest way to start is the CLI scaffold:
 
 ```bash
 npx @lobu/cli init my-bot
