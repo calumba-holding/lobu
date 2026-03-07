@@ -223,9 +223,9 @@ function OutputPanel() {
           class="output-logs absolute inset-0 p-4 text-[11px] leading-[1.8] font-mono text-left overflow-hidden"
           style={{ visibility: "hidden" }}
         >
-          {terminalLines.map((line, i) => (
+          {terminalLines.map((line) => (
             <div
-              key={i}
+              key={`${line.delay}-${line.text}`}
               class="terminal-line"
               style={{
                 color: lineColors[line.style],
@@ -245,30 +245,19 @@ function OutputPanel() {
         </div>
       </div>
       {/* close relative wrapper */}
-
-      {/* Auto-switch to logs tab after 20s */}
-      <script
-        dangerouslySetInnerHTML={{
-          __html: `
-        (function() {
-          var timer = setTimeout(function() {
-            var panel = document.querySelector('.output-panel');
-            if (!panel) return;
-            var logsTab = panel.querySelectorAll('.output-tab')[1];
-            if (logsTab) logsTab.click();
-          }, 20000);
-          document.addEventListener('visibilitychange', function() {
-            if (document.hidden) clearTimeout(timer);
-          });
-        })();
-      `,
-        }}
-      />
     </div>
   );
 }
 
-const PROMPT_TEXT = `Scaffold a Lobu agent with Telegram support using npx @lobu/cli init my-agent, add the google-workspace skill, then start it with cd my-agent && npx @lobu/cli dev -d`;
+const PROMPT_TEXT = `I am new to Lobu and want to set up a Telegram assistant.
+
+Please:
+1. Start with \`npx @lobu/cli --help\` and use it to choose the right commands.
+2. Create a new project named \`my-agent\` with \`npx @lobu/cli init my-agent\`.
+3. Add the \`google-workspace\` skill.
+4. Explain each step in plain language.
+5. Provide deployment steps for local testing and production.
+6. End with exact commands, including \`cd my-agent && npx @lobu/cli dev -d\`.`;
 const GITHUB_URL = "https://github.com/lobu-ai/lobu";
 
 const CopyIcon = () => (
@@ -496,6 +485,7 @@ export function HeroSection() {
               stroke-linecap="round"
               stroke-linejoin="round"
               style={{ color: "var(--color-page-text-muted)", opacity: 0.4 }}
+              aria-hidden="true"
             >
               <path d="M5 12h14M12 5l7 7-7 7" />
             </svg>
@@ -510,6 +500,7 @@ export function HeroSection() {
               stroke-linecap="round"
               stroke-linejoin="round"
               style={{ color: "var(--color-page-text-muted)", opacity: 0.4 }}
+              aria-hidden="true"
             >
               <path d="M12 5v14M5 12l7 7 7-7" />
             </svg>

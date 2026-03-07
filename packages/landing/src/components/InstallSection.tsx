@@ -86,8 +86,8 @@ export function ModeCard({ mode }: { mode: Mode }) {
       </div>
 
       <div class="space-y-3 mb-5">
-        {mode.steps.map((step, i) => (
-          <div key={`${mode.id}-${i}`}>
+        {mode.steps.map((step) => (
+          <div key={`${mode.id}-${step.label}`}>
             <div
               class="text-[11px] font-medium mb-1.5"
               style={{ color: "var(--color-page-text-muted)" }}
@@ -120,8 +120,8 @@ function SelfHostSteps({ variant }: { variant: "docker" | "kubernetes" }) {
   const data = selfHosted[variant];
   return (
     <div class="space-y-3">
-      {data.steps.map((step, i) => (
-        <div key={`${variant}-${i}`}>
+      {data.steps.map((step) => (
+        <div key={`${variant}-${step.label}`}>
           <div
             class="text-[11px] font-medium mb-1.5"
             style={{ color: "var(--color-page-text-muted)" }}

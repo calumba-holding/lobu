@@ -261,9 +261,7 @@ function LobuTomlExample() {
         {" = "}
         <span style={d}>[</span>
         <span style={s}>"github"</span>
-        <span style={d}>,</span>
-        {" "}
-        <span style={s}>"google-workspace"</span>
+        <span style={d}>,</span> <span style={s}>"google-workspace"</span>
         <span style={d}>]</span>
         {"\n\n"}
         <span style={d}>{"# Custom MCP server"}</span>
@@ -286,9 +284,7 @@ function LobuTomlExample() {
         {" = "}
         <span style={d}>[</span>
         <span style={s}>"api.github.com"</span>
-        <span style={d}>,</span>
-        {" "}
-        <span style={s}>"registry.npmjs.org"</span>
+        <span style={d}>,</span> <span style={s}>"registry.npmjs.org"</span>
         <span style={d}>]</span>
         {"\n\n"}
         <span style={d}>[</span>
@@ -383,8 +379,7 @@ export function SkillsSection() {
                   file: "IDENTITY.md",
                   desc: "Who the agent is — persona, name, tone.",
                   badge: "identity",
-                  color:
-                    "bg-cyan-900/40 text-cyan-400 border-cyan-800/50",
+                  color: "bg-cyan-900/40 text-cyan-400 border-cyan-800/50",
                 },
                 {
                   file: "SOUL.md",
@@ -397,8 +392,7 @@ export function SkillsSection() {
                   file: "USER.md",
                   desc: "User-specific context — timezone, preferences.",
                   badge: "context",
-                  color:
-                    "bg-green-900/40 text-green-400 border-green-800/50",
+                  color: "bg-green-900/40 text-green-400 border-green-800/50",
                 },
               ].map((item, i) => (
                 <div
@@ -407,9 +401,7 @@ export function SkillsSection() {
                   style={{
                     backgroundColor: "var(--color-page-bg-elevated)",
                     borderRight:
-                      i < 2
-                        ? "1px solid var(--color-page-border)"
-                        : undefined,
+                      i < 2 ? "1px solid var(--color-page-border)" : undefined,
                   }}
                 >
                   <div class="flex items-center gap-2 mb-2">

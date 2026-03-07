@@ -94,7 +94,9 @@ export function ProvidersRegistryTable() {
                 <Badge text={provider.id} />
               </td>
               <td style={cellStyle}>
-                <code style={{ fontSize: "12px" }}>{provider.defaultModel}</code>
+                <code style={{ fontSize: "12px" }}>
+                  {provider.defaultModel}
+                </code>
               </td>
               <td style={cellStyle}>
                 <Badge text={provider.sdkCompat} />
@@ -105,7 +107,9 @@ export function ProvidersRegistryTable() {
                 </code>
               </td>
               <td style={cellStyle}>
-                <code style={{ fontSize: "12px" }}>{provider.modelsEndpoint}</code>
+                <code style={{ fontSize: "12px" }}>
+                  {provider.modelsEndpoint}
+                </code>
               </td>
             </tr>
           ))}

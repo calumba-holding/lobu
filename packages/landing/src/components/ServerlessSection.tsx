@@ -1,6 +1,6 @@
 import { useState } from "preact/hooks";
+import { ModeCard, modes } from "./InstallSection";
 import { ScheduleCallButton } from "./ScheduleDialog";
-import { modes, ModeCard } from "./InstallSection";
 
 const GITHUB_URL = "https://github.com/lobu-ai/lobu";
 
@@ -82,29 +82,35 @@ export function ServerlessSection() {
             }}
           >
             <button
+              type="button"
               onClick={() => setIsManaged(true)}
               class={`px-6 py-1.5 text-xs font-semibold rounded-lg transition-all ${
-                isManaged
-                  ? "shadow-sm"
-                  : "opacity-60 hover:opacity-100"
+                isManaged ? "shadow-sm" : "opacity-60 hover:opacity-100"
               }`}
               style={{
-                backgroundColor: isManaged ? "var(--color-page-text)" : "transparent",
-                color: isManaged ? "var(--color-page-bg)" : "var(--color-page-text)",
+                backgroundColor: isManaged
+                  ? "var(--color-page-text)"
+                  : "transparent",
+                color: isManaged
+                  ? "var(--color-page-bg)"
+                  : "var(--color-page-text)",
               }}
             >
               Managed
             </button>
             <button
+              type="button"
               onClick={() => setIsManaged(false)}
               class={`px-6 py-1.5 text-xs font-semibold rounded-lg transition-all ${
-                !isManaged
-                  ? "shadow-sm"
-                  : "opacity-60 hover:opacity-100"
+                !isManaged ? "shadow-sm" : "opacity-60 hover:opacity-100"
               }`}
               style={{
-                backgroundColor: !isManaged ? "var(--color-page-text)" : "transparent",
-                color: !isManaged ? "var(--color-page-bg)" : "var(--color-page-text)",
+                backgroundColor: !isManaged
+                  ? "var(--color-page-text)"
+                  : "transparent",
+                color: !isManaged
+                  ? "var(--color-page-bg)"
+                  : "var(--color-page-text)",
               }}
             >
               Open Source
@@ -170,6 +176,7 @@ export function ServerlessSection() {
                   Talk to Founder
                 </ScheduleCallButton>
                 <button
+                  type="button"
                   onClick={() => setIsManaged(false)}
                   class="inline-flex items-center gap-2 text-sm font-medium px-5 py-2.5 rounded-lg transition-all hover:opacity-90"
                   style={{
@@ -204,6 +211,7 @@ export function ServerlessSection() {
                   View on GitHub
                 </a>
                 <button
+                  type="button"
                   onClick={() => setIsManaged(true)}
                   class="inline-flex items-center gap-2 text-sm font-medium px-5 py-2.5 rounded-lg transition-all hover:opacity-90"
                   style={{
@@ -452,11 +460,12 @@ export function ServerlessSection() {
                 class="text-sm mb-5 max-w-md mx-auto leading-relaxed"
                 style={{ color: "var(--color-page-text-muted)" }}
               >
-                Skip the setup and maintenance. Get started in seconds with
-                our fully managed serverless platform.
+                Skip the setup and maintenance. Get started in seconds with our
+                fully managed serverless platform.
               </p>
               <div class="flex flex-wrap gap-3 justify-center">
                 <button
+                  type="button"
                   onClick={() => setIsManaged(true)}
                   class="inline-flex items-center gap-2 text-xs font-medium px-4 py-2 rounded-lg transition-all hover:opacity-80"
                   style={{

@@ -1,5 +1,5 @@
-import { useRef } from "preact/hooks";
 import type { ComponentChildren } from "preact";
+import { useRef } from "preact/hooks";
 
 const CAL_URL =
   "https://cal.com/buremba/lobu-discovery?duration=15&overlayCalendar=true&embed=true&layout=month_view";
@@ -30,6 +30,9 @@ export function ScheduleCallButton({
         class="schedule-dialog"
         onClick={(e) => {
           if (e.target === dialogRef.current) dialogRef.current.close();
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") dialogRef.current?.close();
         }}
       >
         <div class="schedule-dialog-content">
