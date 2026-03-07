@@ -14,14 +14,21 @@ import {
 } from "@lobu/core";
 import type { AgentMetadataStore } from "../../auth/agent-metadata-store";
 import type { ProviderCatalogService } from "../../auth/provider-catalog";
-import { collectModelValues } from "../../auth/provider-model-options";
+import { collectProviderModelOptions } from "../../auth/provider-model-options";
 import type { ProviderStatus } from "../../auth/provider-status";
 import type { AgentSettings, AgentSettingsStore } from "../../auth/settings";
 import type { AuthProfilesManager } from "../../auth/settings/auth-profiles-manager";
+import {
+  extractProviderIdFromModelRef,
+  getModelSelectionState,
+  type ProviderModelPreferences,
+  reconcileModelSelectionForInstalledProviders,
+} from "../../auth/settings/model-selection";
 import type { SettingsTokenPayload } from "../../auth/settings/token-service";
 import type { UserAgentsStore } from "../../auth/user-agents-store";
 import type { WorkerConnectionManager } from "../../gateway/connection-manager";
 import type { IMessageQueue } from "../../infrastructure/queue";
+import type { ModelOption } from "../../modules/module-system";
 import type { GrantStore } from "../../permissions/grant-store";
 import { verifySettingsSession } from "./settings-auth";
 
@@ -30,6 +37,10 @@ const ErrorResponse = z.object({ error: z.string() });
 const TokenQuery = z.object({ token: z.string().optional() });
 const logger = createLogger("agent-config-routes");
 const REDACTED_VALUE = "__LOBU_REDACTED__";
+
+function hasOwnKey(value: object, key: keyof AgentSettings | string): boolean {
+  return Object.hasOwn(value, key);
+}
 
 export interface ConfigChangeEntry {
   category:
@@ -109,6 +120,15 @@ const updateConfigRoute = createRoute({
         "application/json": {
           schema: z.object({
             model: z.string().optional(),
+            modelSelection: z
+              .object({
+                mode: z.enum(["auto", "pinned"]),
+                pinnedModel: z.string().optional(),
+              })
+              .optional(),
+            providerModelPreferences: z
+              .record(z.string(), z.string())
+              .optional(),
             soulMd: z.string().optional(),
             userMd: z.string().optional(),
             identityMd: z.string().optional(),
@@ -275,14 +295,54 @@ function buildConfigChanges(
   }
 
   // Model
-  if (updates.model !== undefined && updates.model !== existing?.model) {
-    changes.push({
-      category: "model",
-      action: "updated",
-      summary: updates.model
-        ? `Model changed to "${updates.model}"`
-        : "Model reset to default",
+  const includesModelUpdate = hasOwnKey(updates, "model");
+  const includesModelSelectionUpdate = hasOwnKey(updates, "modelSelection");
+  const includesProviderModelPreferencesUpdate = hasOwnKey(
+    updates,
+    "providerModelPreferences"
+  );
+  if (
+    includesModelUpdate ||
+    includesModelSelectionUpdate ||
+    includesProviderModelPreferencesUpdate
+  ) {
+    const previousSelection = getModelSelectionState(existing);
+    const nextSelection = getModelSelectionState({
+      model: includesModelUpdate ? updates.model : existing?.model,
+      modelSelection: includesModelSelectionUpdate
+        ? updates.modelSelection
+        : existing?.modelSelection,
     });
+
+    const normalizePrefs = (
+      preferences: ProviderModelPreferences | undefined
+    ): ProviderModelPreferences =>
+      Object.fromEntries(
+        Object.entries(preferences || {}).sort(([a], [b]) => a.localeCompare(b))
+      );
+
+    const previousPrefs = normalizePrefs(existing?.providerModelPreferences);
+    const nextPrefs = normalizePrefs(
+      includesProviderModelPreferencesUpdate
+        ? updates.providerModelPreferences
+        : existing?.providerModelPreferences
+    );
+
+    if (
+      JSON.stringify(previousSelection) !== JSON.stringify(nextSelection) ||
+      JSON.stringify(previousPrefs) !== JSON.stringify(nextPrefs)
+    ) {
+      changes.push({
+        category: "model",
+        action: "updated",
+        summary:
+          nextSelection.mode === "pinned" && nextSelection.pinnedModel
+            ? `Model pinned to "${nextSelection.pinnedModel}"`
+            : Object.keys(nextPrefs).length > 0
+              ? "Auto model preferences updated"
+              : "Model selection set to auto",
+      });
+    }
   }
 
   // Skills
@@ -461,7 +521,16 @@ export function createAgentConfigRoutes(
     try {
       const existingSettings =
         await config.agentSettingsStore.getSettings(agentId);
-      const availableModels = await collectModelValues(agentId, payload.userId);
+      const providerModelOptions = await collectProviderModelOptions(
+        agentId,
+        payload.userId
+      );
+      const availableModels = new Set<string>();
+      for (const options of Object.values(providerModelOptions)) {
+        for (const option of options) {
+          availableModels.add(option.value);
+        }
+      }
       const body = restoreRedactedSentinels(
         c.req.valid("json"),
         existingSettings || {}
@@ -478,9 +547,40 @@ export function createAgentConfigRoutes(
       if (Object.keys(body).length > 0) {
         const validated = await validateSettings(
           body as Partial<AgentSettings>,
-          availableModels
+          {
+            availableModels,
+            providerModelOptions,
+            installedProviderIds: new Set(
+              (existingSettings?.installedProviders || []).map(
+                (provider) => provider.providerId
+              )
+            ),
+          }
         );
         Object.assign(updates, validated);
+      }
+
+      if (
+        hasOwnKey(body, "model") ||
+        hasOwnKey(body, "modelSelection") ||
+        hasOwnKey(body, "providerModelPreferences")
+      ) {
+        const reconciled = reconcileModelSelectionForInstalledProviders({
+          model: hasOwnKey(updates, "model")
+            ? updates.model
+            : existingSettings?.model,
+          modelSelection: hasOwnKey(updates, "modelSelection")
+            ? updates.modelSelection
+            : existingSettings?.modelSelection,
+          providerModelPreferences: hasOwnKey(
+            updates,
+            "providerModelPreferences"
+          )
+            ? updates.providerModelPreferences
+            : existingSettings?.providerModelPreferences,
+          installedProviders: existingSettings?.installedProviders || [],
+        });
+        Object.assign(updates, reconciled);
       }
 
       if (Object.keys(updates).length > 0) {
@@ -1001,9 +1101,39 @@ function restoreRedactedSentinels<T>(input: T, previous: unknown): T {
 
 async function validateSettings(
   input: Partial<AgentSettings>,
-  availableModels: Set<string>
+  modelValidation: {
+    availableModels: Set<string>;
+    providerModelOptions: Record<string, ModelOption[]>;
+    installedProviderIds: Set<string>;
+  }
 ): Promise<Omit<AgentSettings, "updatedAt">> {
   const settings: Omit<AgentSettings, "updatedAt"> = {};
+
+  const inferProviderIdForModelRef = (modelRef: string): string | undefined => {
+    const providerIds = Object.entries(modelValidation.providerModelOptions)
+      .filter(([, options]) =>
+        options.some((option) => option.value === modelRef)
+      )
+      .map(([providerId]) => providerId);
+
+    if (providerIds.length === 1) return providerIds[0];
+    return undefined;
+  };
+
+  const resolveProviderIdForModelRef = (modelRef: string): string | undefined =>
+    extractProviderIdFromModelRef(modelRef) ||
+    inferProviderIdForModelRef(modelRef);
+
+  const validateKnownModelRef = (modelRef: string): void => {
+    if (modelValidation.availableModels.size === 0) {
+      throw new Error(
+        "No models are currently available from configured providers."
+      );
+    }
+    if (!modelValidation.availableModels.has(modelRef)) {
+      throw new Error(`Invalid model: ${modelRef}`);
+    }
+  };
 
   if (typeof input.soulMd === "string") {
     settings.soulMd = input.soulMd;
@@ -1019,17 +1149,84 @@ async function validateSettings(
     const cleanModel = input.model.trim();
     if (!cleanModel) {
       settings.model = undefined;
+      settings.modelSelection = { mode: "auto" };
     } else {
-      if (availableModels.size === 0) {
+      validateKnownModelRef(cleanModel);
+      settings.model = cleanModel;
+      settings.modelSelection = { mode: "pinned", pinnedModel: cleanModel };
+    }
+  }
+
+  if (input.modelSelection && typeof input.modelSelection === "object") {
+    const mode = input.modelSelection.mode;
+    const pinnedModel = input.modelSelection.pinnedModel?.trim();
+
+    if (mode === "auto") {
+      settings.modelSelection = { mode: "auto" };
+      settings.model = undefined;
+    } else {
+      if (!pinnedModel) {
+        throw new Error("Pinned model is required when mode is pinned");
+      }
+      validateKnownModelRef(pinnedModel);
+      const pinnedProviderId = resolveProviderIdForModelRef(pinnedModel);
+      if (!pinnedProviderId) {
         throw new Error(
-          "No models are currently available from configured providers."
+          `Unable to resolve provider for pinned model: ${pinnedModel}`
         );
       }
-      if (!availableModels.has(cleanModel)) {
-        throw new Error(`Invalid model: ${cleanModel}`);
+      if (!modelValidation.installedProviderIds.has(pinnedProviderId)) {
+        throw new Error(
+          `Pinned model provider "${pinnedProviderId}" is not installed`
+        );
       }
-      settings.model = cleanModel;
+      settings.modelSelection = { mode: "pinned", pinnedModel };
+      settings.model = pinnedModel;
     }
+  }
+
+  if (
+    input.providerModelPreferences &&
+    typeof input.providerModelPreferences === "object"
+  ) {
+    const preferences: ProviderModelPreferences = {};
+
+    for (const [providerIdRaw, modelRefRaw] of Object.entries(
+      input.providerModelPreferences
+    )) {
+      const providerId = providerIdRaw.trim();
+      const modelRef = modelRefRaw.trim();
+      if (!providerId || !modelRef) continue;
+
+      if (!modelValidation.installedProviderIds.has(providerId)) {
+        throw new Error(
+          `Model preference set for non-installed provider: ${providerId}`
+        );
+      }
+
+      const modelProviderId = resolveProviderIdForModelRef(modelRef);
+      if (modelProviderId && modelProviderId !== providerId) {
+        throw new Error(
+          `Model "${modelRef}" belongs to provider "${modelProviderId}", not "${providerId}"`
+        );
+      }
+
+      const providerOptions =
+        modelValidation.providerModelOptions[providerId] || [];
+      if (
+        providerOptions.length > 0 &&
+        !providerOptions.some((option) => option.value === modelRef)
+      ) {
+        throw new Error(
+          `Invalid model for provider "${providerId}": ${modelRef}`
+        );
+      }
+
+      preferences[providerId] = modelRef;
+    }
+
+    settings.providerModelPreferences =
+      Object.keys(preferences).length > 0 ? preferences : undefined;
   }
 
   if (input.nixConfig) {

@@ -9,7 +9,18 @@ const DEVICE_TOKEN_URL =
   "https://auth.openai.com/api/accounts/deviceauth/token";
 const TOKEN_EXCHANGE_URL = "https://auth.openai.com/oauth/token";
 const DEVICE_REDIRECT_URI = "https://auth.openai.com/deviceauth/callback";
-const OAUTH_SCOPE = process.env.OPENAI_OAUTH_SCOPE || "model.request";
+const OAUTH_SCOPE =
+  process.env.OPENAI_OAUTH_SCOPE ||
+  [
+    "openid",
+    "profile",
+    "email",
+    "offline_access",
+    "api.model.read",
+    "api.model.request",
+    "api.model.image.request",
+    "api.model.audio.request",
+  ].join(" ");
 const JWT_CLAIM_PATH = "https://api.openai.com/auth";
 const DEVICE_HEADERS = {
   "Content-Type": "application/json",

@@ -8,10 +8,9 @@ import { createLogger } from "@lobu/core";
 import type { Bot } from "grammy";
 import type { AuthProvider, PlatformAuthAdapter } from "../auth/platform-auth";
 import {
-  type ClaimService,
   buildClaimSettingsUrl,
+  type ClaimService,
 } from "../auth/settings/claim-service";
-import { buildTelegramSettingsUrl } from "../auth/settings/token-service";
 
 const logger = createLogger("telegram-auth-adapter");
 
@@ -22,10 +21,7 @@ const logger = createLogger("telegram-auth-adapter");
 export class TelegramAuthAdapter implements PlatformAuthAdapter {
   private claimService?: ClaimService;
 
-  constructor(
-    private bot: Bot,
-    _publicGatewayUrl: string
-  ) {}
+  constructor(private bot: Bot) {}
 
   setClaimService(service: ClaimService): void {
     this.claimService = service;
@@ -85,52 +81,83 @@ export class TelegramAuthAdapter implements PlatformAuthAdapter {
       }
     }
 
-    // DMs use web_app button with Telegram initData auth
-    const settingsUrl = buildTelegramSettingsUrl(String(chatId));
-
-    // Telegram rejects inline keyboard URLs for localhost; fall back to plain text
-    let includeButton = true;
-    try {
-      const u = new URL(settingsUrl);
-      if (
-        u.hostname === "localhost" ||
-        u.hostname === "127.0.0.1" ||
-        u.hostname === "::1"
-      ) {
-        includeButton = false;
-      }
-    } catch {
-      includeButton = false;
+    // DMs: check if user has a linked OAuth identity
+    if (!this.claimService) {
+      logger.error("ClaimService not available for DM auth prompt");
+      throw new Error("ClaimService not configured");
     }
 
-    const message = includeButton
-      ? [
-          "<b>Setup Required</b>",
-          "",
-          "You need to add a model provider to use this bot.",
-          "Tap the button below to configure.",
-        ].join("\n")
-      : [
-          "<b>Setup Required</b>",
-          "",
-          "You need to add a model provider to use this bot.",
-          "Configure it using this link:",
-          "",
-          settingsUrl,
-        ].join("\n");
+    const baseUrl = process.env.PUBLIC_GATEWAY_URL || "http://localhost:8080";
+
+    const linkedOAuthUserId = await this.claimService.getLinkedOAuthUserId(
+      "telegram",
+      userId
+    );
+
+    if (linkedOAuthUserId) {
+      // Linked user: use web_app button with initData URL
+      const settingsUrl = new URL("/settings", baseUrl);
+      settingsUrl.searchParams.set("platform", "telegram");
+      settingsUrl.searchParams.set("chat", String(chatId));
+
+      const message = [
+        "<b>Setup Required</b>",
+        "",
+        "You need to add a model provider to use this bot.",
+        "Tap the button below to configure.",
+      ].join("\n");
+
+      try {
+        await this.bot.api.sendMessage(chatId, message, {
+          parse_mode: "HTML",
+          reply_markup: {
+            inline_keyboard: [
+              [
+                {
+                  text: "Open Settings",
+                  web_app: { url: settingsUrl.toString() },
+                },
+              ],
+            ],
+          },
+        });
+        logger.info(
+          { chatId, userId },
+          "Sent web_app settings link (DM, linked)"
+        );
+        return;
+      } catch (error) {
+        logger.error({ error, chatId }, "Failed to send web_app settings link");
+        throw error;
+      }
+    }
+
+    // Not linked: url button with claim URL (opens in Telegram's browser for OAuth)
+    const dmClaimCode = await this.claimService.createClaim(
+      "telegram",
+      String(chatId),
+      userId
+    );
+    const settingsUrl = buildClaimSettingsUrl(dmClaimCode);
+
+    const message = [
+      "<b>Setup Required</b>",
+      "",
+      "You need to add a model provider to use this bot.",
+      "Tap the button below to sign in and configure.",
+    ].join("\n");
 
     try {
       await this.bot.api.sendMessage(chatId, message, {
         parse_mode: "HTML",
-        ...(includeButton && {
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: "Open Settings", web_app: { url: settingsUrl } }],
-            ],
-          },
-        }),
+        reply_markup: {
+          inline_keyboard: [[{ text: "Sign In", url: settingsUrl }]],
+        },
       });
-      logger.info({ chatId, userId }, "Sent settings link (DM)");
+      logger.info(
+        { chatId, userId },
+        "Sent url button settings link (DM, not linked)"
+      );
     } catch (error) {
       logger.error({ error, chatId }, "Failed to send settings link");
       throw error;

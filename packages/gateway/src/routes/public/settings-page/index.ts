@@ -27,6 +27,12 @@ export interface ProviderMeta {
   apiKeyInstructions: string;
   apiKeyPlaceholder: string;
   catalogDescription?: string;
+  capabilities?: (
+    | "text"
+    | "image-generation"
+    | "speech-to-text"
+    | "text-to-speech"
+  )[];
 }
 
 export interface SettingsPageOptions {
@@ -76,6 +82,22 @@ export function renderSettingsPage(
       )
     );
   })();
+  const providerModelPreferences = Object.fromEntries(
+    Object.entries(s.providerModelPreferences || {})
+      .map(([providerId, modelRef]) => [providerId.trim(), modelRef.trim()])
+      .filter(([providerId, modelRef]) => providerId && modelRef)
+  );
+  const modelSelection =
+    s.modelSelection?.mode === "auto" || s.modelSelection?.mode === "pinned"
+      ? {
+          mode: s.modelSelection.mode,
+          ...(s.modelSelection.pinnedModel
+            ? { pinnedModel: s.modelSelection.pinnedModel }
+            : {}),
+        }
+      : s.model
+        ? { mode: "pinned", pinnedModel: s.model }
+        : { mode: "auto" };
 
   const initialState = {
     agentId: payload.agentId,
@@ -88,11 +110,14 @@ export function renderSettingsPage(
           supportedAuthTypes: p.supportedAuthTypes,
           apiKeyInstructions: p.apiKeyInstructions,
           apiKeyPlaceholder: p.apiKeyPlaceholder,
+          capabilities: p.capabilities || [],
         },
       ])
     ),
     providerOrder,
     providerModels: providerModelOptions,
+    modelSelection,
+    providerModelPreferences,
     catalogProviders: catalogProviders.map((p) => ({
       id: p.id,
       name: p.name,
@@ -101,6 +126,7 @@ export function renderSettingsPage(
       supportedAuthTypes: p.supportedAuthTypes,
       apiKeyInstructions: p.apiKeyInstructions,
       apiKeyPlaceholder: p.apiKeyPlaceholder,
+      capabilities: p.capabilities || [],
     })),
     initialSkills: s.skillsConfig?.skills || [],
     initialMcpServers: s.mcpServers || {},

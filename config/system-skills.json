@@ -278,7 +278,13 @@
           "apiKeyPlaceholder": "gsk_...",
           "sdkCompat": "openai",
           "defaultModel": "llama-3.3-70b-versatile",
-          "modelsEndpoint": "/v1/models"
+          "modelsEndpoint": "/v1/models",
+          "stt": {
+            "enabled": true,
+            "sdkCompat": "openai",
+            "transcriptionPath": "/v1/audio/transcriptions",
+            "model": "whisper-large-v3-turbo"
+          }
         }
       ]
     },
@@ -315,6 +321,55 @@
           "sdkCompat": "openai",
           "defaultModel": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
           "modelsEndpoint": "/v1/models"
+        }
+      ]
+    },
+    {
+      "id": "nvidia",
+      "name": "NVIDIA NIM",
+      "description": "NVIDIA-hosted models and inference APIs",
+      "providers": [
+        {
+          "displayName": "NVIDIA NIM (free)",
+          "iconUrl": "https://www.google.com/s2/favicons?domain=nvidia.com&sz=128",
+          "envVarName": "NVIDIA_API_KEY",
+          "upstreamBaseUrl": "https://integrate.api.nvidia.com",
+          "apiKeyInstructions": "Get your API key from <a href=\"https://build.nvidia.com/settings/api-keys\" target=\"_blank\" class=\"text-blue-600 hover:underline\">NVIDIA Build</a>",
+          "apiKeyPlaceholder": "nvapi-...",
+          "sdkCompat": "openai",
+          "modelsEndpoint": "/v1/models"
+        }
+      ]
+    },
+    {
+      "id": "z-ai",
+      "name": "z.ai",
+      "description": "z.ai coding and reasoning models",
+      "providers": [
+        {
+          "displayName": "z.ai",
+          "iconUrl": "https://www.google.com/s2/favicons?domain=z.ai&sz=128",
+          "envVarName": "Z_AI_API_KEY",
+          "upstreamBaseUrl": "https://api.z.ai/api/coding/paas/v4",
+          "apiKeyInstructions": "Get your API key from <a href=\"https://z.ai/manage-apikey/apikey-list\" target=\"_blank\" class=\"text-blue-600 hover:underline\">z.ai</a>",
+          "apiKeyPlaceholder": "zai-...",
+          "sdkCompat": "openai"
+        }
+      ]
+    },
+    {
+      "id": "elevenlabs",
+      "name": "ElevenLabs",
+      "description": "Voice and speech models",
+      "providers": [
+        {
+          "displayName": "ElevenLabs",
+          "iconUrl": "https://www.google.com/s2/favicons?domain=elevenlabs.io&sz=128",
+          "envVarName": "ELEVENLABS_API_KEY",
+          "upstreamBaseUrl": "https://api.elevenlabs.io",
+          "apiKeyInstructions": "Get your API key from <a href=\"https://elevenlabs.io/app/api-keys\" target=\"_blank\" class=\"text-blue-600 hover:underline\">ElevenLabs</a>",
+          "apiKeyPlaceholder": "sk_...",
+          "sdkCompat": "openai"
         }
       ]
     },
@@ -402,7 +457,13 @@
           "apiKeyPlaceholder": "sk-or-...",
           "sdkCompat": "openai",
           "defaultModel": "anthropic/claude-sonnet-4",
-          "modelsEndpoint": "/v1/models"
+          "modelsEndpoint": "/v1/models",
+          "stt": {
+            "enabled": true,
+            "sdkCompat": "openai",
+            "transcriptionPath": "/audio/transcriptions",
+            "model": "whisper-1"
+          }
         }
       ]
     },

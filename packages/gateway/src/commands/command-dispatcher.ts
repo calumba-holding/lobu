@@ -4,7 +4,7 @@ import {
   createLogger,
 } from "@lobu/core";
 import type { ChannelBindingService } from "../channels";
-import { resolveSpace } from "../spaces";
+import { platformAgentId } from "../spaces";
 
 const logger = createLogger("command-dispatcher");
 
@@ -72,6 +72,7 @@ export class CommandDispatcher {
   }
 
   private async resolveAgentId(input: CommandDispatchInput): Promise<string> {
+    // Check channel binding first (Slack multi-tenant)
     const binding = await this.channelBindingService.getBinding(
       input.platform,
       input.channelId,
@@ -81,11 +82,11 @@ export class CommandDispatcher {
       return binding.agentId;
     }
 
-    return resolveSpace({
-      platform: input.platform,
-      userId: input.userId,
-      channelId: input.channelId,
-      isGroup: input.isGroup,
-    }).agentId;
+    return platformAgentId(
+      input.platform,
+      input.userId,
+      input.channelId,
+      input.isGroup
+    );
   }
 }

@@ -15,6 +15,10 @@ import {
   type ToolsConfig,
 } from "@lobu/core";
 import type Redis from "ioredis";
+import type {
+  ModelSelectionState,
+  ProviderModelPreferences,
+} from "./model-selection";
 
 const ENCRYPTED_VALUE_PREFIX = "enc:v1:";
 
@@ -30,6 +34,10 @@ interface SensitiveValueDecodeResult {
 export interface AgentSettings {
   /** Claude model to use (e.g., claude-sonnet-4, claude-opus-4) */
   model?: string;
+  /** Model selection mode (auto provider/default model vs pinned provider/model). */
+  modelSelection?: ModelSelectionState;
+  /** Per-provider preferred model for auto mode. */
+  providerModelPreferences?: ProviderModelPreferences;
   /** Network access configuration */
   networkConfig?: NetworkConfig;
   /** Nix environment configuration */
@@ -66,9 +74,7 @@ export interface AgentSettings {
  * Store and retrieve agent settings from Redis
  * Pattern: agent:settings:{agentId}
  *
- * Settings are stored per agentId, which can be:
- * - Hash-based (from resolveSpace): e.g., "user-a1b2c3d4"
- * - Explicit (from channel binding): any custom agentId
+ * Settings are stored per agentId (e.g., "telegram-6570514069", "slack-g-C12345")
  */
 export class AgentSettingsStore extends BaseRedisStore<AgentSettings> {
   private readonly encryptionAvailable: boolean;

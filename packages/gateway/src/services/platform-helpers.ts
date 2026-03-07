@@ -5,9 +5,10 @@
 
 import { createLogger } from "@lobu/core";
 import type { AgentSettingsStore } from "../auth/settings";
+import { resolveEffectiveModelRef } from "../auth/settings/model-selection";
 import type { ChannelBindingService } from "../channels";
 import type { MessagePayload } from "../infrastructure/queue/queue-producer";
-import { resolveSpace } from "../spaces";
+import { platformAgentId } from "../spaces";
 
 const logger = createLogger("platform-helpers");
 
@@ -29,13 +30,21 @@ export async function resolveAgentOptions(
     return { ...baseOptions };
   }
 
-  logger.info({ agentId, model: settings.model }, "Applying agent settings");
-
   const mergedOptions: Record<string, any> = { ...baseOptions };
+  const effectiveModelRef = resolveEffectiveModelRef(settings);
+  logger.info(
+    {
+      agentId,
+      configuredModel: settings.model,
+      effectiveModel: effectiveModelRef,
+    },
+    "Applying agent settings"
+  );
 
-  if (settings.model) {
-    mergedOptions.model = settings.model;
+  if (effectiveModelRef) {
+    mergedOptions.model = effectiveModelRef;
   } else if ((settings.installedProviders?.length ?? 0) > 0) {
+    // Auto mode with installed providers: let worker resolve default model.
     delete mergedOptions.model;
   }
 
@@ -100,8 +109,8 @@ export function buildMessagePayload(params: {
 }
 
 /**
- * Resolve agent ID from channel binding or space fallback.
- * Returns the agentId and whether a config prompt was sent (caller should stop processing).
+ * Resolve agent ID. Deterministic for all platforms.
+ * Channel binding is checked first for Slack (multi-tenant), then falls back to platformAgentId.
  */
 export async function resolveAgentId(params: {
   platform: string;
@@ -110,7 +119,7 @@ export async function resolveAgentId(params: {
   isGroup: boolean;
   teamId?: string;
   channelBindingService?: ChannelBindingService;
-  sendConfigPrompt: () => Promise<boolean>;
+  sendConfigPrompt?: () => Promise<boolean>;
 }): Promise<{ agentId: string; promptSent: boolean }> {
   const {
     platform,
@@ -122,6 +131,7 @@ export async function resolveAgentId(params: {
     sendConfigPrompt,
   } = params;
 
+  // Check channel binding first (Slack multi-tenant)
   if (channelBindingService) {
     const binding = await channelBindingService.getBinding(
       platform,
@@ -133,18 +143,16 @@ export async function resolveAgentId(params: {
       return { agentId: binding.agentId, promptSent: false };
     }
 
-    // No binding — send configuration prompt
-    const sent = await sendConfigPrompt();
-    if (sent) {
-      return { agentId: "", promptSent: true };
+    if (sendConfigPrompt) {
+      const sent = await sendConfigPrompt();
+      if (sent) return { agentId: "", promptSent: true };
     }
-
-    // Fallback if config prompt fails
-    const space = resolveSpace({ platform, userId, channelId, isGroup });
-    logger.info({ agentId: space.agentId }, "Fallback resolved agentId");
-    return { agentId: space.agentId, promptSent: false };
   }
 
-  const space = resolveSpace({ platform, userId, channelId, isGroup });
-  return { agentId: space.agentId, promptSent: false };
+  const agentId = platformAgentId(platform, userId, channelId, isGroup);
+  logger.info(
+    { agentId, platform, channelId },
+    "Deterministic agent ID resolved"
+  );
+  return { agentId, promptSent: false };
 }

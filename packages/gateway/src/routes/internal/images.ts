@@ -1,0 +1,154 @@
+/**
+ * Internal Image Routes
+ *
+ * Worker-facing endpoints for image generation.
+ */
+
+import { createLogger, verifyWorkerToken } from "@lobu/core";
+import { Hono } from "hono";
+import type { ImageGenerationService } from "../../services/image-generation-service";
+
+const logger = createLogger("internal-image-routes");
+
+type WorkerContext = {
+  Variables: {
+    worker: {
+      userId: string;
+      conversationId: string;
+      channelId: string;
+      teamId?: string;
+      agentId?: string;
+      deploymentName: string;
+      platform?: string;
+    };
+  };
+};
+
+export function createImageRoutes(
+  imageGenerationService: ImageGenerationService
+): Hono<WorkerContext> {
+  const router = new Hono<WorkerContext>();
+
+  const authenticateWorker = async (c: any, next: () => Promise<void>) => {
+    const authHeader = c.req.header("authorization");
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return c.json({ error: "Missing or invalid authorization" }, 401);
+    }
+    const workerToken = authHeader.substring(7);
+    const tokenData = verifyWorkerToken(workerToken);
+    if (!tokenData) {
+      return c.json({ error: "Invalid worker token" }, 401);
+    }
+    c.set("worker", tokenData);
+    await next();
+  };
+
+  /**
+   * Generate an image from prompt text
+   * POST /internal/images/generate
+   */
+  router.post("/internal/images/generate", authenticateWorker, async (c) => {
+    try {
+      const worker = c.get("worker");
+      const { prompt, size, quality, background, format } = await c.req.json<{
+        prompt?: string;
+        size?: "1024x1024" | "1024x1536" | "1536x1024" | "auto";
+        quality?: "low" | "medium" | "high" | "auto";
+        background?: "transparent" | "opaque" | "auto";
+        format?: "png" | "jpeg" | "webp";
+      }>();
+
+      if (!prompt || typeof prompt !== "string") {
+        return c.json(
+          { error: "prompt is required and must be a string" },
+          400
+        );
+      }
+      if (prompt.length > 4000) {
+        return c.json({ error: "prompt must be 4000 characters or less" }, 400);
+      }
+
+      const agentId = worker.agentId;
+      if (!agentId) {
+        return c.json({ error: "Missing agentId in worker context" }, 400);
+      }
+
+      logger.info("Generating image", {
+        agentId,
+        promptLength: prompt.length,
+        size,
+        quality,
+        background,
+        format,
+      });
+
+      const result = await imageGenerationService.generate(prompt, agentId, {
+        size,
+        quality,
+        background,
+        format,
+      });
+      if ("error" in result) {
+        return c.json(
+          {
+            error: result.error,
+            availableProviders: result.availableProviders,
+          },
+          400
+        );
+      }
+
+      return new Response(result.imageBuffer, {
+        headers: {
+          "Content-Type": result.mimeType,
+          "Content-Length": result.imageBuffer.length.toString(),
+          "X-Image-Provider": result.provider,
+        },
+      });
+    } catch (error) {
+      logger.error("Image generation error", { error });
+      return c.json(
+        {
+          error:
+            error instanceof Error ? error.message : "Failed to generate image",
+        },
+        500
+      );
+    }
+  });
+
+  /**
+   * Check image generation capabilities for current agent
+   * GET /internal/images/capabilities
+   */
+  router.get("/internal/images/capabilities", authenticateWorker, async (c) => {
+    try {
+      const worker = c.get("worker");
+      const agentId = worker.agentId;
+      if (!agentId) {
+        return c.json({ error: "Missing agentId in worker context" }, 400);
+      }
+
+      const config = await imageGenerationService.getConfig(agentId);
+      if (!config) {
+        return c.json({
+          available: false,
+          features: { generation: false },
+          providers: imageGenerationService.getProviderInfo(),
+        });
+      }
+
+      return c.json({
+        available: true,
+        provider: config.provider,
+        features: { generation: true },
+      });
+    } catch (error) {
+      logger.error("Image capabilities check error", { error });
+      return c.json({ error: "Failed to check capabilities" }, 500);
+    }
+  });
+
+  logger.info("Internal image routes registered");
+  return router;
+}

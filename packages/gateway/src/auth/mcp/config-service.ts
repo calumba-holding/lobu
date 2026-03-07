@@ -1,4 +1,5 @@
 import { createLogger, verifyWorkerToken } from "@lobu/core";
+import type { SystemConfigResolver } from "../../services/system-config-resolver";
 import type {
   DiscoveredOAuthMetadata,
   OAuthDiscoveryService,
@@ -59,6 +60,7 @@ interface McpConfigServiceOptions {
   credentialStore?: McpCredentialStore;
   inputStore?: McpInputStore;
   agentSettingsStore?: AgentSettingsStore;
+  configResolver?: SystemConfigResolver;
 }
 
 export class McpConfigService {
@@ -67,6 +69,7 @@ export class McpConfigService {
   private credentialStore?: McpCredentialStore;
   private inputStore?: McpInputStore;
   private agentSettingsStore?: AgentSettingsStore;
+  private configResolver?: SystemConfigResolver;
   private discoveryEnriched = false;
 
   constructor(options: McpConfigServiceOptions = {}) {
@@ -74,8 +77,9 @@ export class McpConfigService {
     this.credentialStore = options.credentialStore;
     this.inputStore = options.inputStore;
     this.agentSettingsStore = options.agentSettingsStore;
+    this.configResolver = options.configResolver;
     logger.info(
-      `McpConfigService initialized with discovery: ${!!this.discoveryService}, credential store: ${!!this.credentialStore}, input store: ${!!this.inputStore}`
+      `McpConfigService initialized with discovery: ${!!this.discoveryService}, credential store: ${!!this.credentialStore}, input store: ${!!this.inputStore}, config resolver: ${!!this.configResolver}`
     );
   }
 
@@ -494,10 +498,12 @@ export class McpConfigService {
 
   private async loadConfig(): Promise<LoadedConfig> {
     if (!this.cache) {
-      this.cache = {
-        rawServers: {},
-        httpServers: new Map(),
-      };
+      let globalMcpServers: Record<string, any> = {};
+      if (this.configResolver) {
+        globalMcpServers = await this.configResolver.getGlobalMcpServers();
+      }
+      const normalized = normalizeConfig({ mcpServers: globalMcpServers });
+      this.cache = normalized;
     }
     return this.cache;
   }

@@ -49,6 +49,20 @@ export interface PostedGrantRequest {
 }
 
 /**
+ * Payload emitted on "package:requested" — platform renderers listen for this.
+ */
+export interface PostedPackageRequest {
+  id: string;
+  userId: string;
+  agentId: string;
+  conversationId: string;
+  channelId: string;
+  teamId?: string;
+  packages: string[];
+  reason: string;
+}
+
+/**
  * Platform-agnostic interaction service (fire-and-forget).
  * Posts questions with buttons; no Redis, no blocking, no state machine.
  * User clicks → platform converts to regular message → normal queue.
@@ -136,6 +150,42 @@ export class InteractionService extends EventEmitter {
     );
 
     this.emit("grant:requested", posted);
+    return posted;
+  }
+
+  /**
+   * Post a package install request with approve/deny buttons (non-blocking, fire-and-forget).
+   * Emits "package:requested" for platform renderers.
+   */
+  async postPackageRequest(
+    userId: string,
+    agentId: string,
+    conversationId: string,
+    channelId: string,
+    teamId: string | undefined,
+    packages: string[],
+    reason: string
+  ): Promise<PostedPackageRequest> {
+    if (this.beforeCreateHook) {
+      await this.beforeCreateHook(userId, conversationId);
+    }
+
+    const posted: PostedPackageRequest = {
+      id: `pkg_${randomUUID()}`,
+      userId,
+      agentId,
+      conversationId,
+      channelId,
+      teamId,
+      packages,
+      reason,
+    };
+
+    logger.info(
+      `Posted package request ${posted.id} for agent ${agentId} packages=${packages.join(",")}`
+    );
+
+    this.emit("package:requested", posted);
     return posted;
   }
 

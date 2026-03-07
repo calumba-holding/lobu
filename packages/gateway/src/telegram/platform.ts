@@ -14,6 +14,7 @@ import { Bot } from "grammy";
 import type { Hono } from "hono";
 import { platformAuthRegistry } from "../auth/platform-auth";
 import { CommandDispatcher } from "../commands/command-dispatcher";
+import { SystemMessageLimiter } from "../infrastructure/redis/system-message-limiter";
 import type { CoreServices, PlatformAdapter } from "../platform";
 import type { IFileHandler } from "../platform/file-handler";
 import {
@@ -88,6 +89,7 @@ export class TelegramPlatform implements PlatformAdapter {
       services.getSessionManager(),
       this.agentOptions
     );
+    this.messageHandler.setFileHandler(this.fileHandler);
 
     // Create response renderer
     this.responseRenderer = new TelegramResponseRenderer(
@@ -122,7 +124,7 @@ export class TelegramPlatform implements PlatformAdapter {
 
     // Create and register auth adapter
     const publicGatewayUrl = services.getPublicGatewayUrl();
-    this.authAdapter = new TelegramAuthAdapter(this.bot, publicGatewayUrl);
+    this.authAdapter = new TelegramAuthAdapter(this.bot);
     platformAuthRegistry.register("telegram", this.authAdapter);
 
     // Detect webhook vs polling mode
@@ -135,18 +137,26 @@ export class TelegramPlatform implements PlatformAdapter {
       this.setThreadStatus(channelId, conversationId, status)
     );
 
-    // Wire up channel binding service
-    const channelBindingService = services.getChannelBindingService();
-    if (channelBindingService && this.messageHandler) {
-      this.messageHandler.setChannelBindingService(channelBindingService);
-      logger.info("Channel binding service wired to Telegram message handler");
-    }
-
     // Wire up agent settings store
     const agentSettingsStore = services.getAgentSettingsStore();
     if (agentSettingsStore && this.messageHandler) {
       this.messageHandler.setAgentSettingsStore(agentSettingsStore);
       logger.info("Agent settings store wired to Telegram message handler");
+    }
+
+    const transcriptionService = services.getTranscriptionService();
+    if (transcriptionService && this.messageHandler) {
+      this.messageHandler.setTranscriptionService(transcriptionService);
+      logger.info("Transcription service wired to Telegram message handler");
+    }
+
+    if (this.messageHandler) {
+      const systemMessageLimiter = new SystemMessageLimiter(
+        services.getQueue().getRedisClient(),
+        "lobu:sysmsg"
+      );
+      this.messageHandler.setSystemMessageLimiter(systemMessageLimiter);
+      logger.info("System message limiter wired to Telegram message handler");
     }
 
     // Wire up command dispatcher
@@ -164,14 +174,14 @@ export class TelegramPlatform implements PlatformAdapter {
     // Wire up claim service for settings link generation
     const claimService = services.getClaimService();
     if (claimService) {
-      if (this.messageHandler) {
-        this.messageHandler.setClaimService(claimService);
-      }
       if (this.authAdapter) {
         this.authAdapter.setClaimService(claimService);
       }
+      if (this.interactionRenderer) {
+        this.interactionRenderer.setClaimService(claimService);
+      }
       logger.info(
-        "Claim service wired to Telegram auth adapter and message handler"
+        "Claim service wired to Telegram auth adapter and interaction renderer"
       );
     }
 
@@ -179,13 +189,9 @@ export class TelegramPlatform implements PlatformAdapter {
     if (this.messageHandler) {
       const userAgentsStore = services.getUserAgentsStore();
       const agentMetadataStore = services.getAgentMetadataStore();
-      const adminStatusCache = services.getAdminStatusCache();
       this.messageHandler.setUserAgentsStore(userAgentsStore);
       this.messageHandler.setAgentMetadataStore(agentMetadataStore);
-      this.messageHandler.setAdminStatusCache(adminStatusCache);
-      logger.info(
-        "User agents and admin status stores wired to Telegram message handler"
-      );
+      logger.info("User agents stores wired to Telegram message handler");
     }
 
     logger.info("Telegram platform initialized");
@@ -598,6 +604,39 @@ export class TelegramPlatform implements PlatformAdapter {
     // Telegram group chat IDs are negative
     const chatId = Number(channelId);
     return chatId < 0;
+  }
+
+  async notifyIdentityLinked(channelId: string): Promise<void> {
+    const chatId = Number(channelId);
+    const baseUrl = process.env.PUBLIC_GATEWAY_URL || "http://localhost:8080";
+    const settingsUrl = new URL("/settings", baseUrl);
+    settingsUrl.searchParams.set("platform", "telegram");
+    settingsUrl.searchParams.set("chat", channelId);
+
+    try {
+      await this.bot.api.sendMessage(
+        chatId,
+        "Your account is now linked. Tap the button below to open settings.",
+        {
+          parse_mode: "HTML",
+          reply_markup: {
+            inline_keyboard: [
+              [
+                {
+                  text: "Open Settings",
+                  web_app: { url: settingsUrl.toString() },
+                },
+              ],
+            ],
+          },
+        }
+      );
+    } catch (err) {
+      logger.warn(
+        { error: String(err), chatId },
+        "Failed to send link notification"
+      );
+    }
   }
 
   getDisplayInfo(): { name: string; icon: string; logoUrl?: string } {

@@ -30,6 +30,7 @@ export class ClaimService {
   private static readonly CLAIM_TTL_SECONDS = 5 * 60; // 5 minutes
   private static readonly CLAIM_PREFIX = "settings:claim:";
   private static readonly ACCESS_PREFIX = "settings:access:";
+  private static readonly IDENTITY_PREFIX = "settings:identity:";
 
   constructor(private redis: Redis) {}
 
@@ -103,6 +104,36 @@ export class ClaimService {
     const key = `${ClaimService.ACCESS_PREFIX}${oauthUserId}`;
     const members = await this.redis.smembers(key);
     return members.map((m) => JSON.parse(m) as AccessEntry);
+  }
+
+  /**
+   * Link a platform identity to an OAuth user ID.
+   * Subsequent Telegram initData sessions can resolve the linked OAuth identity.
+   */
+  async linkPlatformIdentity(
+    platform: string,
+    platformUserId: string,
+    oauthUserId: string
+  ): Promise<void> {
+    const key = `${ClaimService.IDENTITY_PREFIX}${platform}:${platformUserId}`;
+    await this.redis.set(key, oauthUserId);
+    logger.info("Linked platform identity", {
+      platform,
+      platformUserId,
+      oauthUserId,
+    });
+  }
+
+  /**
+   * Get the linked OAuth user ID for a platform identity.
+   * Returns null if no link exists.
+   */
+  async getLinkedOAuthUserId(
+    platform: string,
+    platformUserId: string
+  ): Promise<string | null> {
+    const key = `${ClaimService.IDENTITY_PREFIX}${platform}:${platformUserId}`;
+    return this.redis.get(key);
   }
 
   /**

@@ -9,24 +9,20 @@ import {
   generateTraceId,
 } from "@lobu/core";
 import type { Bot } from "grammy";
-import type { AdminStatusCache } from "../../auth/admin-status-cache";
 import type { AgentMetadataStore } from "../../auth/agent-metadata-store";
 import type { AgentSettingsStore } from "../../auth/settings";
-import {
-  type ClaimService,
-  buildClaimSettingsUrl,
-} from "../../auth/settings/claim-service";
-import { buildTelegramSettingsUrl } from "../../auth/settings/token-service";
 import type { UserAgentsStore } from "../../auth/user-agents-store";
-import type { ChannelBindingService } from "../../channels";
 import type { CommandDispatcher } from "../../commands/command-dispatcher";
 import { createTelegramReply } from "../../commands/command-reply-adapters";
 import type { QueueProducer } from "../../infrastructure/queue/queue-producer";
+import type { SystemMessageLimiter } from "../../infrastructure/redis/system-message-limiter";
+import type { IFileHandler } from "../../platform/file-handler";
 import {
   buildMessagePayload,
   resolveAgentId,
   resolveAgentOptions,
 } from "../../services/platform-helpers";
+import type { TranscriptionService } from "../../services/transcription-service";
 import type { ISessionManager } from "../../session";
 import type { TelegramConfig } from "../config";
 import { isGroupChat, type TelegramContext } from "../types";
@@ -46,6 +42,13 @@ interface StoredMessage {
 interface ConversationHistory {
   messages: StoredMessage[];
   lastUpdated: number;
+}
+
+interface TelegramInboundAudioFile {
+  id: string;
+  name: string;
+  mimetype: string;
+  size: number;
 }
 
 class MessageDeduplicator<T extends string | number = string> {
@@ -90,14 +93,15 @@ export class TelegramMessageHandler {
   private conversationHistory = new Map<string, ConversationHistory>();
   private isRunning = false;
   private historyCleanupTimer?: NodeJS.Timeout;
-  private channelBindingService?: ChannelBindingService;
   private agentSettingsStore?: AgentSettingsStore;
+  private transcriptionService?: TranscriptionService;
+  private fileHandler?: IFileHandler;
   private userAgentsStore?: UserAgentsStore;
   private agentMetadataStore?: AgentMetadataStore;
-  private adminStatusCache?: AdminStatusCache;
-  private claimService?: ClaimService;
   private commandDispatcher?: CommandDispatcher;
+  private systemMessageLimiter?: SystemMessageLimiter;
   private botUsername?: string;
+  private botUserId?: number;
   private statusCallback?: (
     channelId: string,
     conversationId: string,
@@ -112,12 +116,16 @@ export class TelegramMessageHandler {
     private agentOptions: AgentOptions
   ) {}
 
-  setChannelBindingService(service: ChannelBindingService): void {
-    this.channelBindingService = service;
-  }
-
   setAgentSettingsStore(store: AgentSettingsStore): void {
     this.agentSettingsStore = store;
+  }
+
+  setTranscriptionService(service: TranscriptionService): void {
+    this.transcriptionService = service;
+  }
+
+  setFileHandler(handler: IFileHandler): void {
+    this.fileHandler = handler;
   }
 
   setUserAgentsStore(store: UserAgentsStore): void {
@@ -128,16 +136,12 @@ export class TelegramMessageHandler {
     this.agentMetadataStore = store;
   }
 
-  setAdminStatusCache(cache: AdminStatusCache): void {
-    this.adminStatusCache = cache;
-  }
-
-  setClaimService(service: ClaimService): void {
-    this.claimService = service;
-  }
-
   setCommandDispatcher(dispatcher: CommandDispatcher): void {
     this.commandDispatcher = dispatcher;
+  }
+
+  setSystemMessageLimiter(limiter: SystemMessageLimiter): void {
+    this.systemMessageLimiter = limiter;
   }
 
   setStatusCallback(
@@ -173,16 +177,16 @@ export class TelegramMessageHandler {
     // Fetch bot info for mention detection
     this.bot.api.getMe().then((me) => {
       this.botUsername = me.username;
-      logger.info({ botUsername: this.botUsername }, "Bot username resolved");
+      this.botUserId = me.id;
+      logger.info(
+        { botUsername: this.botUsername, botUserId: this.botUserId },
+        "Bot identity resolved"
+      );
     });
 
-    this.bot.on("message:text", async (ctx) => {
-      try {
-        await this.processMessage(ctx);
-      } catch (err) {
-        logger.error({ error: String(err) }, "Error handling text message");
-      }
-    });
+    this.registerMessageListener("message:text", "text");
+    this.registerMessageListener("message:voice", "voice");
+    this.registerMessageListener("message:audio", "audio");
 
     // Periodically cleanup expired histories
     if (this.historyCleanupTimer) {
@@ -206,6 +210,19 @@ export class TelegramMessageHandler {
       this.historyCleanupTimer = undefined;
     }
     logger.info("Telegram message handler stopped");
+  }
+
+  private registerMessageListener(event: string, label: string): void {
+    this.bot.on(event as any, async (ctx) => {
+      try {
+        await this.processMessage(ctx);
+      } catch (err) {
+        logger.error(
+          { error: String(err), event: label },
+          "Error handling Telegram message"
+        );
+      }
+    });
   }
 
   /**
@@ -232,7 +249,9 @@ export class TelegramMessageHandler {
       [msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(" ") ||
       undefined;
 
-    const body = msg.text || "";
+    const audioFiles = this.extractInboundAudioFiles(msg);
+    const hasAudio = audioFiles.length > 0;
+    const body = this.extractMessageBody(msg, hasAudio);
 
     logger.info(
       {
@@ -241,6 +260,7 @@ export class TelegramMessageHandler {
         chatType,
         senderId,
         isGroup,
+        hasAudio,
         body: body.substring(0, 100),
       },
       "Processing message"
@@ -255,9 +275,22 @@ export class TelegramMessageHandler {
       return;
     }
 
-    // Groups always require @mention; DMs never do
-    if (isGroup && !this.isBotMentioned(msg)) {
-      return;
+    // Group safety gates:
+    // - voice/audio messages only when replying to bot
+    // - text messages require @mention
+    if (isGroup) {
+      if (hasAudio) {
+        const repliedToBot = this.isReplyToBot(msg);
+        if (!repliedToBot) {
+          logger.debug(
+            { messageId },
+            "Skipping group audio not replying to bot"
+          );
+          return;
+        }
+      } else if (!this.isBotMentioned(msg)) {
+        return;
+      }
     }
 
     // Check if groups are allowed
@@ -278,7 +311,7 @@ export class TelegramMessageHandler {
       repliedMessage: msg.reply_to_message
         ? {
             id: msg.reply_to_message.message_id,
-            body: msg.reply_to_message.text || "",
+            body: this.extractMessageBody(msg.reply_to_message, false),
             sender:
               msg.reply_to_message.from?.username ||
               String(msg.reply_to_message.from?.id || "unknown"),
@@ -304,6 +337,7 @@ export class TelegramMessageHandler {
       String(messageId),
       body,
       context,
+      audioFiles,
       conversationHistory
     );
   }
@@ -359,6 +393,214 @@ export class TelegramMessageHandler {
     return false;
   }
 
+  private isReplyToBot(msg: any): boolean {
+    const replyFrom = msg.reply_to_message?.from;
+    if (!replyFrom) return false;
+
+    if (this.botUserId && replyFrom.id === this.botUserId) {
+      return true;
+    }
+
+    return (
+      !!this.botUsername &&
+      typeof replyFrom.username === "string" &&
+      replyFrom.username === this.botUsername
+    );
+  }
+
+  private extractMessageBody(
+    msg: any,
+    includeAudioPlaceholder: boolean
+  ): string {
+    const text = typeof msg.text === "string" ? msg.text.trim() : "";
+    if (text.length > 0) {
+      return text;
+    }
+
+    const caption = typeof msg.caption === "string" ? msg.caption.trim() : "";
+    if (caption.length > 0) {
+      return caption;
+    }
+
+    return includeAudioPlaceholder ? "<media:audio>" : "";
+  }
+
+  private extractInboundAudioFiles(msg: any): TelegramInboundAudioFile[] {
+    const extracted: TelegramInboundAudioFile[] = [];
+    const voice = msg.voice;
+    if (voice?.file_id) {
+      extracted.push({
+        id: String(voice.file_id),
+        name: `voice_${msg.message_id}.ogg`,
+        mimetype: voice.mime_type || "audio/ogg",
+        size: typeof voice.file_size === "number" ? voice.file_size : 0,
+      });
+    }
+
+    const audio = msg.audio;
+    if (audio?.file_id) {
+      extracted.push({
+        id: String(audio.file_id),
+        name:
+          typeof audio.file_name === "string" && audio.file_name.length > 0
+            ? audio.file_name
+            : `audio_${msg.message_id}.mp3`,
+        mimetype: audio.mime_type || "audio/mpeg",
+        size: typeof audio.file_size === "number" ? audio.file_size : 0,
+      });
+    }
+
+    return extracted;
+  }
+
+  private async transcribeTelegramAudio(
+    userRequest: string,
+    audioFiles: TelegramInboundAudioFile[],
+    agentId: string,
+    messageId: string,
+    context: TelegramContext
+  ): Promise<string> {
+    if (audioFiles.length === 0) {
+      return userRequest;
+    }
+
+    if (!this.fileHandler) {
+      logger.warn({ messageId }, "Telegram file handler not configured");
+      return this.buildAudioDownloadFailedMessage(
+        "Telegram file handler is not configured"
+      );
+    }
+
+    if (!this.transcriptionService) {
+      logger.info({ messageId }, "Transcription service not configured");
+      return this.buildTranscriptionUnavailableMessage([
+        "openai",
+        "gemini",
+        "elevenlabs",
+      ]);
+    }
+
+    const transcriptions: string[] = [];
+
+    for (const audioFile of audioFiles) {
+      let buffer: Buffer;
+      try {
+        const { stream, metadata } = await this.fileHandler.downloadFile(
+          audioFile.id
+        );
+        buffer = await this.readStreamToBuffer(stream);
+        if (audioFile.mimetype === "audio/ogg" && metadata.mimetype) {
+          audioFile.mimetype = metadata.mimetype;
+        }
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
+        logger.warn(
+          { messageId, fileId: audioFile.id, error: errorMessage },
+          "Failed to download Telegram audio file"
+        );
+        return this.buildAudioDownloadFailedMessage(errorMessage);
+      }
+
+      const result = await this.transcriptionService.transcribe(
+        buffer,
+        agentId,
+        audioFile.mimetype
+      );
+
+      if ("text" in result) {
+        transcriptions.push(`[Voice message]: ${result.text}`);
+        logger.info(
+          {
+            messageId,
+            fileId: audioFile.id,
+            provider: result.provider,
+            textLength: result.text.length,
+          },
+          "Telegram audio transcription successful"
+        );
+        continue;
+      }
+
+      if (result.error.includes("No transcription provider configured")) {
+        await this.sendProviderSetupPrompt(context, agentId);
+        logger.info(
+          { messageId, fileId: audioFile.id },
+          "No transcription provider configured"
+        );
+        return this.buildTranscriptionUnavailableMessage(
+          result.availableProviders
+        );
+      }
+
+      logger.warn(
+        { messageId, fileId: audioFile.id, error: result.error },
+        "Telegram audio transcription failed"
+      );
+      return this.buildTranscriptionFailedMessage(result.error);
+    }
+
+    if (transcriptions.length === 0) {
+      return userRequest;
+    }
+
+    const transcribedText = transcriptions.join("\n\n");
+    if (!userRequest.trim() || userRequest === "<media:audio>") {
+      return transcribedText;
+    }
+
+    return `${transcribedText}\n\n${userRequest}`;
+  }
+
+  private async readStreamToBuffer(
+    stream: AsyncIterable<unknown>
+  ): Promise<Buffer> {
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as any));
+    }
+    return Buffer.concat(chunks);
+  }
+
+  private buildAudioDownloadFailedMessage(errorDetail: string): string {
+    return `[Voice message received - audio download failed]
+
+The user sent a voice message but the audio file could not be downloaded from Telegram's servers.
+
+Error: ${errorDetail}
+
+Please let the user know:
+1. You received their voice message but couldn't process it due to a technical issue
+2. Ask them to either send the voice message again or type their message instead`;
+  }
+
+  private buildTranscriptionUnavailableMessage(
+    availableProviders: string[]
+  ): string {
+    const providers =
+      availableProviders.length > 0
+        ? availableProviders.join(", ")
+        : "openai, gemini, elevenlabs";
+    return `[Voice message received - transcription unavailable]
+
+The user sent a voice message but no transcription provider is configured.
+Available providers that can be configured: ${providers}
+
+To enable voice transcription:
+1. Use the Sudo tool to generate a settings link for the user
+2. Ask them to connect OpenAI, Gemini, or ElevenLabs credentials
+
+For now, let the user know you received the voice message but couldn't transcribe it, and ask them to type their message.`;
+  }
+
+  private buildTranscriptionFailedMessage(errorDetail: string): string {
+    return `[Voice message received - transcription failed]
+
+Error: ${errorDetail}
+
+The user sent a voice message but transcription failed. Let them know and suggest they try again or type their message.`;
+  }
+
   /**
    * Enqueue message for worker processing.
    */
@@ -366,6 +608,7 @@ export class TelegramMessageHandler {
     messageId: string,
     body: string,
     context: TelegramContext,
+    audioFiles: TelegramInboundAudioFile[],
     conversationHistory: Array<{
       role: "user" | "assistant";
       content: string;
@@ -400,23 +643,64 @@ export class TelegramMessageHandler {
       "Message received"
     );
 
-    // Resolve agent ID
-    const resolved = await resolveAgentId({
+    // Resolve agent ID (deterministic for Telegram)
+    const { agentId } = await resolveAgentId({
       platform: "telegram",
       userId,
       channelId: chatId,
       isGroup: context.isGroup,
-      channelBindingService: this.channelBindingService,
-      sendConfigPrompt: () => this.sendConfigurationPrompt(context),
     });
-    if (resolved.promptSent) return;
-    const agentId = resolved.agentId;
+
+    // Auto-create agent metadata on first message
+    if (this.agentMetadataStore) {
+      const existing = await this.agentMetadataStore.getMetadata(agentId);
+      if (!existing) {
+        const agentName = context.isGroup
+          ? `Telegram Group ${chatId}`
+          : `Telegram ${context.senderDisplayName || userId}`;
+        await this.agentMetadataStore.createAgent(
+          agentId,
+          agentName,
+          "telegram",
+          userId
+        );
+        await this.userAgentsStore?.addAgent("telegram", userId, agentId);
+        logger.info(
+          { agentId, userId },
+          "Auto-created agent for Telegram user"
+        );
+      }
+    }
+
+    // Check if agent has providers configured — send setup prompt if not
+    if (this.agentSettingsStore) {
+      const settings = await this.agentSettingsStore.getSettings(agentId);
+      if (!settings?.installedProviders?.length) {
+        await this.sendProviderSetupPrompt(context, agentId);
+        return;
+      }
+    }
 
     // Clean up body - remove bot mention
     let cleanBody = body;
     if (this.botUsername) {
       cleanBody = cleanBody.replace(`@${this.botUsername}`, "").trim();
     }
+
+    const processedBody = await this.transcribeTelegramAudio(
+      cleanBody,
+      audioFiles,
+      agentId,
+      messageId,
+      context
+    );
+
+    const fileMetadata = audioFiles.map((file) => ({
+      id: file.id,
+      name: file.name,
+      mimetype: file.mimetype,
+      size: file.size,
+    }));
 
     // Fetch agent settings and merge
     const agentOptions = await this.getAgentOptionsWithSettings(agentId);
@@ -429,7 +713,7 @@ export class TelegramMessageHandler {
       teamId: context.isGroup ? chatId : "telegram",
       agentId,
       messageId,
-      messageText: cleanBody,
+      messageText: processedBody,
       channelId: chatId,
       platformMetadata: {
         traceId,
@@ -444,6 +728,7 @@ export class TelegramMessageHandler {
         repliedMessageId: context.repliedMessage?.id,
         responseChannel: chatId,
         responseId: messageId,
+        files: fileMetadata.length > 0 ? fileMetadata : undefined,
         conversationHistory:
           conversationHistory.length > 0 ? conversationHistory : undefined,
       },
@@ -457,6 +742,7 @@ export class TelegramMessageHandler {
         messageId,
         conversationId,
         chatId,
+        fileCount: fileMetadata.length,
         historyCount: conversationHistory.length,
       },
       "Message enqueued"
@@ -469,189 +755,94 @@ export class TelegramMessageHandler {
   }
 
   /**
-   * Send a configuration prompt when no agent is bound.
-   * Groups: claim-based OAuth flow (url button in group).
-   * DMs: web_app button with Telegram initData auth.
-   * Returns true if sent (caller should stop), false if failed (caller should fallback).
+   * Send a setup prompt when the agent has no provider configured.
+   * Uses Telegram web_app button — auth handled via initData, no claim needed.
+   * Throttled to avoid spamming the user on repeated messages.
    */
-  private async sendConfigurationPrompt(
-    context: TelegramContext
-  ): Promise<boolean> {
-    if (!this.userAgentsStore || !this.agentMetadataStore) {
-      return false;
-    }
+  private async sendProviderSetupPrompt(
+    context: TelegramContext,
+    agentId: string
+  ): Promise<void> {
+    const sendPrompt = async () => {
+      const baseUrl = process.env.PUBLIC_GATEWAY_URL || "http://localhost:8080";
+      const settingsUrl = new URL("/settings", baseUrl);
+      settingsUrl.searchParams.set("chat", String(context.chatId));
+      const configUrl = settingsUrl.toString();
 
-    try {
-      const userId = String(context.senderId);
-      const chatId = String(context.chatId);
+      const message =
+        "Welcome! To get started, set up an AI provider (like Claude or OpenAI) so I can respond to your messages.";
 
-      // For groups, check admin permissions
-      if (context.isGroup) {
-        const canConfigure = await this.checkCanConfigureTelegram(
-          chatId,
-          userId
-        );
-        if (!canConfigure.allowed) {
-          await this.bot.api.sendMessage(
-            context.chatId,
-            canConfigure.reason ||
-              "Only group admins can configure the bot for this group."
-          );
-          return true;
-        }
-      }
-
-      // Groups: claim-based OAuth flow with url button
-      if (context.isGroup) {
-        if (!this.claimService) {
-          logger.warn("ClaimService not available for group config prompt");
-          await this.bot.api.sendMessage(
-            context.chatId,
-            "Welcome! Configuration is temporarily unavailable. Please try again later."
-          );
-          return true;
-        }
-
-        const claimCode = await this.claimService.createClaim(
-          "telegram",
-          chatId,
-          userId
-        );
-        const configUrl = buildClaimSettingsUrl(claimCode);
-
-        await this.bot.api.sendMessage(
-          context.chatId,
-          "Welcome! To get started, tap the button below to configure which agent should handle messages here.",
-          {
-            reply_markup: {
-              inline_keyboard: [[{ text: "Configure Agent", url: configUrl }]],
-            },
-          }
-        );
-
-        logger.info(
-          { userId, chatId: context.chatId },
-          "Sent claim-based configuration prompt (group)"
-        );
-        return true;
-      }
-
-      // DMs: web_app button with Telegram initData auth
-      const configUrl = buildTelegramSettingsUrl(chatId);
-
-      // Telegram rejects inline keyboard URLs like http://localhost:...; fall back to plain text
-      let includeButton = true;
+      // Telegram rejects web_app buttons with localhost URLs
+      let isLocalhost = false;
       try {
         const u = new URL(configUrl);
-        if (
+        isLocalhost =
           u.hostname === "localhost" ||
           u.hostname === "127.0.0.1" ||
-          u.hostname === "::1"
-        ) {
-          includeButton = false;
-        }
+          u.hostname === "::1";
       } catch {
-        includeButton = false;
+        isLocalhost = true;
       }
 
-      if (includeButton) {
+      if (isLocalhost) {
         await this.bot.api.sendMessage(
           context.chatId,
-          "Welcome! To get started, tap the button below to configure which agent should handle messages here.",
-          {
-            reply_markup: {
-              inline_keyboard: [
-                [
-                  {
-                    text: "Configure Agent",
-                    web_app: { url: configUrl },
-                  },
-                ],
-              ],
-            },
-          }
+          `${message}\n\nSet up: ${configUrl}`
         );
       } else {
-        await this.bot.api.sendMessage(
-          context.chatId,
-          `Welcome! To get started, please configure which agent should handle messages here.\n\nConfigure: ${configUrl}`
-        );
+        await this.bot.api.sendMessage(context.chatId, message, {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "Set Up Provider", web_app: { url: configUrl } }],
+            ],
+          },
+        });
       }
 
       logger.info(
-        { userId, chatId: context.chatId },
-        "Sent configuration prompt (DM)"
+        { agentId, chatId: context.chatId },
+        "Sent provider setup prompt"
       );
-      return true;
-    } catch (error) {
-      logger.error({ error }, "Failed to send configuration prompt");
-      return false;
-    }
+    };
+
+    await this.sendThrottled(
+      `provider_setup:telegram:${context.chatId}:${agentId}`,
+      sendPrompt,
+      { chatId: context.chatId, agentId }
+    );
   }
 
   /**
-   * Check if a Telegram user can configure a group.
+   * Run a send function with optional throttling via systemMessageLimiter.
    */
-  private async checkCanConfigureTelegram(
-    chatId: string,
-    userId: string
-  ): Promise<{ allowed: boolean; reason?: string }> {
-    // Check cache
-    if (this.adminStatusCache) {
-      const cached = await this.adminStatusCache.getStatus(
-        "telegram",
-        chatId,
-        userId
-      );
-      if (cached !== null) {
-        return cached
-          ? { allowed: true }
-          : {
-              allowed: false,
-              reason: "Only group admins can configure the bot for this group.",
-            };
+  private async sendThrottled(
+    dedupeKey: string,
+    sendFn: () => Promise<void>,
+    logContext: Record<string, unknown>
+  ): Promise<void> {
+    if (!this.systemMessageLimiter) {
+      try {
+        await sendFn();
+      } catch (error) {
+        logger.warn(
+          { error: String(error), ...logContext },
+          "Failed to send throttled message"
+        );
       }
+      return;
     }
 
     try {
-      const member = await this.bot.api.getChatMember(
-        Number(chatId),
-        Number(userId)
-      );
-      const isAdmin =
-        member.status === "creator" || member.status === "administrator";
-
-      // Cache result
-      if (this.adminStatusCache) {
-        await this.adminStatusCache.setStatus(
-          "telegram",
-          chatId,
-          userId,
-          isAdmin
-        );
-      }
-
-      if (isAdmin) {
-        return { allowed: true };
-      }
-
-      return {
-        allowed: false,
-        reason: "Only group admins can configure the bot for this group.",
-      };
+      await this.systemMessageLimiter.sendOnce(dedupeKey, sendFn, {
+        sentTtlSeconds: 3600,
+        lockTtlSeconds: 30,
+        failOpen: false,
+      });
     } catch (error) {
-      logger.warn({ error, chatId, userId }, "Failed Telegram admin check");
-      // Fallback to first-user
-      if (this.channelBindingService) {
-        const existing = await this.channelBindingService.getBinding(
-          "telegram",
-          chatId
-        );
-        if (!existing) {
-          return { allowed: true };
-        }
-      }
-      return { allowed: true };
+      logger.warn(
+        { error: String(error), ...logContext },
+        "Failed to send throttled message"
+      );
     }
   }
 

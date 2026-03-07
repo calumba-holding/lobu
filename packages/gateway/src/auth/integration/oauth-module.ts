@@ -4,13 +4,13 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import type { WorkerConnectionManager } from "../../gateway/connection-manager";
 import type { IMessageQueue } from "../../infrastructure/queue";
+import { SETTINGS_SESSION_COOKIE_NAME } from "../../routes/public/settings-auth";
 import { GenericOAuth2Client } from "../oauth/generic-client";
 import type { McpOAuthStateStore } from "../oauth/state-store";
 import {
   renderOAuthErrorPage,
   renderOAuthSuccessPage,
 } from "../oauth-templates";
-import { SETTINGS_SESSION_COOKIE_NAME } from "../../routes/public/settings-auth";
 import type { IntegrationConfigService } from "./config-service";
 import type { IntegrationCredentialStore } from "./credential-store";
 

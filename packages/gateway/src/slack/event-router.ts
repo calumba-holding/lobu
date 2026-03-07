@@ -597,6 +597,12 @@ export class SlackEventHandlers {
     this.actionHandler.setClaimService(service);
   }
 
+  setSystemMessageLimiter(
+    limiter: import("../infrastructure/redis/system-message-limiter").SystemMessageLimiter
+  ): void {
+    this.messageHandler.setSystemMessageLimiter(limiter);
+  }
+
   /**
    * Cleanup method for graceful shutdown
    */

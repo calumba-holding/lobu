@@ -10,10 +10,6 @@ type SlackInfo = {
   dmLink: string;
 };
 
-type TelegramInfo = {
-  configured: boolean;
-};
-
 type LandingOptions = {
   publicGatewayUrl?: string;
   githubUrl: string;
@@ -109,18 +105,11 @@ async function getSlackInfo(): Promise<SlackInfo | null> {
   return inFlight;
 }
 
-function getTelegramInfo(): TelegramInfo {
-  // Keep the public landing page focused on Slack + API + Telegram.
-  // WhatsApp support exists in the codebase but is intentionally not advertised here.
-  return { configured: Boolean(process.env.TELEGRAM_BOT_TOKEN) };
-}
-
 function renderLandingPage(options: {
   githubUrl: string;
   docsUrl: string;
   publicGatewayUrl?: string;
   slackInfo?: SlackInfo | null;
-  telegramInfo: TelegramInfo;
 }): string {
   const githubUrl = escapeHtml(options.githubUrl);
   const docsUrl = escapeHtml(options.docsUrl);
@@ -129,14 +118,11 @@ function renderLandingPage(options: {
     : "";
 
   const slack = options.slackInfo;
-  const telegram = options.telegramInfo;
 
   const slackStatus = slack
     ? `Workspace: ${escapeHtml(slack.teamName)}`
     : "Not configured";
   const slackLink = slack ? slack.dmLink : "";
-
-  const telegramStatus = telegram.configured ? "Configured" : "Not configured";
 
   return `<!doctype html>
 <html lang="en">
@@ -144,15 +130,36 @@ function renderLandingPage(options: {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Lobu Gateway</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; }
+      .gateway-box { background: #f0f0f0; padding: 20px; border-radius: 8px; margin: 20px 0; }
+      .gateway-box input { width: 70%; padding: 8px; font-size: 14px; }
+      .gateway-box button { padding: 8px 16px; cursor: pointer; }
+    </style>
   </head>
   <body>
     <h1>Lobu Gateway</h1>
+    ${
+      publicGateway
+        ? `<div class="gateway-box">
+      <label>Gateway URL: </label>
+      <input type="text" value="${publicGateway}" readonly id="gatewayUrl" />
+      <button onclick="copyUrl()">Copy</button>
+    </div>`
+        : ""
+    }
     <ul>
       <li><a href="${docsUrl}">API Documentation</a></li>
       <li><a href="${githubUrl}" target="_blank" rel="noreferrer">GitHub</a></li>
-      <li>Telegram: ${telegramStatus}</li>
       <li>Slack: ${slackStatus}${slack ? ` — <a href="${slackLink}" target="_blank" rel="noreferrer">Message ${escapeHtml(slack.botName)}</a>` : ""}</li>
-    </ul>${publicGateway ? `\n    <p><small>${publicGateway}</small></p>` : ""}
+    </ul>
+    <script>
+      function copyUrl() {
+        const input = document.getElementById('gatewayUrl');
+        input.select();
+        document.execCommand('copy');
+      }
+    </script>
   </body>
 </html>`;
 }
@@ -162,7 +169,6 @@ export function createLandingRoutes(options: LandingOptions) {
 
   app.get("/", async (c) => {
     const slackInfo = await getSlackInfo();
-    const telegramInfo = getTelegramInfo();
 
     return c.html(
       renderLandingPage({
@@ -170,7 +176,6 @@ export function createLandingRoutes(options: LandingOptions) {
         docsUrl: "/api/docs",
         publicGatewayUrl: options.publicGatewayUrl,
         slackInfo,
-        telegramInfo,
       })
     );
   });

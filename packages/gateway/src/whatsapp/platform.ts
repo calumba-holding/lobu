@@ -8,6 +8,7 @@ import {
   type UserSuggestion,
 } from "@lobu/core";
 import { platformAuthRegistry } from "../auth/platform-auth";
+import { SystemMessageLimiter } from "../infrastructure/redis/system-message-limiter";
 import type { CoreServices, PlatformAdapter } from "../platform";
 import type { IFileHandler } from "../platform/file-handler";
 import {
@@ -109,15 +110,6 @@ export class WhatsAppPlatform implements PlatformAdapter {
 
     logger.info("WhatsApp auth adapter registered");
 
-    // Wire up channel binding service for agent routing
-    const channelBindingService = services.getChannelBindingService();
-    if (channelBindingService && this.messageHandler) {
-      this.messageHandler.setChannelBindingService(channelBindingService);
-      logger.info(
-        "✅ Channel binding service wired to WhatsApp message handler"
-      );
-    }
-
     // Wire up agent settings store for applying agent configuration
     const agentSettingsStore = services.getAgentSettingsStore();
     if (agentSettingsStore && this.messageHandler) {
@@ -130,6 +122,17 @@ export class WhatsAppPlatform implements PlatformAdapter {
     if (transcriptionService && this.messageHandler) {
       this.messageHandler.setTranscriptionService(transcriptionService);
       logger.info("✅ Transcription service wired to WhatsApp message handler");
+    }
+
+    if (this.messageHandler) {
+      const systemMessageLimiter = new SystemMessageLimiter(
+        services.getQueue().getRedisClient(),
+        "lobu:sysmsg"
+      );
+      this.messageHandler.setSystemMessageLimiter(systemMessageLimiter);
+      logger.info(
+        "✅ System message limiter wired to WhatsApp message handler"
+      );
     }
 
     // Wire up user agent configuration stores
@@ -377,22 +380,21 @@ export class WhatsAppPlatform implements PlatformAdapter {
       // This ensures credentials are looked up correctly
       const phoneUserId = selfE164 || normalizedChannel;
 
-      // Import resolveSpace for proper agentId
-      const { resolveSpace } = await import("../spaces");
-      const space = resolveSpace({
-        platform: "whatsapp",
-        userId: phoneUserId,
-        channelId: phoneUserId,
-        isGroup: false,
-      });
+      const { platformAgentId } = await import("../spaces");
+      const agentId = platformAgentId(
+        "whatsapp",
+        phoneUserId,
+        phoneUserId,
+        false
+      );
 
       const payload = {
         userId: phoneUserId,
-        conversationId: space.agentId, // Use resolved space as conversation identifier
+        conversationId: agentId,
         messageId,
         channelId: resolvedChannel,
         teamId: "whatsapp",
-        agentId: space.agentId, // agentId is the isolation boundary
+        agentId,
         botId: selfE164 || "whatsapp-bot",
         platform: "whatsapp",
         messageText: cleanMessage,
@@ -409,7 +411,7 @@ export class WhatsAppPlatform implements PlatformAdapter {
 
       await queueProducer.enqueueMessage(payload);
       logger.info(
-        `Queued self-chat message ${messageId} to worker queue (space: ${space.agentId})`
+        `Queued self-chat message ${messageId} to worker queue (agent: ${agentId})`
       );
 
       return {

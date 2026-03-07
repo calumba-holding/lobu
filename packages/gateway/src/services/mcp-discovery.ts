@@ -1,7 +1,6 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { createLogger } from "@lobu/core";
 import type { PrefillMcpServer } from "../auth/settings/token-service";
+import type { SystemConfigResolver } from "./system-config-resolver";
 
 const logger = createLogger("mcp-discovery-service");
 
@@ -54,10 +53,13 @@ export interface DiscoveredMcpCandidate {
 export class McpDiscoveryService {
   private readonly officialRegistryUrl: string;
   private readonly timeoutMs: number;
-  private readonly localRegistry: LocalRegistryServer[];
+  private readonly configResolver?: SystemConfigResolver;
+  private localRegistry: LocalRegistryServer[] = [];
+  private localRegistryLoaded = false;
   private readonly recentCandidates = new Map<string, DiscoveredMcpCandidate>();
 
-  constructor() {
+  constructor(options: { configResolver?: SystemConfigResolver } = {}) {
+    this.configResolver = options.configResolver;
     this.officialRegistryUrl =
       process.env.MCP_DISCOVERY_OFFICIAL_REGISTRY_URL ||
       DEFAULT_OFFICIAL_REGISTRY_URL;
@@ -66,12 +68,12 @@ export class McpDiscoveryService {
       Number.isFinite(timeoutFromEnv) && timeoutFromEnv > 0
         ? timeoutFromEnv
         : DEFAULT_TIMEOUT_MS;
-    this.localRegistry = loadLocalRegistry();
   }
 
   async search(query: string, limit = 5): Promise<DiscoveredMcpCandidate[]> {
     const trimmed = query.trim();
     if (!trimmed) return [];
+    await this.ensureLocalRegistryLoaded();
 
     const [official, local] = await Promise.all([
       this.searchOfficialRegistry(trimmed, 25),
@@ -88,6 +90,7 @@ export class McpDiscoveryService {
   async getById(id: string): Promise<DiscoveredMcpCandidate | null> {
     const clean = id.trim();
     if (!clean) return null;
+    await this.ensureLocalRegistryLoaded();
 
     const cached =
       this.recentCandidates.get(clean) ||
@@ -117,6 +120,35 @@ export class McpDiscoveryService {
         candidate.canonicalId.toLowerCase() === clean.toLowerCase()
     );
     return exact || null;
+  }
+
+  private async ensureLocalRegistryLoaded(): Promise<void> {
+    if (this.localRegistryLoaded) return;
+    this.localRegistryLoaded = true;
+
+    if (!this.configResolver) {
+      logger.info("MCP discovery local resolver not configured");
+      return;
+    }
+
+    try {
+      const resolved = await this.configResolver.getMcpRegistryServers();
+      this.localRegistry = resolved.map((entry) => ({
+        id: entry.id,
+        name: entry.name,
+        description: entry.description,
+        type: entry.type,
+        config: entry.config,
+      }));
+      logger.info("Loaded local MCP registry", {
+        source: "resolver",
+        serverCount: this.localRegistry.length,
+      });
+    } catch (error) {
+      logger.warn("Failed to load local MCP registry from resolver", {
+        error,
+      });
+    }
   }
 
   private cacheCandidate(candidate: DiscoveredMcpCandidate): void {
@@ -213,32 +245,6 @@ export class McpDiscoveryService {
         };
       });
   }
-}
-
-function loadLocalRegistry(): LocalRegistryServer[] {
-  const candidatePaths = [
-    join(__dirname, "../../../cli/src/mcp-servers.json"),
-    join(process.cwd(), "packages/cli/src/mcp-servers.json"),
-  ];
-
-  for (const filePath of candidatePaths) {
-    try {
-      const raw = readFileSync(filePath, "utf-8");
-      const parsed = JSON.parse(raw) as { servers?: LocalRegistryServer[] };
-      if (Array.isArray(parsed.servers)) {
-        logger.info("Loaded local MCP registry", {
-          filePath,
-          serverCount: parsed.servers.length,
-        });
-        return parsed.servers;
-      }
-    } catch {
-      // Try next path
-    }
-  }
-
-  logger.warn("Could not load local MCP registry JSON");
-  return [];
 }
 
 function normalizeOfficialEntry(

@@ -1,19 +1,5 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { createLogger } from "@lobu/core";
-
-// Load mcp-servers.json from CLI package
-const mcpServersPath = join(__dirname, "../../../cli/src/mcp-servers.json");
-const mcpServersData = JSON.parse(readFileSync(mcpServersPath, "utf-8")) as {
-  servers: Array<{
-    id: string;
-    name: string;
-    description: string;
-    type: string;
-    config: Record<string, unknown>;
-    setupInstructions?: string;
-  }>;
-};
+import type { SystemConfigResolver } from "./system-config-resolver";
 
 const logger = createLogger("mcp-registry");
 
@@ -31,85 +17,78 @@ export interface McpRegistryEntry {
 
 /**
  * Service for accessing the MCP server registry.
- *
- * Responsibilities:
- * - Load MCP server definitions from mcp-servers.json
- * - Provide search and lookup functionality
- * - Return curated list of popular MCPs for quick-add
  */
 export class McpRegistryService {
   /**
    * Curated list of popular MCPs for quick-add chips in the settings UI.
-   * These are MCPs that are easy to set up or don't require authentication.
    */
   static readonly CURATED_MCP_IDS = [
-    "sentry", // No auth required
-    "playwright", // Command-based, no auth
-    "github", // OAuth - popular
-    "notion", // OAuth - popular
-    "linear", // OAuth - popular
+    "sentry",
+    "playwright",
+    "github",
+    "notion",
+    "linear",
   ];
 
-  private registry: McpRegistryEntry[];
+  private registry: McpRegistryEntry[] = [];
+  private loaded = false;
 
-  constructor() {
-    this.registry = this.loadRegistry();
-    logger.info(`Loaded ${this.registry.length} MCPs from registry`);
-  }
+  constructor(private readonly resolver?: SystemConfigResolver) {}
 
-  /**
-   * Load MCP server definitions from mcp-servers.json
-   */
-  private loadRegistry(): McpRegistryEntry[] {
-    return mcpServersData.servers.map((server) => ({
-      id: server.id,
-      name: server.name,
-      description: server.description,
-      type: server.type as McpRegistryEntry["type"],
-      config: server.config as Record<string, unknown>,
-      setupInstructions: server.setupInstructions,
+  private async ensureLoaded(): Promise<void> {
+    if (this.loaded) return;
+    this.loaded = true;
+
+    if (!this.resolver) {
+      logger.warn("MCP registry resolver not configured");
+      return;
+    }
+
+    const resolved = await this.resolver.getMcpRegistryServers();
+    this.registry = resolved.map((entry) => ({
+      id: entry.id,
+      name: entry.name,
+      description: entry.description,
+      type: entry.type,
+      config: entry.config,
     }));
+
+    logger.info(`Loaded ${this.registry.length} MCPs from resolver`);
   }
 
-  /**
-   * Get curated list of popular MCPs for quick-add
-   */
-  getCurated(): McpRegistryEntry[] {
-    return this.registry.filter((m) =>
-      McpRegistryService.CURATED_MCP_IDS.includes(m.id)
+  async getCurated(): Promise<McpRegistryEntry[]> {
+    await this.ensureLoaded();
+
+    const curated = this.registry.filter((mcp) =>
+      McpRegistryService.CURATED_MCP_IDS.includes(mcp.id)
     );
+
+    return curated.length > 0 ? curated : this.registry.slice(0, 5);
   }
 
-  /**
-   * Search MCPs by name, description, or ID
-   * @param query - Search query (case-insensitive)
-   * @param limit - Maximum number of results (default 20)
-   */
-  search(query: string, limit = 20): McpRegistryEntry[] {
-    const q = query.toLowerCase().trim();
-    if (!q) return this.registry.slice(0, limit);
+  async search(query: string, limit = 20): Promise<McpRegistryEntry[]> {
+    await this.ensureLoaded();
+
+    const trimmed = query.toLowerCase().trim();
+    if (!trimmed) return this.registry.slice(0, limit);
 
     return this.registry
       .filter(
-        (m) =>
-          m.name.toLowerCase().includes(q) ||
-          m.description.toLowerCase().includes(q) ||
-          m.id.toLowerCase().includes(q)
+        (entry) =>
+          entry.name.toLowerCase().includes(trimmed) ||
+          entry.description.toLowerCase().includes(trimmed) ||
+          entry.id.toLowerCase().includes(trimmed)
       )
       .slice(0, limit);
   }
 
-  /**
-   * Get all MCPs from the registry
-   */
-  getAll(): McpRegistryEntry[] {
+  async getAll(): Promise<McpRegistryEntry[]> {
+    await this.ensureLoaded();
     return this.registry;
   }
 
-  /**
-   * Get MCP by ID
-   */
-  getById(id: string): McpRegistryEntry | null {
-    return this.registry.find((m) => m.id === id) || null;
+  async getById(id: string): Promise<McpRegistryEntry | null> {
+    await this.ensureLoaded();
+    return this.registry.find((entry) => entry.id === id) || null;
   }
 }

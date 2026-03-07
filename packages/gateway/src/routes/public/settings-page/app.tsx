@@ -115,6 +115,7 @@ export interface SettingsContextValue {
   // Actions
   toggleSection(id: string): void;
   openExternal(url: string): void;
+  reloadPage(): void;
   hasPendingSettingsChanges(): boolean;
   buildSettingsSnapshot(): SettingsSnapshot;
 }
@@ -165,10 +166,16 @@ function App() {
   );
 
   // Init provider state
+  const providerModels = state.providerModels || {};
+  const initialProviderModelPreferences = state.providerModelPreferences || {};
   const initProviderState: Record<string, ProviderState> = {};
   for (const pid of providerOrder.value) {
     const pInfo = state.PROVIDERS[pid] || ({} as ProviderInfo);
     const authTypes = pInfo.supportedAuthTypes || [pInfo.authType || "oauth"];
+    const selectedModel = initialProviderModelPreferences[pid] || "";
+    const selectedModelLabel =
+      providerModels[pid]?.find((option) => option.value === selectedModel)
+        ?.label || selectedModel;
     initProviderState[pid] = {
       status: "Checking...",
       connected: false,
@@ -185,8 +192,8 @@ function App() {
       verificationUrl: "",
       pollStatus: "Waiting for authorization...",
       deviceAuthId: "",
-      selectedModel: "",
-      modelQuery: "",
+      selectedModel,
+      modelQuery: selectedModelLabel,
       showModelDropdown: false,
     };
   }
@@ -291,6 +298,18 @@ function App() {
     );
   }
 
+  function providerModelPreferencesSignature(): string {
+    const preferences: Record<string, string> = {};
+    for (const providerId of providerOrder.value) {
+      const selectedModel = (
+        providerState.value[providerId]?.selectedModel || ""
+      ).trim();
+      if (!selectedModel) continue;
+      preferences[providerId] = selectedModel;
+    }
+    return JSON.stringify(preferences);
+  }
+
   function buildSettingsSnapshot(): SettingsSnapshot {
     return {
       identityMd: identityMd.value || "",
@@ -303,6 +322,7 @@ function App() {
       skills: skillsSignature(),
       mcpServers: mcpServersSignature(),
       permissions: permissionsSignature(),
+      providerModelPreferences: providerModelPreferencesSignature(),
     };
   }
 
@@ -340,6 +360,20 @@ function App() {
       window.Telegram.WebApp.openLink(url);
     } else {
       window.open(url, "_blank");
+    }
+  }
+
+  function reloadPage() {
+    if (state.platform === "telegram" && state.channelId) {
+      // Telegram WebView: navigate to bootstrap URL instead of reloading,
+      // because reload loses initData and crashes the mini app.
+      const url = new URL("/settings", window.location.origin);
+      url.searchParams.set("platform", "telegram");
+      url.searchParams.set("chat", state.channelId);
+      if (state.agentId) url.searchParams.set("agent", state.agentId);
+      window.location.href = url.toString();
+    } else {
+      window.location.reload();
     }
   }
 
@@ -456,7 +490,7 @@ function App() {
   const ctx: SettingsContextValue = {
     agentId: state.agentId,
     PROVIDERS: state.PROVIDERS,
-    providerModels: state.providerModels || {},
+    providerModels,
     catalogProviders,
     providerOrder,
     primaryProvider,
@@ -520,6 +554,7 @@ function App() {
 
     toggleSection,
     openExternal,
+    reloadPage,
     hasPendingSettingsChanges,
     buildSettingsSnapshot,
   };
@@ -612,9 +647,19 @@ async function handleSave(ctx: SettingsContextValue) {
       }
     }
 
+    const providerModelPreferences: Record<string, string> = {};
+    for (const providerId of ctx.providerOrder.value) {
+      const selectedModel = (
+        ctx.providerState.value[providerId]?.selectedModel || ""
+      ).trim();
+      if (!selectedModel) continue;
+      providerModelPreferences[providerId] = selectedModel;
+    }
+
     // Core settings
     const settings: Record<string, unknown> = {
-      model: "",
+      modelSelection: { mode: "auto" },
+      providerModelPreferences,
       identityMd: ctx.identityMd.value || "",
       soulMd: ctx.soulMd.value || "",
       userMd: ctx.userMd.value || "",

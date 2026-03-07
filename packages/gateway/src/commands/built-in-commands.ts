@@ -4,11 +4,14 @@ import {
   createLogger,
 } from "@lobu/core";
 import type { AgentSettingsStore } from "../auth/settings";
-import { buildTelegramSettingsUrl } from "../auth/settings";
 import {
-  type ClaimService,
   buildClaimSettingsUrl,
+  type ClaimService,
 } from "../auth/settings/claim-service";
+import {
+  getModelSelectionState,
+  resolveEffectiveModelRef,
+} from "../auth/settings/model-selection";
 
 const logger = createLogger("built-in-commands");
 
@@ -37,29 +40,40 @@ export function registerBuiltInCommands(
         return;
       }
 
-      if (ctx.platform === "telegram") {
-        // Groups: use claim-based OAuth flow
-        const isGroup = ctx.channelId.startsWith("-");
-        if (isGroup) {
-          const claimCode = await deps.claimService.createClaim(
-            "telegram",
-            ctx.channelId,
-            ctx.userId
-          );
-          const settingsUrl = buildClaimSettingsUrl(claimCode, {
-            agentId: ctx.agentId,
+      // Telegram DMs: check if user has a linked OAuth identity
+      if (ctx.platform === "telegram" && !ctx.channelId.startsWith("-")) {
+        const linkedOAuthUserId = await deps.claimService.getLinkedOAuthUserId(
+          "telegram",
+          ctx.userId
+        );
+
+        if (linkedOAuthUserId) {
+          // Linked: use initData URL with web_app button (native mini app)
+          const baseUrl =
+            process.env.PUBLIC_GATEWAY_URL || "http://localhost:8080";
+          const settingsUrl = new URL("/settings", baseUrl);
+          settingsUrl.searchParams.set("platform", "telegram");
+          settingsUrl.searchParams.set("chat", ctx.channelId);
+          await ctx.reply("Tap the button below to open settings.", {
+            url: settingsUrl.toString(),
+            urlLabel: "Open Settings",
+            webApp: true,
           });
-          await ctx.reply(
-            "Here's your settings link.\n\nUse this page to configure your agent's model, network access, and more.",
-            { url: settingsUrl, urlLabel: "Open Settings" }
-          );
           return;
         }
-        // DMs: stable Telegram web_app URL
-        const settingsUrl = buildTelegramSettingsUrl(ctx.channelId);
+
+        // Not linked: claim URL with url button (opens in Telegram's browser for OAuth)
+        const claimCode = await deps.claimService.createClaim(
+          ctx.platform,
+          ctx.channelId,
+          ctx.userId
+        );
+        const settingsUrl = buildClaimSettingsUrl(claimCode, {
+          agentId: ctx.agentId,
+        });
         await ctx.reply(
-          "Here's your settings link.\n\nUse this page to configure your agent's model, network access, and more.",
-          { url: settingsUrl, urlLabel: "Open Settings" }
+          "Tap the button below to sign in and configure your agent.",
+          { url: settingsUrl, urlLabel: "Sign In" }
         );
         return;
       }
@@ -102,7 +116,9 @@ export function registerBuiltInCommands(
 
       const settings = await deps.agentSettingsStore.getSettings(ctx.agentId);
 
-      const model = settings?.model || "default";
+      const modelSelection = getModelSelectionState(settings);
+      const effectiveModel = resolveEffectiveModelRef(settings);
+      const model = effectiveModel || "auto";
       const mcpCount = settings?.mcpServers
         ? Object.keys(settings.mcpServers).length
         : 0;
@@ -112,7 +128,7 @@ export function registerBuiltInCommands(
 
       const parts = [
         `Agent: ${ctx.agentId}`,
-        `Model: ${model}`,
+        `Model: ${model} (${modelSelection.mode})`,
         `MCP servers: ${mcpCount}`,
         `Skills: ${skillsCount}`,
       ];

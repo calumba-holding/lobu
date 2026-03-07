@@ -5,6 +5,7 @@
 
 import { createLogger, type UserSuggestion } from "@lobu/core";
 import { type Bot, InlineKeyboard } from "grammy";
+import type { ClaimService } from "../auth/settings/claim-service";
 import type { QueueProducer } from "../infrastructure/queue/queue-producer";
 import type {
   InteractionService,
@@ -52,6 +53,8 @@ export class TelegramInteractionRenderer {
   private storedGrants = new Map<string, StoredGrant>();
   private cleanupTimer?: NodeJS.Timeout;
 
+  private claimService?: ClaimService;
+
   constructor(
     private bot: Bot,
     private interactionService: InteractionService,
@@ -96,6 +99,10 @@ export class TelegramInteractionRenderer {
       () => this.cleanupExpired(),
       OPTIONS_TTL_MS
     );
+  }
+
+  setClaimService(service: ClaimService): void {
+    this.claimService = service;
   }
 
   /**
@@ -281,49 +288,81 @@ export class TelegramInteractionRenderer {
   }
 
   /**
-   * Render a link button with inline keyboard (web_app).
+   * Render a link button with inline keyboard.
+   * For DMs: linked users get web_app button with initData URL,
+   * unlinked users get url button (opens in Telegram's browser for OAuth).
    */
   async renderLinkButton(btn: PostedLinkButton): Promise<void> {
     const chatId = Number(btn.channelId);
+    const isGroup = chatId < 0;
 
     logger.info(
       { buttonId: btn.id, chatId, linkType: btn.linkType },
       "Rendering link button"
     );
 
-    // OAuth links should open in browser; settings/install use Telegram WebApp.
-    // web_app buttons are only allowed in private chats, so use url for groups.
-    const isGroup = chatId < 0;
-    const keyboard =
-      btn.linkType === "oauth" || isGroup
-        ? new InlineKeyboard().url(btn.label, btn.url)
-        : new InlineKeyboard().webApp(btn.label, btn.url);
+    // OAuth links always open in browser
+    if (btn.linkType === "oauth" || isGroup) {
+      const keyboard = new InlineKeyboard().url(btn.label, btn.url);
+      await this.sendLinkButtonMessage(chatId, btn, keyboard);
+      return;
+    }
+
+    // DMs with settings/install links: check linking status
+    let useWebApp = false;
+    if (this.claimService && btn.userId) {
+      const linked = await this.claimService.getLinkedOAuthUserId(
+        "telegram",
+        btn.userId
+      );
+      if (linked) {
+        // Linked: transform URL to initData bootstrap URL
+        useWebApp = true;
+        try {
+          const originalUrl = new URL(btn.url);
+          originalUrl.searchParams.set("platform", "telegram");
+          originalUrl.searchParams.set("chat", String(chatId));
+          btn = { ...btn, url: originalUrl.toString() };
+        } catch {
+          // If URL parsing fails, fall through to url button
+          useWebApp = false;
+        }
+      }
+    }
+
+    const keyboard = useWebApp
+      ? new InlineKeyboard().webApp(btn.label, btn.url)
+      : new InlineKeyboard().url(btn.label, btn.url);
+
+    await this.sendLinkButtonMessage(chatId, btn, keyboard);
+  }
+
+  private async sendLinkButtonMessage(
+    chatId: number,
+    btn: PostedLinkButton,
+    keyboard: InlineKeyboard
+  ): Promise<void> {
+    const messageText =
+      btn.linkType === "install"
+        ? `Tap the button below to install:`
+        : btn.linkType === "oauth"
+          ? `Tap the button below to connect:`
+          : `Tap the button below to open settings:`;
 
     try {
-      await this.bot.api.sendMessage(
-        chatId,
-        btn.linkType === "install"
-          ? `Tap the button below to install:`
-          : btn.linkType === "oauth"
-            ? `Tap the button below to connect:`
-            : `Tap the button below to open settings:`,
-        { reply_markup: keyboard }
-      );
+      await this.bot.api.sendMessage(chatId, messageText, {
+        reply_markup: keyboard,
+      });
     } catch (err) {
       logger.warn(
         { error: String(err), chatId },
         "Primary link button failed, falling back to URL button"
       );
-      // Fall back to regular URL button (works for non-HTTPS URLs too)
       const fallbackKeyboard = new InlineKeyboard().url(btn.label, btn.url);
       try {
-        await this.bot.api.sendMessage(
-          chatId,
-          btn.linkType === "install"
-            ? `Tap the button below to install:`
-            : `Tap the button below to open settings:`,
-          { reply_markup: fallbackKeyboard }
-        );
+        await this.bot.api.sendMessage(chatId, messageText, {
+          reply_markup: fallbackKeyboard,
+        });
       } catch (err2) {
         logger.error(
           { error: String(err2), chatId },

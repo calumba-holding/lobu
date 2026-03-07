@@ -248,9 +248,14 @@ function setupServer(
       createIntegrationsDiscoveryRoutes,
     } = require("../routes/internal/integrations-discovery");
     const { SkillRegistryCoordinator } = require("../services/skill-registry");
+    const { McpDiscoveryService } = require("../services/mcp-discovery");
     const skillRegistryCoordinator = new SkillRegistryCoordinator();
+    const mcpDiscovery = new McpDiscoveryService({
+      configResolver: coreServices.getSystemConfigResolver(),
+    });
     const integrationsDiscoveryRouter = createIntegrationsDiscoveryRoutes({
       coordinator: skillRegistryCoordinator,
+      mcpDiscovery,
       agentSettingsStore: coreServices?.getAgentSettingsStore(),
       integrationConfigService: coreServices?.getIntegrationConfigService(),
       integrationCredentialStore: coreServices?.getIntegrationCredentialStore(),
@@ -269,6 +274,17 @@ function setupServer(
       const audioRouter = createAudioRoutes(transcriptionService);
       app.route("", audioRouter);
       logger.info("Audio routes enabled at :8080/internal/audio/*");
+    }
+  }
+
+  // Image routes (image generation for workers)
+  if (coreServices) {
+    const imageGenerationService = coreServices.getImageGenerationService();
+    if (imageGenerationService) {
+      const { createImageRoutes } = require("../routes/internal/images");
+      const imageRouter = createImageRoutes(imageGenerationService);
+      app.route("", imageRouter);
+      logger.info("Image routes enabled at :8080/internal/images/*");
     }
   }
 
@@ -622,6 +638,7 @@ function setupServer(
         settingsOAuthClient,
         settingsOAuthStateStore,
         claimService: claimServiceForSettings,
+        platformRegistry,
       });
       app.route("", settingsPageRouter);
       logger.info("Settings HTML page enabled at :8080/settings");
@@ -733,7 +750,9 @@ function setupServer(
       const {
         createIntegrationsRoutes,
       } = require("../routes/public/integrations");
-      const integrationsRouter = createIntegrationsRoutes();
+      const integrationsRouter = createIntegrationsRoutes({
+        configResolver: coreServices.getSystemConfigResolver(),
+      });
       app.route("/api/v1/integrations", integrationsRouter);
       logger.info("Integrations routes enabled at :8080/api/v1/integrations/*");
     }
@@ -1158,6 +1177,7 @@ export async function startGateway(
     runtime: config.agentDefaults.runtime,
     model: config.agentDefaults.model,
     timeoutMinutes: config.agentDefaults.timeoutMinutes,
+    compaction: config.agentDefaults.compaction,
     pluginsConfig: config.agentDefaults.pluginsConfig,
   };
 

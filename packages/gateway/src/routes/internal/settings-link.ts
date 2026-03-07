@@ -2,16 +2,15 @@
  * Internal Settings Link Routes
  *
  * Worker-facing endpoint for generating settings magic links.
- * Used by the Configure custom tool.
+ * Used by the InstallSkill, InstallPackage, and RequestNetworkAccess custom tools.
  */
 
 import { createLogger, verifyWorkerToken } from "@lobu/core";
 import { Hono } from "hono";
 import type { ClaimService } from "../../auth/settings/claim-service";
-import {
-  buildTelegramSettingsUrl,
-  type PrefillMcpServer,
-  type PrefillSkill,
+import type {
+  PrefillMcpServer,
+  PrefillSkill,
 } from "../../auth/settings/token-service";
 import type { InteractionService } from "../../interactions";
 import type { GrantStore } from "../../permissions/grant-store";
@@ -77,20 +76,20 @@ export function createSettingsLinkRoutes(
         reason,
         message,
         label,
-        prefillProviders,
-        prefillSkills,
-        prefillMcpServers,
-        prefillNixPackages,
-        prefillGrants,
+        providers,
+        skills,
+        mcpServers,
+        nixPackages,
+        grants,
       } = body as {
         reason?: string;
         message?: string;
         label?: string;
-        prefillProviders?: string[];
-        prefillSkills?: PrefillSkill[];
-        prefillMcpServers?: PrefillMcpServer[];
-        prefillNixPackages?: string[];
-        prefillGrants?: string[];
+        providers?: string[];
+        skills?: PrefillSkill[];
+        mcpServers?: PrefillMcpServer[];
+        nixPackages?: string[];
+        grants?: string[];
       };
 
       const agentId = worker.agentId;
@@ -108,26 +107,26 @@ export function createSettingsLinkRoutes(
         platform,
         reason: reason?.substring(0, 100),
         hasMessage: !!message,
-        prefillProvidersCount: prefillProviders?.length || 0,
-        prefillSkillsCount: prefillSkills?.length || 0,
-        prefillMcpServersCount: prefillMcpServers?.length || 0,
-        prefillNixPackagesCount: prefillNixPackages?.length || 0,
-        prefillGrantsCount: prefillGrants?.length || 0,
+        providersCount: providers?.length || 0,
+        skillsCount: skills?.length || 0,
+        mcpServersCount: mcpServers?.length || 0,
+        nixPackagesCount: nixPackages?.length || 0,
+        grantsCount: grants?.length || 0,
       });
 
       // Domain-only requests can use inline approval buttons
       const isDomainOnly =
-        prefillGrants &&
-        prefillGrants.length > 0 &&
-        !prefillSkills?.length &&
-        !prefillMcpServers?.length &&
-        !prefillProviders?.length &&
-        !prefillNixPackages?.length;
+        grants &&
+        grants.length > 0 &&
+        !skills?.length &&
+        !mcpServers?.length &&
+        !providers?.length &&
+        !nixPackages?.length;
 
       if (isDomainOnly && interactionService && grantStore) {
         logger.info("Using inline grant approval", {
           agentId,
-          domains: prefillGrants,
+          domains: grants,
         });
 
         await interactionService.postGrantRequest(
@@ -136,7 +135,7 @@ export function createSettingsLinkRoutes(
           worker.conversationId,
           worker.channelId,
           worker.teamId,
-          prefillGrants,
+          grants,
           reason || "Domain access requested"
         );
 
@@ -147,37 +146,39 @@ export function createSettingsLinkRoutes(
         });
       }
 
-      // Telegram plain "Open Settings" links use stable URLs (no claim needed)
-      const hasPrefillData =
-        prefillSkills?.length ||
-        prefillMcpServers?.length ||
-        prefillProviders?.length ||
-        prefillNixPackages?.length ||
-        prefillGrants?.length ||
-        message;
+      // Package-only requests can use inline approval buttons
+      const isPackageOnly =
+        nixPackages &&
+        nixPackages.length > 0 &&
+        !skills?.length &&
+        !mcpServers?.length &&
+        !providers?.length &&
+        !grants?.length;
 
-      if (platform === "telegram" && !hasPrefillData && interactionService) {
-        const stableUrl = buildTelegramSettingsUrl(worker.channelId);
-        const buttonLabel = label || "Open Settings";
+      if (isPackageOnly && interactionService) {
+        logger.info("Using inline package approval", {
+          agentId,
+          packages: nixPackages,
+        });
 
-        await interactionService.postLinkButton(
+        await interactionService.postPackageRequest(
           userId,
+          agentId,
           worker.conversationId,
           worker.channelId,
           worker.teamId,
-          platform,
-          stableUrl,
-          buttonLabel,
-          "settings"
+          nixPackages,
+          reason || "Package install requested"
         );
 
         return c.json({
-          type: "settings_link",
-          message: "Settings link sent as a button to the user.",
+          type: "inline_package",
+          message:
+            "Approval buttons sent to user in chat. The user will approve or deny the package install.",
         });
       }
 
-      // Use claim-based URLs
+      // Use claim-based URLs (all platforms, including Telegram)
       if (!claimService) {
         return c.json({ error: "Claim service not configured" }, 500);
       }
@@ -194,29 +195,29 @@ export function createSettingsLinkRoutes(
       if (agentId) settingsUrl.searchParams.set("agent", agentId);
 
       // For simple prefill data, use query params
-      if (prefillSkills?.length) {
+      if (skills?.length) {
         settingsUrl.searchParams.set(
           "skills",
-          prefillSkills.map((s) => s.repo).join(",")
+          skills.map((s) => s.repo).join(",")
         );
       }
-      if (prefillProviders?.length) {
-        settingsUrl.searchParams.set("providers", prefillProviders.join(","));
+      if (providers?.length) {
+        settingsUrl.searchParams.set("providers", providers.join(","));
       }
-      if (prefillMcpServers?.length) {
+      if (mcpServers?.length) {
         settingsUrl.searchParams.set(
           "mcps",
-          encodePrefillMcpServers(prefillMcpServers)
+          encodePrefillMcpServers(mcpServers)
         );
       }
       if (message) {
         settingsUrl.searchParams.set("message", message);
       }
-      if (prefillNixPackages?.length) {
-        settingsUrl.searchParams.set("nix", prefillNixPackages.join(","));
+      if (nixPackages?.length) {
+        settingsUrl.searchParams.set("nix", nixPackages.join(","));
       }
-      if (prefillGrants?.length) {
-        settingsUrl.searchParams.set("grants", prefillGrants.join(","));
+      if (grants?.length) {
+        settingsUrl.searchParams.set("grants", grants.join(","));
       }
 
       const url = settingsUrl.toString();
@@ -224,9 +225,9 @@ export function createSettingsLinkRoutes(
       if (interactionService) {
         const buttonLabel =
           label ||
-          (prefillMcpServers?.length
-            ? `Install ${prefillMcpServers[0]?.name || "MCP Server"}`
-            : prefillSkills?.length
+          (mcpServers?.length
+            ? `Install ${mcpServers[0]?.name || "MCP Server"}`
+            : skills?.length
               ? "Install Skill"
               : "Open Settings");
 
@@ -238,9 +239,7 @@ export function createSettingsLinkRoutes(
           platform,
           url,
           buttonLabel,
-          prefillSkills?.length || prefillMcpServers?.length
-            ? "install"
-            : "settings"
+          skills?.length || mcpServers?.length ? "install" : "settings"
         );
 
         return c.json({

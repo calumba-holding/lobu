@@ -10,6 +10,7 @@ import { WebClient } from "@slack/web-api";
 import type { NextFunction, Request, Response } from "express";
 import { CommandDispatcher } from "../commands/command-dispatcher";
 import type { MessagePayload } from "../infrastructure/queue/queue-producer";
+import { SystemMessageLimiter } from "../infrastructure/redis/system-message-limiter";
 import { getDispatcherModules } from "../modules/module-system";
 import type { CoreServices, PlatformAdapter } from "../platform";
 import {
@@ -19,7 +20,7 @@ import {
   platformFactoryRegistry,
 } from "../platform/platform-factory";
 import type { ResponseRenderer } from "../platform/response-renderer";
-import { resolveSpace } from "../spaces";
+import { platformAgentId } from "../spaces";
 import type { AgentOptions, SlackPlatformConfig } from "./config";
 import { SlackEventHandlers } from "./event-router";
 import { SlackFileHandler } from "./file-handler";
@@ -306,6 +307,13 @@ export class SlackPlatform implements PlatformAdapter {
       this.eventHandlers.setClaimService(claimService);
       logger.info("✅ Claim service wired to Slack event handlers");
     }
+
+    const systemMessageLimiter = new SystemMessageLimiter(
+      services.getQueue().getRedisClient(),
+      "lobu:sysmsg"
+    );
+    this.eventHandlers.setSystemMessageLimiter(systemMessageLimiter);
+    logger.info("✅ System message limiter wired to Slack event handlers");
 
     logger.info("✅ Slack platform initialized");
   }
@@ -771,14 +779,13 @@ export class SlackPlatform implements PlatformAdapter {
     // Use TEST_USER_ID for testing, or fall back to bot's user
     const testUserId = process.env.TEST_USER_ID || botUserId;
 
-    // Resolve agentId for multi-tenant isolation
     const isDirectMessage = channelId.startsWith("D");
-    const { agentId } = resolveSpace({
-      platform: "slack",
-      userId: testUserId,
+    const agentId = platformAgentId(
+      "slack",
+      testUserId,
       channelId,
-      isGroup: !isDirectMessage,
-    });
+      !isDirectMessage
+    );
 
     // Build payload matching MessagePayload structure
     const payload: MessagePayload = {

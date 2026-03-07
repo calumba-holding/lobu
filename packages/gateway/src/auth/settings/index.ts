@@ -4,11 +4,10 @@ export {
   createAuthProfileLabel,
   type UpsertAuthProfileInput,
 } from "./auth-profiles-manager";
-export { ClaimService, buildClaimSettingsUrl } from "./claim-service";
-export {
-  buildTelegramSettingsUrl,
-  type PrefillMcpServer,
-  type PrefillSkill,
-  type SettingsSourceContext,
-  type SettingsTokenPayload,
+export { buildClaimSettingsUrl, ClaimService } from "./claim-service";
+export type {
+  PrefillMcpServer,
+  PrefillSkill,
+  SettingsSourceContext,
+  SettingsTokenPayload,
 } from "./token-service";

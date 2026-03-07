@@ -6,8 +6,8 @@
 import { createLogger } from "@lobu/core";
 import type { AuthProvider, PlatformAuthAdapter } from "../auth/platform-auth";
 import {
-  type ClaimService,
   buildClaimSettingsUrl,
+  type ClaimService,
 } from "../auth/settings/claim-service";
 import type { BaileysClient } from "./connection/baileys-client";
 

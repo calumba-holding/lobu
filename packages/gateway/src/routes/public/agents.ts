@@ -11,7 +11,7 @@
 import { createLogger } from "@lobu/core";
 import { Hono } from "hono";
 import type { AgentMetadataStore } from "../../auth/agent-metadata-store";
-import type { AgentSettingsStore } from "../../auth/settings";
+import type { AgentSettings, AgentSettingsStore } from "../../auth/settings";
 import type { UserAgentsStore } from "../../auth/user-agents-store";
 import type { ChannelBindingService } from "../../channels";
 import { verifySettingsSession } from "./settings-auth";
@@ -33,13 +33,56 @@ export interface AgentRoutesConfig {
 
 /**
  * Sanitize user-provided agentId.
- * Must be lowercase alphanumeric with hyphens, 3-40 chars.
+ * Lowercase alphanumeric with hyphens, 3-60 chars, must start with a letter.
  */
 function sanitizeAgentId(input: string): string | null {
   const cleaned = input.toLowerCase().replace(/[^a-z0-9-]/g, "-");
-  if (cleaned.length < 3 || cleaned.length > 40) return null;
+  if (cleaned.length < 3 || cleaned.length > 60) return null;
   if (!/^[a-z]/.test(cleaned)) return null;
   return cleaned;
+}
+
+function cloneSettingValue<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function buildDefaultSettingsFromSource(
+  source: AgentSettings | null
+): Omit<AgentSettings, "updatedAt"> {
+  if (!source) return {};
+
+  const defaults: Omit<AgentSettings, "updatedAt"> = {};
+
+  if (source.model !== undefined) defaults.model = source.model;
+  if (source.modelSelection)
+    defaults.modelSelection = cloneSettingValue(source.modelSelection);
+  if (source.providerModelPreferences)
+    defaults.providerModelPreferences = cloneSettingValue(
+      source.providerModelPreferences
+    );
+  if (source.networkConfig)
+    defaults.networkConfig = cloneSettingValue(source.networkConfig);
+  if (source.nixConfig)
+    defaults.nixConfig = cloneSettingValue(source.nixConfig);
+  if (source.mcpServers)
+    defaults.mcpServers = cloneSettingValue(source.mcpServers);
+  if (source.soulMd !== undefined) defaults.soulMd = source.soulMd;
+  if (source.userMd !== undefined) defaults.userMd = source.userMd;
+  if (source.identityMd !== undefined) defaults.identityMd = source.identityMd;
+  if (source.skillsConfig)
+    defaults.skillsConfig = cloneSettingValue(source.skillsConfig);
+  if (source.toolsConfig)
+    defaults.toolsConfig = cloneSettingValue(source.toolsConfig);
+  if (source.pluginsConfig)
+    defaults.pluginsConfig = cloneSettingValue(source.pluginsConfig);
+  if (source.installedProviders) {
+    defaults.installedProviders = cloneSettingValue(source.installedProviders);
+  }
+  if (source.verboseLogging !== undefined) {
+    defaults.verboseLogging = source.verboseLogging;
+  }
+
+  return defaults;
 }
 
 export function createAgentRoutes(config: AgentRoutesConfig): Hono {
@@ -106,8 +149,30 @@ export function createAgentRoutes(config: AgentRoutesConfig): Hono {
         { description: body.description }
       );
 
-      // Create default settings
-      await config.agentSettingsStore.saveSettings(agentId, {});
+      // Create default settings, seeded from the current workspace/channel agent when available.
+      let defaultSettings: Omit<AgentSettings, "updatedAt"> = {};
+      try {
+        let sourceAgentId = payload.agentId;
+        if (!sourceAgentId && body.channelId) {
+          const binding = await config.channelBindingService.getBinding(
+            payload.platform,
+            body.channelId,
+            payload.teamId
+          );
+          sourceAgentId = binding?.agentId;
+        }
+
+        if (sourceAgentId) {
+          const sourceSettings =
+            await config.agentSettingsStore.getSettings(sourceAgentId);
+          defaultSettings = buildDefaultSettingsFromSource(sourceSettings);
+        }
+      } catch (error) {
+        logger.warn("Failed to derive source defaults for new agent", {
+          error,
+        });
+      }
+      await config.agentSettingsStore.saveSettings(agentId, defaultSettings);
 
       // Associate with user
       await config.userAgentsStore.addAgent(

@@ -130,7 +130,7 @@ export function createIntegrationRoutes(
         if ((config.authType || "oauth") === "api-key") {
           return c.json(
             {
-              error: `Integration "${integration}" uses API key auth. Use Configure to set it up.`,
+              error: `Integration "${integration}" uses API key auth. Use Sudo to set it up.`,
             },
             400
           );

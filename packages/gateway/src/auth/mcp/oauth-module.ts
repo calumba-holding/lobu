@@ -2,6 +2,7 @@ import { createLogger, decrypt, encrypt } from "@lobu/core";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { BaseModule } from "../../modules/module-system";
+import { SETTINGS_SESSION_COOKIE_NAME } from "../../routes/public/settings-auth";
 import { GenericOAuth2Client } from "../oauth/generic-client";
 import type { McpOAuthStateStore } from "../oauth/state-store";
 import {
@@ -9,7 +10,6 @@ import {
   renderOAuthErrorPage,
   renderOAuthSuccessPage,
 } from "../oauth-templates";
-import { SETTINGS_SESSION_COOKIE_NAME } from "../../routes/public/settings-auth";
 import type { McpConfigService } from "./config-service";
 import type { McpCredentialStore } from "./credential-store";
 import type { McpInputStore } from "./input-store";

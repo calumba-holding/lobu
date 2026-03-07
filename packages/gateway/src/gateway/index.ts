@@ -19,6 +19,7 @@ import type { McpProxy } from "../auth/mcp/proxy";
 import type { McpTool } from "../auth/mcp/tool-cache";
 import type { ProviderCatalogService } from "../auth/provider-catalog";
 import type { AgentSettingsStore } from "../auth/settings/agent-settings-store";
+import { resolveEffectiveModelRef } from "../auth/settings/model-selection";
 import type { IMessageQueue } from "../infrastructure/queue";
 import type { InstructionService } from "../services/instruction-service";
 import type { SystemSkillsService } from "../services/system-skills-service";
@@ -353,11 +354,13 @@ export class WorkerGateway {
       }
 
       // Resolve dynamic provider configuration
+      const agentSettings =
+        this.agentSettingsStore && agentId
+          ? await this.agentSettingsStore.getSettings(agentId)
+          : null;
       const providerConfig = await this.resolveProviderConfig(
         agentId || "",
-        this.agentSettingsStore
-          ? (await this.agentSettingsStore.getSettings(agentId || ""))?.model
-          : undefined,
+        resolveEffectiveModelRef(agentSettings),
         baseUrl
       );
 

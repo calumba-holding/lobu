@@ -17,7 +17,7 @@ export function Header() {
     switching.value = true;
     try {
       await api.switchAgent(agentId, ctx.platform, ctx.channelId!, ctx.teamId);
-      window.location.reload();
+      ctx.reloadPage();
     } catch (e: unknown) {
       ctx.errorMsg.value =
         e instanceof Error ? e.message : "Failed to switch agent";
@@ -41,7 +41,7 @@ export function Header() {
     switching.value = true;
     try {
       await api.createAgent(agentId, trimmed, ctx.channelId);
-      window.location.reload();
+      ctx.reloadPage();
     } catch (e: unknown) {
       ctx.errorMsg.value =
         e instanceof Error ? e.message : "Failed to create agent";
@@ -78,7 +78,7 @@ export function Header() {
     try {
       await api.deleteAgent(ctx.agentId);
       if (ctx.hasChannelId) {
-        window.location.reload();
+        ctx.reloadPage();
       } else {
         document.body.innerHTML =
           '<div style="display:flex;align-items:center;justify-content:center;min-height:100vh"><div style="text-align:center;color:white"><p style="font-size:1.5rem;margin-bottom:0.5rem">Agent deleted</p><p style="font-size:0.875rem;opacity:0.7">This agent has been permanently removed.</p></div></div>';
@@ -319,7 +319,6 @@ export function Header() {
                     {ctx.agentName.value || "Agent Settings"}
                   </h1>
                   {editBtn}
-                  {deleteBtn}
                 </div>
               )}
             </div>

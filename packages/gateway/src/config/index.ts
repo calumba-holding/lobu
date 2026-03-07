@@ -174,6 +174,22 @@ export function buildGatewayConfig(): GatewayConfig {
     "AGENT_DEFAULT_OWLETTO_MEMORY_ENABLED",
     true
   );
+  const defaultMemoryFlushEnabled = getOptionalBoolean(
+    "AGENT_DEFAULT_MEMORY_FLUSH_ENABLED",
+    true
+  );
+  const defaultMemoryFlushSoftThresholdTokens = getOptionalNumber(
+    "AGENT_DEFAULT_MEMORY_FLUSH_SOFT_THRESHOLD_TOKENS",
+    4000
+  );
+  const defaultMemoryFlushSystemPrompt = getOptionalEnv(
+    "AGENT_DEFAULT_MEMORY_FLUSH_SYSTEM_PROMPT",
+    "Session nearing compaction. Store durable memories now."
+  );
+  const defaultMemoryFlushPrompt = getOptionalEnv(
+    "AGENT_DEFAULT_MEMORY_FLUSH_PROMPT",
+    "Write any lasting notes to memory using available memory tools. Reply with NO_REPLY if nothing to store."
+  );
   const publicGatewayUrl = getOptionalEnv(
     "PUBLIC_GATEWAY_URL",
     DEFAULTS.PUBLIC_GATEWAY_URL
@@ -190,6 +206,14 @@ export function buildGatewayConfig(): GatewayConfig {
       timeoutMinutes: process.env.TIMEOUT_MINUTES
         ? Number(process.env.TIMEOUT_MINUTES)
         : undefined,
+      compaction: {
+        memoryFlush: {
+          enabled: defaultMemoryFlushEnabled,
+          softThresholdTokens: defaultMemoryFlushSoftThresholdTokens,
+          systemPrompt: defaultMemoryFlushSystemPrompt,
+          prompt: defaultMemoryFlushPrompt,
+        },
+      },
       pluginsConfig: {
         plugins: [
           {

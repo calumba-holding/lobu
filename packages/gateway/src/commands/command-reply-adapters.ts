@@ -81,11 +81,12 @@ export function createTelegramReply(
   const isGroup = chatId < 0;
   return async (text, options) => {
     if (options?.url) {
-      // Groups: use `url` button (web_app is only allowed in private chats)
-      // DMs: use `web_app` button for native Telegram mini-app experience
-      const button = isGroup
-        ? { text: options.urlLabel || "Open", url: options.url }
-        : { text: options.urlLabel || "Open", web_app: { url: options.url } };
+      // Groups: always use `url` button (web_app is only allowed in private chats)
+      // DMs: default to `url` button; use `web_app` only when explicitly requested
+      const useWebApp = !isGroup && options.webApp === true;
+      const button = useWebApp
+        ? { text: options.urlLabel || "Open", web_app: { url: options.url } }
+        : { text: options.urlLabel || "Open", url: options.url };
       try {
         await bot.api.sendMessage(chatId, text, {
           reply_markup: {
@@ -93,8 +94,11 @@ export function createTelegramReply(
           },
         });
         return;
-      } catch {
-        // Fall through to plain text if button fails (e.g. localhost URLs)
+      } catch (err) {
+        console.error(
+          "[telegram-reply] button failed, falling back to plain text",
+          err
+        );
       }
     }
     await bot.api.sendMessage(chatId, text);

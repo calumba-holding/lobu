@@ -1,7 +1,6 @@
 #!/usr/bin/env bun
 
 import { CommandRegistry, createLogger, moduleRegistry } from "@lobu/core";
-import { OAuthStateStore } from "../auth/oauth/state-store";
 import { AdminStatusCache } from "../auth/admin-status-cache";
 import { AgentMetadataStore } from "../auth/agent-metadata-store";
 import { ApiKeyProviderModule } from "../auth/api-key-provider-module";
@@ -22,14 +21,15 @@ import { CLAUDE_PROVIDER } from "../auth/oauth/providers";
 import {
   createMcpOAuthStateStore,
   createOAuthStateStore,
+  OAuthStateStore,
   type ProviderOAuthStateStore,
 } from "../auth/oauth/state-store";
 import { ProviderCatalogService } from "../auth/provider-catalog";
 import { AgentSettingsStore, AuthProfilesManager } from "../auth/settings";
-import { ModelPreferenceStore } from "../auth/settings/model-preference-store";
-import { UserAgentsStore } from "../auth/user-agents-store";
 import { ClaimService } from "../auth/settings/claim-service";
+import { ModelPreferenceStore } from "../auth/settings/model-preference-store";
 import { SettingsOAuthClient } from "../auth/settings/oauth-client";
+import { UserAgentsStore } from "../auth/user-agents-store";
 import { ChannelBindingService } from "../channels";
 import { registerBuiltInCommands } from "../commands/built-in-commands";
 import type { GatewayConfig } from "../config";
@@ -49,8 +49,10 @@ import {
 import { GrantStore } from "../permissions/grant-store";
 import { SecretProxy } from "../proxy/secret-proxy";
 import { TokenRefreshJob } from "../proxy/token-refresh-job";
+import { ImageGenerationService } from "./image-generation-service";
 import { InstructionService } from "./instruction-service";
 import { RedisSessionStore, SessionManager } from "./session-manager";
+import { SystemConfigResolver } from "./system-config-resolver";
 import { SystemSkillsService } from "./system-skills-service";
 import { TranscriptionService } from "./transcription-service";
 
@@ -113,6 +115,7 @@ export class CoreServices {
   // System Skills Service
   // ============================================================================
   private systemSkillsService?: SystemSkillsService;
+  private systemConfigResolver?: SystemConfigResolver;
 
   // ============================================================================
   // Integration Services
@@ -132,6 +135,7 @@ export class CoreServices {
   private agentSettingsStore?: AgentSettingsStore;
   private channelBindingService?: ChannelBindingService;
   private transcriptionService?: TranscriptionService;
+  private imageGenerationService?: ImageGenerationService;
   private userAgentsStore?: UserAgentsStore;
   private agentMetadataStore?: AgentMetadataStore;
   private adminStatusCache?: AdminStatusCache;
@@ -353,8 +357,13 @@ export class CoreServices {
     this.transcriptionService = new TranscriptionService(
       this.authProfilesManager
     );
+    this.imageGenerationService = new ImageGenerationService(
+      this.authProfilesManager
+    );
     this.modelPreferenceStore = new ModelPreferenceStore(redisClient, "claude");
-    logger.info("✅ Auth profile & model preference stores initialized");
+    logger.info(
+      "✅ Auth profile, model preference, transcription, and image generation services initialized"
+    );
 
     // Initialize secret injection proxy (will be finalized after provider modules are registered)
     this.secretProxy = new SecretProxy({
@@ -381,26 +390,6 @@ export class CoreServices {
     this.tokenRefreshJob.start();
     logger.info("✅ Token refresh job started");
 
-    // Register NVIDIA NIM API-key provider
-    const nvidiaModule = new ApiKeyProviderModule({
-      providerId: "nvidia",
-      providerDisplayName: "NVIDIA NIM (free)",
-      providerIconUrl:
-        "https://www.google.com/s2/favicons?domain=nvidia.com&sz=128",
-      envVarName: "NVIDIA_API_KEY",
-      slug: "nvidia",
-      upstreamBaseUrl: "https://integrate.api.nvidia.com",
-      modelsEndpoint: "/v1/models",
-      apiKeyInstructions:
-        'Get your API key from <a href="https://build.nvidia.com/settings/api-keys" target="_blank" class="text-blue-600 hover:underline">NVIDIA Build</a>',
-      apiKeyPlaceholder: "nvapi-...",
-      agentSettingsStore: this.agentSettingsStore,
-    });
-    moduleRegistry.register(nvidiaModule);
-    logger.info(
-      `✅ NVIDIA NIM module registered (system token: ${nvidiaModule.hasSystemKey() ? "available" : "not available"})`
-    );
-
     // Register Claude OAuth module
     this.oauthStateStore = createOAuthStateStore("claude", redisClient);
     const claudeOAuthModule = new ClaudeOAuthModule(
@@ -419,106 +408,58 @@ export class CoreServices {
       `✅ ChatGPT OAuth module registered (system token: ${chatgptOAuthModule.hasSystemKey() ? "available" : "not available"})`
     );
 
-    // Register Gemini API-key provider
-    const geminiModule = new ApiKeyProviderModule({
-      providerId: "gemini",
-      providerDisplayName: "Google Gemini",
-      providerIconUrl:
-        "https://www.google.com/s2/favicons?domain=gemini.google.com&sz=128",
-      envVarName: "GEMINI_API_KEY",
-      slug: "gemini",
-      upstreamBaseUrl: "https://generativelanguage.googleapis.com",
-      apiKeyInstructions:
-        'Get your API key from <a href="https://aistudio.google.com/apikey" target="_blank" class="text-blue-600 hover:underline">Google AI Studio</a>',
-      apiKeyPlaceholder: "AIza...",
-      agentSettingsStore: this.agentSettingsStore,
-    });
-    moduleRegistry.register(geminiModule);
-    logger.info(
-      `✅ Gemini module registered (system token: ${geminiModule.hasSystemKey() ? "available" : "not available"})`
-    );
-
-    // Register z.ai API-key provider
-    const zaiModule = new ApiKeyProviderModule({
-      providerId: "z-ai",
-      providerDisplayName: "z.ai",
-      providerIconUrl: "https://www.google.com/s2/favicons?domain=z.ai&sz=128",
-      envVarName: "Z_AI_API_KEY",
-      slug: "z-ai",
-      upstreamBaseUrl: "https://api.z.ai/api/coding/paas/v4",
-      apiKeyInstructions:
-        'Get your API key from <a href="https://z.ai/manage-apikey/apikey-list" target="_blank" class="text-blue-600 hover:underline">z.ai</a>',
-      apiKeyPlaceholder: "zai-...",
-      agentSettingsStore: this.agentSettingsStore,
-    });
-    moduleRegistry.register(zaiModule);
-    logger.info(
-      `✅ z.ai module registered (system token: ${zaiModule.hasSystemKey() ? "available" : "not available"})`
-    );
-
-    // Register ElevenLabs API-key provider
-    const elevenlabsModule = new ApiKeyProviderModule({
-      providerId: "elevenlabs",
-      providerDisplayName: "ElevenLabs",
-      providerIconUrl:
-        "https://www.google.com/s2/favicons?domain=elevenlabs.io&sz=128",
-      envVarName: "ELEVENLABS_API_KEY",
-      slug: "elevenlabs",
-      upstreamBaseUrl: "https://api.elevenlabs.io",
-      apiKeyInstructions:
-        'Get your API key from <a href="https://elevenlabs.io/app/api-keys" target="_blank" class="text-blue-600 hover:underline">ElevenLabs</a>',
-      apiKeyPlaceholder: "sk_...",
-      agentSettingsStore: this.agentSettingsStore,
-    });
-    moduleRegistry.register(elevenlabsModule);
-    logger.info(
-      `✅ ElevenLabs module registered (system token: ${elevenlabsModule.hasSystemKey() ? "available" : "not available"})`
-    );
-
-    const systemSkillsUrl = process.env.LOBU_SYSTEM_SKILLS_URL;
+    const systemSkillsUrl =
+      process.env.LOBU_SYSTEM_SKILLS_URL || "config/system-skills.json";
     this.systemSkillsService = new SystemSkillsService(systemSkillsUrl);
+    this.systemConfigResolver = new SystemConfigResolver(
+      this.systemSkillsService,
+      this.agentSettingsStore
+    );
+    logger.info(`System skills config source: ${systemSkillsUrl}`);
+
+    if (!this.integrationConfigService) {
+      this.integrationConfigService = new IntegrationConfigService(
+        this.systemConfigResolver
+      );
+    }
+    this.transcriptionService?.setProviderConfigSource(() =>
+      this.integrationConfigService
+        ? this.integrationConfigService.getProviders()
+        : Promise.resolve({})
+    );
 
     // Register config-driven providers from system skills
-    if (systemSkillsUrl) {
-      // Create config service early if not yet initialized
-      if (!this.integrationConfigService) {
-        this.integrationConfigService = new IntegrationConfigService(
-          this.systemSkillsService,
-          this.agentSettingsStore
-        );
-      }
-      const configProviders =
-        await this.integrationConfigService.getProviders();
-      const registeredIds = new Set(
-        getModelProviderModules().map((m) => m.providerId)
-      );
-      for (const [id, entry] of Object.entries(configProviders)) {
-        if (registeredIds.has(id)) {
-          logger.info(
-            `Skipping config-driven provider "${id}" — already registered`
-          );
-          continue;
-        }
-        const module = new ApiKeyProviderModule({
-          providerId: id,
-          providerDisplayName: entry.displayName,
-          providerIconUrl: entry.iconUrl,
-          envVarName: entry.envVarName,
-          slug: id,
-          upstreamBaseUrl: entry.upstreamBaseUrl,
-          modelsEndpoint: entry.modelsEndpoint,
-          sdkCompat: entry.sdkCompat,
-          defaultModel: entry.defaultModel,
-          registryAlias: entry.registryAlias,
-          apiKeyInstructions: entry.apiKeyInstructions,
-          apiKeyPlaceholder: entry.apiKeyPlaceholder,
-          agentSettingsStore: this.agentSettingsStore,
-        });
-        moduleRegistry.register(module);
+    const configProviders = await this.integrationConfigService.getProviders();
+    const registeredIds = new Set(
+      getModelProviderModules().map((m) => m.providerId)
+    );
+    for (const [id, entry] of Object.entries(configProviders)) {
+      if (registeredIds.has(id)) {
         logger.info(
-          `✅ Registered config-driven provider: ${id} (system key: ${module.hasSystemKey() ? "available" : "not available"})`
+          `Skipping config-driven provider "${id}" — already registered`
         );
+        continue;
       }
+      const module = new ApiKeyProviderModule({
+        providerId: id,
+        providerDisplayName: entry.displayName,
+        providerIconUrl: entry.iconUrl,
+        envVarName: entry.envVarName,
+        slug: id,
+        upstreamBaseUrl: entry.upstreamBaseUrl,
+        modelsEndpoint: entry.modelsEndpoint,
+        sdkCompat: entry.sdkCompat,
+        defaultModel: entry.defaultModel,
+        registryAlias: entry.registryAlias,
+        apiKeyInstructions: entry.apiKeyInstructions,
+        apiKeyPlaceholder: entry.apiKeyPlaceholder,
+        agentSettingsStore: this.agentSettingsStore,
+      });
+      moduleRegistry.register(module);
+      registeredIds.add(id);
+      logger.info(
+        `✅ Registered config-driven provider: ${id} (system key: ${module.hasSystemKey() ? "available" : "not available"})`
+      );
     }
 
     // Initialize provider catalog service
@@ -595,22 +536,8 @@ export class CoreServices {
       credentialStore: mcpCredentialStore,
       inputStore: mcpInputStore,
       agentSettingsStore: this.agentSettingsStore,
+      configResolver: this.systemConfigResolver,
     });
-
-    // Register MCP servers from system skills as global MCPs
-    if (this.systemSkillsService) {
-      const systemSkills = await this.systemSkillsService.getSystemSkills();
-      const mcpServers: Record<string, any> = {};
-      for (const skill of systemSkills) {
-        if (!skill.mcpServers) continue;
-        for (const mcp of skill.mcpServers) {
-          mcpServers[mcp.id] = { url: mcp.url, type: mcp.type || "sse" };
-        }
-      }
-      if (Object.keys(mcpServers).length > 0) {
-        this.mcpConfigService.registerGlobalServers(mcpServers);
-      }
-    }
 
     // Initialize instruction service (needed by WorkerGateway)
     // Pass agentSettingsStore so skills instructions can be fetched per-agent
@@ -683,16 +610,15 @@ export class CoreServices {
       throw new Error("Queue must be initialized before integration services");
     }
 
-    if (!this.systemSkillsService) {
+    if (!this.integrationConfigService) {
       logger.info(
-        "No SystemSkillsService available, integration services disabled"
+        "No integration config service available, integrations disabled"
       );
       return;
     }
 
     // Check if there are any integrations configured
-    const integrationConfigs =
-      await this.systemSkillsService.getAllIntegrationConfigs();
+    const integrationConfigs = await this.integrationConfigService.getAll();
     if (Object.keys(integrationConfigs).length === 0) {
       logger.info(
         "No integrations found in system skills, integration services disabled"
@@ -702,12 +628,6 @@ export class CoreServices {
 
     const redisClient = this.queue.getRedisClient();
 
-    if (!this.integrationConfigService) {
-      this.integrationConfigService = new IntegrationConfigService(
-        this.systemSkillsService,
-        this.agentSettingsStore
-      );
-    }
     this.integrationCredentialStore = new IntegrationCredentialStore(
       redisClient
     );
@@ -864,6 +784,10 @@ export class CoreServices {
     return this.transcriptionService;
   }
 
+  getImageGenerationService(): ImageGenerationService | undefined {
+    return this.imageGenerationService;
+  }
+
   getUserAgentsStore(): UserAgentsStore {
     if (!this.userAgentsStore)
       throw new Error("User agents store not initialized");
@@ -904,6 +828,10 @@ export class CoreServices {
 
   getSystemSkillsService(): SystemSkillsService | undefined {
     return this.systemSkillsService;
+  }
+
+  getSystemConfigResolver(): SystemConfigResolver | undefined {
+    return this.systemConfigResolver;
   }
 
   getIntegrationConfigService(): IntegrationConfigService | undefined {

@@ -4,6 +4,10 @@ function apiUrl(agentId: string, path: string): string {
   return `/api/v1/agents/${encodeURIComponent(agentId)}${path}`;
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function jsonPost(url: string, body: unknown): Promise<Response> {
   return fetch(url, {
     method: "POST",
@@ -126,17 +130,41 @@ export async function installProvider(
   agentId: string,
   providerId: string
 ): Promise<void> {
-  const resp = await fetch(
-    apiUrl(agentId, `/config/providers/${encodeURIComponent(providerId)}`),
-    {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled: true }),
-    }
+  const url = apiUrl(
+    agentId,
+    `/config/providers/${encodeURIComponent(providerId)}`
   );
-  if (!resp.ok) {
-    const data = await parseJsonSafe(resp);
-    throw new Error(data.error || "Failed to install provider");
+  const maxAttempts = 3;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const resp = await fetch(url, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: true }),
+      });
+
+      if (resp.ok) return;
+
+      const data = await parseJsonSafe(resp);
+      const message =
+        data.error || `Failed to install provider (HTTP ${resp.status})`;
+
+      // Retry transient server failures to survive short gateway restarts.
+      if (resp.status >= 500 && attempt < maxAttempts) {
+        await sleep(attempt * 500);
+        continue;
+      }
+
+      throw new Error(message);
+    } catch (error) {
+      // Retry transient network errors to survive short gateway restarts.
+      if (attempt < maxAttempts) {
+        await sleep(attempt * 500);
+        continue;
+      }
+      throw error;
+    }
   }
 }
 

@@ -6,10 +6,12 @@
  * - Google Gemini (gemini auth profile) - Audio input/output
  * - ElevenLabs (elevenlabs auth profile) - STT and high-quality TTS
  *
- * Provider selection: first installed provider wins (openai → gemini → elevenlabs).
- * No env vars needed — TTS is a free capability of installed providers.
+ * STT selection: built-ins (chatgpt/openai, gemini, elevenlabs) plus optional
+ * config-driven STT providers declared in system-skills provider config.
+ * TTS selection stays built-in only (openai → gemini → elevenlabs).
  */
 
+import type { ProviderConfigEntry } from "@lobu/core";
 import { createLogger } from "@lobu/core";
 import type { AuthProfilesManager } from "../auth/settings/auth-profiles-manager";
 
@@ -18,8 +20,14 @@ const logger = createLogger("transcription-service");
 export type TranscriptionProvider = "openai" | "gemini" | "elevenlabs";
 
 interface TranscriptionConfig {
+  profileProviderId: string;
+  displayName: string;
   provider: TranscriptionProvider;
   apiKey: string;
+  openaiCompat?: {
+    endpointUrl: string;
+    model: string;
+  };
 }
 
 export interface TranscriptionSuccess {
@@ -84,7 +92,22 @@ function displayName(provider: TranscriptionProvider): string {
 }
 
 export class TranscriptionService {
-  constructor(private readonly authProfilesManager: AuthProfilesManager) {}
+  private providerConfigSource?:
+    | (() => Promise<Record<string, ProviderConfigEntry>>)
+    | undefined;
+
+  constructor(
+    private readonly authProfilesManager: AuthProfilesManager,
+    providerConfigSource?: () => Promise<Record<string, ProviderConfigEntry>>
+  ) {
+    this.providerConfigSource = providerConfigSource;
+  }
+
+  setProviderConfigSource(
+    source: () => Promise<Record<string, ProviderConfigEntry>>
+  ): void {
+    this.providerConfigSource = source;
+  }
 
   /**
    * Transcribe audio buffer to text
@@ -94,47 +117,55 @@ export class TranscriptionService {
     agentId: string,
     mimeType = "audio/ogg"
   ): Promise<TranscriptionResult> {
-    const config = await this.getConfig(agentId);
+    const configs = await this.getTranscriptionConfigs(agentId);
 
-    if (!config) {
+    if (configs.length === 0) {
       return this.noProviderError(
         "No transcription provider configured",
         agentId
       );
     }
 
-    logger.info("Transcribing audio", {
-      agentId,
-      provider: config.provider,
-      bufferSize: audioBuffer.length,
-      mimeType,
-    });
+    const attemptErrors: string[] = [];
+    for (const config of configs) {
+      logger.info("Transcribing audio", {
+        agentId,
+        provider: config.provider,
+        profileProviderId: config.profileProviderId,
+        bufferSize: audioBuffer.length,
+        mimeType,
+      });
 
-    try {
-      const text = await this.transcribeWithProvider(
-        audioBuffer,
-        config,
-        mimeType
-      );
-      logger.info("Transcription successful", {
-        agentId,
-        provider: config.provider,
-        textLength: text.length,
-      });
-      return { text, provider: config.provider };
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      logger.error("Transcription failed", {
-        agentId,
-        provider: config.provider,
-        error: errorMessage,
-      });
-      return {
-        error: `Transcription failed with ${displayName(config.provider)}: ${errorMessage}`,
-        availableProviders: [],
-      };
+      try {
+        const text = await this.transcribeWithProvider(
+          audioBuffer,
+          config,
+          mimeType
+        );
+        logger.info("Transcription successful", {
+          agentId,
+          provider: config.provider,
+          profileProviderId: config.profileProviderId,
+          textLength: text.length,
+        });
+        return { text, provider: config.provider };
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
+        logger.error("Transcription failed", {
+          agentId,
+          provider: config.provider,
+          profileProviderId: config.profileProviderId,
+          error: errorMessage,
+        });
+        attemptErrors.push(`${config.displayName}: ${errorMessage}`);
+      }
     }
+
+    return {
+      error: `Transcription failed with all configured providers: ${attemptErrors.join(" | ")}`,
+      availableProviders: [...new Set(configs.map((c) => c.provider))],
+    };
   }
 
   /**
@@ -142,16 +173,114 @@ export class TranscriptionService {
    * First TTS-capable provider with a valid profile wins (openai → gemini → elevenlabs).
    */
   async getConfig(agentId: string): Promise<TranscriptionConfig | null> {
+    const configs = await this.getSynthesisConfigs(agentId);
+    return configs[0] ?? null;
+  }
+
+  private async getSynthesisConfigs(
+    agentId: string
+  ): Promise<TranscriptionConfig[]> {
+    const configs: TranscriptionConfig[] = [];
     for (const { profileProviderId, ttsProvider } of TTS_CAPABLE_PROVIDERS) {
       const profile = await this.authProfilesManager.getBestProfile(
         agentId,
         profileProviderId
       );
       if (profile) {
-        return { provider: ttsProvider, apiKey: profile.credential };
+        configs.push({
+          profileProviderId,
+          displayName: displayName(ttsProvider),
+          provider: ttsProvider,
+          apiKey: profile.credential,
+        });
       }
     }
-    return null;
+    return configs;
+  }
+
+  private async getTranscriptionConfigs(
+    agentId: string
+  ): Promise<TranscriptionConfig[]> {
+    const configs = await this.getSynthesisConfigs(agentId);
+    const providerIds = new Set(configs.map((c) => c.profileProviderId));
+    const configDriven = await this.getConfigDrivenSttCandidates();
+
+    for (const candidate of configDriven) {
+      if (providerIds.has(candidate.profileProviderId)) continue;
+
+      const profile = await this.authProfilesManager.getBestProfile(
+        agentId,
+        candidate.profileProviderId
+      );
+      if (!profile) continue;
+
+      configs.push({
+        profileProviderId: candidate.profileProviderId,
+        displayName: candidate.displayName,
+        provider: candidate.provider,
+        apiKey: profile.credential,
+        openaiCompat: candidate.openaiCompat,
+      });
+      providerIds.add(candidate.profileProviderId);
+    }
+
+    return configs;
+  }
+
+  private async getConfigDrivenSttCandidates(): Promise<
+    Array<Omit<TranscriptionConfig, "apiKey">>
+  > {
+    if (!this.providerConfigSource) return [];
+
+    let providerConfigs: Record<string, ProviderConfigEntry>;
+    try {
+      providerConfigs = await this.providerConfigSource();
+    } catch (error) {
+      logger.warn("Failed to load provider configs for STT", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return [];
+    }
+
+    const candidates: Array<Omit<TranscriptionConfig, "apiKey">> = [];
+    for (const [providerId, entry] of Object.entries(providerConfigs)) {
+      const stt = entry.stt;
+      const compat = stt?.sdkCompat || entry.sdkCompat;
+      const sttEnabled = stt ? stt.enabled !== false : compat === "openai";
+      if (!sttEnabled) continue;
+
+      if (compat !== "openai") {
+        logger.warn("Unsupported config-driven STT compatibility", {
+          providerId,
+          compat,
+        });
+        continue;
+      }
+
+      const endpoint = this.resolveEndpointUrl(
+        stt?.transcriptionPath,
+        stt?.baseUrl || entry.upstreamBaseUrl
+      );
+      if (!endpoint) {
+        logger.warn("Invalid STT endpoint configuration", {
+          providerId,
+          transcriptionPath: stt?.transcriptionPath,
+          baseUrl: stt?.baseUrl || entry.upstreamBaseUrl,
+        });
+        continue;
+      }
+
+      candidates.push({
+        profileProviderId: providerId,
+        displayName: entry.displayName || providerId,
+        provider: "openai",
+        openaiCompat: {
+          endpointUrl: endpoint,
+          model: stt?.model?.trim() || "whisper-1",
+        },
+      });
+    }
+    return candidates;
   }
 
   /**
@@ -229,7 +358,12 @@ export class TranscriptionService {
   ): Promise<string> {
     switch (config.provider) {
       case "openai":
-        return this.transcribeWithOpenAI(buffer, config.apiKey, mimeType);
+        return this.transcribeWithOpenAI(
+          buffer,
+          config.apiKey,
+          mimeType,
+          config.openaiCompat
+        );
       case "gemini":
         return this.transcribeWithGemini(buffer, config.apiKey, mimeType);
       case "elevenlabs":
@@ -242,7 +376,8 @@ export class TranscriptionService {
   private async transcribeWithOpenAI(
     buffer: Buffer,
     apiKey: string,
-    mimeType: string
+    mimeType: string,
+    options?: { endpointUrl: string; model: string }
   ): Promise<string> {
     const formData = new FormData();
     const ext = this.getExtensionFromMime(mimeType);
@@ -251,13 +386,16 @@ export class TranscriptionService {
       new Blob([buffer], { type: mimeType }),
       `audio.${ext}`
     );
-    formData.append("model", "whisper-1");
+    formData.append("model", options?.model || "whisper-1");
 
-    const resp = await fetch("https://api.openai.com/v1/audio/transcriptions", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}` },
-      body: formData,
-    });
+    const resp = await fetch(
+      options?.endpointUrl || "https://api.openai.com/v1/audio/transcriptions",
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: formData,
+      }
+    );
 
     if (!resp.ok) {
       const error = await resp.text();
@@ -514,5 +652,33 @@ export class TranscriptionService {
       "audio/mp4": "m4a",
     };
     return mimeToExt[mimeType] || "ogg";
+  }
+
+  private resolveEndpointUrl(
+    transcriptionPath: string | undefined,
+    baseUrl: string | undefined
+  ): string | null {
+    const path = (
+      transcriptionPath || this.getDefaultOpenAiTranscriptionPath(baseUrl)
+    ).trim();
+    if (/^https?:\/\//i.test(path)) {
+      return path;
+    }
+
+    const base = (baseUrl || "").trim();
+    if (!base) return null;
+
+    const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+    return `${base.replace(/\/+$/, "")}${normalizedPath}`;
+  }
+
+  private getDefaultOpenAiTranscriptionPath(
+    baseUrl: string | undefined
+  ): string {
+    const trimmedBase = (baseUrl || "").trim().replace(/\/+$/, "");
+    if (trimmedBase.endsWith("/v1")) {
+      return "/audio/transcriptions";
+    }
+    return "/v1/audio/transcriptions";
   }
 }

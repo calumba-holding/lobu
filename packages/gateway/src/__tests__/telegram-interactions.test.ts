@@ -16,7 +16,7 @@ describe("TelegramInteractionRenderer link buttons", () => {
     renderer.shutdown();
   });
 
-  test("renders install links as WebApp buttons", async () => {
+  test("renders install links as URL buttons when user is not linked", async () => {
     await renderer.renderLinkButton({
       id: "lb_test",
       userId: "u1",
@@ -31,11 +31,11 @@ describe("TelegramInteractionRenderer link buttons", () => {
     expect(sendMessage).toHaveBeenCalledTimes(1);
     const [, , options] = sendMessage.mock.calls[0] as [number, string, any];
     const button = options.reply_markup.inline_keyboard[0][0];
-    expect(button.web_app?.url).toBe("https://example.com/settings?st=abc");
-    expect(button.url).toBeUndefined();
+    expect(button.url).toBe("https://example.com/settings?st=abc");
+    expect(button.web_app).toBeUndefined();
   });
 
-  test("renders settings links as WebApp buttons", async () => {
+  test("renders settings links as URL buttons when user is not linked", async () => {
     await renderer.renderLinkButton({
       id: "lb_test",
       userId: "u1",
@@ -50,8 +50,8 @@ describe("TelegramInteractionRenderer link buttons", () => {
     expect(sendMessage).toHaveBeenCalledTimes(1);
     const [, , options] = sendMessage.mock.calls[0] as [number, string, any];
     const button = options.reply_markup.inline_keyboard[0][0];
-    expect(button.web_app?.url).toBe("https://example.com/settings?st=abc");
-    expect(button.url).toBeUndefined();
+    expect(button.url).toBe("https://example.com/settings?st=abc");
+    expect(button.web_app).toBeUndefined();
   });
 
   test("renders oauth links as URL buttons", async () => {

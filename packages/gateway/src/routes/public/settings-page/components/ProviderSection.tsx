@@ -3,6 +3,42 @@ import { type SettingsContextValue, useSettings } from "../app";
 import type { CatalogProvider, ProviderState } from "../types";
 import { Section } from "./Section";
 
+const CAPABILITY_META: Record<
+  "text" | "image-generation" | "speech-to-text" | "text-to-speech",
+  { emoji: string; title: string }
+> = {
+  text: { emoji: "📝", title: "Text" },
+  "image-generation": { emoji: "🖼️", title: "Image generation" },
+  "speech-to-text": { emoji: "🎙️", title: "Speech to text" },
+  "text-to-speech": { emoji: "🔊", title: "Text to speech" },
+};
+
+function CapabilityChips({
+  capabilities,
+}: {
+  capabilities: (
+    | "text"
+    | "image-generation"
+    | "speech-to-text"
+    | "text-to-speech"
+  )[];
+}) {
+  if (!capabilities.length) return null;
+  return (
+    <div class="flex flex-wrap gap-1 mt-1">
+      {capabilities.map((capability) => (
+        <span
+          key={capability}
+          title={CAPABILITY_META[capability].title}
+          class="inline-flex items-center justify-center text-base leading-none"
+        >
+          {CAPABILITY_META[capability].emoji}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 // ─── Shared auth helpers ──────────────────────────────────────────────────
 
 type UpdatePS = (u: Partial<ProviderState>) => void;
@@ -12,18 +48,25 @@ function handleAuthSuccess(
   providerId: string,
   providerName: string
 ) {
-  if (ctx.pendingProvider.value?.id === providerId) {
-    ctx.pendingProvider.value = { ...ctx.pendingProvider.value, success: true };
+  const pendingProvider = ctx.pendingProvider.value;
+  if (pendingProvider?.id === providerId) {
+    if (pendingProvider.success) {
+      return;
+    }
+
+    ctx.pendingProvider.value = { ...pendingProvider, success: true };
     setTimeout(async () => {
       ctx.pendingProvider.value = null;
       try {
         await api.installProvider(ctx.agentId, providerId);
         ctx.successMsg.value = "Provider added and connected!";
         window.scrollTo({ top: 0, behavior: "smooth" });
-        setTimeout(() => window.location.reload(), 800);
+        setTimeout(() => ctx.reloadPage(), 800);
       } catch (e: unknown) {
         ctx.errorMsg.value =
-          e instanceof Error ? e.message : "Failed to install provider";
+          e instanceof Error
+            ? e.message
+            : String(e || "Failed to install provider");
       }
     }, 800);
     return;
@@ -86,6 +129,11 @@ async function startDeviceCodeFlow(
   providerName: string,
   updatePS: UpdatePS
 ) {
+  if (ctx.deviceCodePollTimer.value) {
+    clearInterval(ctx.deviceCodePollTimer.value);
+    ctx.deviceCodePollTimer.value = null;
+  }
+
   updatePS({ status: "Starting..." });
   try {
     const data = await api.startDeviceCode(providerId, ctx.agentId);
@@ -364,9 +412,9 @@ function ProviderCard({
       return;
     try {
       await api.uninstallProvider(ctx.agentId, providerId);
-      ctx.successMsg.value = "Provider removed! Refreshing...";
+      ctx.successMsg.value = "Provider removed!";
       window.scrollTo({ top: 0, behavior: "smooth" });
-      setTimeout(() => window.location.reload(), 800);
+      setTimeout(() => ctx.reloadPage(), 800);
     } catch (e: unknown) {
       ctx.errorMsg.value =
         e instanceof Error ? e.message : "Failed to remove provider";
@@ -408,6 +456,7 @@ function ProviderCard({
           )}
           <div class="min-w-0">
             <p class="text-sm font-medium text-gray-800">{pInfo.name}</p>
+            <CapabilityChips capabilities={pInfo.capabilities || []} />
             <p
               class={`text-xs truncate max-w-[120px] sm:max-w-none ${
                 ps.connected
@@ -768,13 +817,14 @@ function ProviderCatalog() {
                   <div class="flex-1 min-w-0">
                     <p class="text-xs font-medium text-gray-800">{cp.name}</p>
                   </div>
-                  <div class="flex flex-wrap gap-1 justify-end">
-                    {(cp.supportedAuthTypes || [cp.authType]).map((at) => (
+                  <div class="flex items-center gap-1 ml-2">
+                    {(cp.capabilities || []).map((capability) => (
                       <span
-                        key={at}
-                        class="text-[9px] uppercase font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-400 border border-gray-100"
+                        key={capability}
+                        title={CAPABILITY_META[capability].title}
+                        class="inline-flex items-center justify-center text-sm leading-none"
                       >
-                        {at}
+                        {CAPABILITY_META[capability].emoji}
                       </span>
                     ))}
                   </div>

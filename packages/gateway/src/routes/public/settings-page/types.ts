@@ -4,6 +4,12 @@ export interface ProviderInfo {
   supportedAuthTypes: ("oauth" | "device-code" | "api-key")[];
   apiKeyInstructions: string;
   apiKeyPlaceholder: string;
+  capabilities: (
+    | "text"
+    | "image-generation"
+    | "speech-to-text"
+    | "text-to-speech"
+  )[];
 }
 
 export interface CatalogProvider {
@@ -14,11 +20,22 @@ export interface CatalogProvider {
   supportedAuthTypes: ("oauth" | "device-code" | "api-key")[];
   apiKeyInstructions: string;
   apiKeyPlaceholder: string;
+  capabilities: (
+    | "text"
+    | "image-generation"
+    | "speech-to-text"
+    | "text-to-speech"
+  )[];
 }
 
 export interface ModelOption {
   label: string;
   value: string;
+}
+
+export interface ModelSelectionState {
+  mode: "auto" | "pinned";
+  pinnedModel?: string;
 }
 
 export interface SkillIntegrationInfo {
@@ -140,6 +157,8 @@ export interface SettingsState {
   PROVIDERS: Record<string, ProviderInfo>;
   providerOrder: string[];
   providerModels: Record<string, ModelOption[]>;
+  modelSelection: ModelSelectionState;
+  providerModelPreferences: Record<string, string>;
   catalogProviders: CatalogProvider[];
   initialSkills: Skill[];
   initialMcpServers: Record<string, McpConfig>;
@@ -182,4 +201,5 @@ export interface SettingsSnapshot {
   skills: string;
   mcpServers: string;
   permissions: string;
+  providerModelPreferences: string;
 }

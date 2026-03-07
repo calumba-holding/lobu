@@ -5,11 +5,11 @@ const logger = createLogger("dispatcher");
 import type { AnyBlock } from "@slack/types";
 import type { WebClient } from "@slack/web-api";
 import {
-  type ClaimService,
   buildClaimSettingsUrl,
+  type ClaimService,
 } from "../../auth/settings/claim-service";
 import type { DispatcherModuleSource } from "../../modules/module-system";
-import { resolveSpace } from "../../spaces";
+import { platformAgentId } from "../../spaces";
 import type { SlackActionBody, SlackContext } from "../types";
 import type { MessageHandler } from "./messages";
 
@@ -252,12 +252,12 @@ export class ActionHandler {
 
     // Resolve agentId from context for module actions
     const isDirectMessage = channelId.startsWith("D");
-    const { agentId } = resolveSpace({
-      platform: "slack",
+    const agentId = platformAgentId(
+      "slack",
       userId,
       channelId,
-      isGroup: !isDirectMessage,
-    });
+      !isDirectMessage
+    );
 
     for (const module of dispatcherModules) {
       if (module.handleAction) {
@@ -328,13 +328,7 @@ export class ActionHandler {
     }
 
     try {
-      // Resolve agentId for user's personal space (DM context)
-      const { agentId } = resolveSpace({
-        platform: "slack",
-        userId,
-        channelId: userId, // Use userId as channelId for DM-like context
-        isGroup: false,
-      });
+      const agentId = platformAgentId("slack", userId, userId, false);
 
       const claimCode = await this.claimService.createClaim(
         "slack",

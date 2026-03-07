@@ -4,14 +4,15 @@ import type { AdminStatusCache } from "../../auth/admin-status-cache";
 import type { AgentMetadataStore } from "../../auth/agent-metadata-store";
 import type { AgentSettingsStore } from "../../auth/settings";
 import {
-  type ClaimService,
   buildClaimSettingsUrl,
+  type ClaimService,
 } from "../../auth/settings/claim-service";
 import type { UserAgentsStore } from "../../auth/user-agents-store";
 import type { ChannelBindingService } from "../../channels";
 import type { CommandDispatcher } from "../../commands/command-dispatcher";
 import { createSlackThreadReply } from "../../commands/command-reply-adapters";
 import type { QueueProducer } from "../../infrastructure/queue/queue-producer";
+import type { SystemMessageLimiter } from "../../infrastructure/redis/system-message-limiter";
 import {
   buildMessagePayload,
   resolveAgentId,
@@ -35,6 +36,7 @@ export class MessageHandler {
   private adminStatusCache?: AdminStatusCache;
   private commandDispatcher?: CommandDispatcher;
   private claimService?: ClaimService;
+  private systemMessageLimiter?: SystemMessageLimiter;
 
   constructor(
     private queueProducer: QueueProducer,
@@ -93,6 +95,10 @@ export class MessageHandler {
     this.claimService = service;
   }
 
+  setSystemMessageLimiter(limiter: SystemMessageLimiter): void {
+    this.systemMessageLimiter = limiter;
+  }
+
   /**
    * Transcribe audio files from Slack message.
    * Returns the original message with transcriptions prepended.
@@ -100,7 +106,11 @@ export class MessageHandler {
   private async transcribeAudioFiles(
     userRequest: string,
     files: any[] | undefined,
-    slackToken?: string
+    agentId: string,
+    slackToken?: string,
+    context?: SlackContext,
+    client?: WebClient,
+    isDirectMessage?: boolean
   ): Promise<string> {
     if (!files?.length || !this.transcriptionService) {
       return userRequest;
@@ -159,12 +169,9 @@ export class MessageHandler {
 
         const buffer = Buffer.from(await response.arrayBuffer());
         const mimetype = audioFile.mimetype || "audio/mpeg";
-        const filename =
-          audioFile.name || `audio.${audioFile.filetype || "mp3"}`;
-
         const result = await this.transcriptionService.transcribe(
           buffer,
-          filename,
+          agentId,
           mimetype
         );
 
@@ -178,6 +185,14 @@ export class MessageHandler {
         } else if (
           result.error?.includes("No transcription provider configured")
         ) {
+          if (context && client && typeof isDirectMessage === "boolean") {
+            await this.sendSttConfigurationPrompt(
+              context,
+              client,
+              isDirectMessage,
+              agentId
+            );
+          }
           logger.info("Transcription service not configured - skipping audio");
           break; // No point trying more files
         } else {
@@ -204,6 +219,83 @@ export class MessageHandler {
       return transcriptionPrefix;
     }
     return `${transcriptionPrefix}\n\n${userRequest}`;
+  }
+
+  private async sendSttConfigurationPrompt(
+    context: SlackContext,
+    client: WebClient,
+    isDirectMessage: boolean,
+    agentId: string
+  ): Promise<boolean> {
+    const sendPrompt = async () => {
+      const sent = await this.sendConfigurationPrompt(
+        context,
+        client,
+        isDirectMessage
+      );
+      if (!sent) {
+        throw new Error("Slack configuration prompt could not be sent");
+      }
+    };
+
+    if (!this.systemMessageLimiter) {
+      try {
+        await sendPrompt();
+        return true;
+      } catch (error) {
+        logger.warn(
+          {
+            error: String(error),
+            channelId: context.channelId,
+            teamId: context.teamId,
+            agentId,
+          },
+          "Failed to send Slack STT configuration prompt"
+        );
+        return false;
+      }
+    }
+
+    const throttleSecondsRaw = Number.parseInt(
+      process.env.STT_CONFIG_PROMPT_DEBOUNCE_SECONDS || "3600",
+      10
+    );
+    const lockSecondsRaw = Number.parseInt(
+      process.env.STT_CONFIG_PROMPT_LOCK_SECONDS || "30",
+      10
+    );
+    const throttleSeconds = Number.isFinite(throttleSecondsRaw)
+      ? Math.max(1, throttleSecondsRaw)
+      : 3600;
+    const lockSeconds = Number.isFinite(lockSecondsRaw)
+      ? Math.max(1, lockSecondsRaw)
+      : 30;
+    const dedupeKey = [
+      "stt_unconfigured",
+      "slack",
+      context.teamId,
+      context.channelId,
+      agentId,
+    ].join(":");
+
+    try {
+      return await this.systemMessageLimiter.sendOnce(dedupeKey, sendPrompt, {
+        sentTtlSeconds: throttleSeconds,
+        lockTtlSeconds: lockSeconds,
+        failOpen: false,
+      });
+    } catch (error) {
+      logger.warn(
+        {
+          error: String(error),
+          channelId: context.channelId,
+          teamId: context.teamId,
+          agentId,
+        },
+        "Failed to send debounced Slack STT configuration prompt"
+      );
+      return false;
+    }
   }
 
   /**
@@ -275,13 +367,6 @@ export class MessageHandler {
     );
     logger.info(
       `📨 Handling request from user ${context.userId} in thread ${context.threadTs || context.messageTs}`
-    );
-
-    // Transcribe audio files if present
-    const processedRequest = await this.transcribeAudioFiles(
-      userRequest,
-      files,
-      client.token
     );
 
     // CRITICAL: Always use thread_ts for thread identification
@@ -371,6 +456,17 @@ export class MessageHandler {
         `Skipping thread ownership check for DM channel ${context.channelId}`
       );
     }
+
+    // Transcribe audio files after agent resolution so provider config is scoped per agent
+    const processedRequest = await this.transcribeAudioFiles(
+      userRequest,
+      files,
+      agentId,
+      client.token,
+      context,
+      client,
+      isDirectMessage
+    );
 
     // Get existing session if any
     const existingSession = await this.sessionManager.findSessionByThread(

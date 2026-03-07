@@ -5,6 +5,7 @@ import {
 } from "../modules/module-system";
 import type { AgentSettingsStore } from "./settings/agent-settings-store";
 import type { AuthProfilesManager } from "./settings/auth-profiles-manager";
+import { reconcileModelSelectionForInstalledProviders } from "./settings/model-selection";
 
 const logger = createLogger("provider-catalog");
 
@@ -82,9 +83,17 @@ export class ProviderCatalogService {
       installedAt: Date.now(),
       ...(config ? { config } : {}),
     };
+    const nextInstalledProviders = [...installed, entry];
+    const reconciled = reconcileModelSelectionForInstalledProviders({
+      model: settings?.model,
+      modelSelection: settings?.modelSelection,
+      providerModelPreferences: settings?.providerModelPreferences,
+      installedProviders: nextInstalledProviders,
+    });
 
     await this.agentSettingsStore.updateSettings(agentId, {
-      installedProviders: [...installed, entry],
+      installedProviders: nextInstalledProviders,
+      ...reconciled,
     });
 
     logger.info(`Installed provider ${providerId} for agent ${agentId}`);
@@ -107,9 +116,16 @@ export class ProviderCatalogService {
 
     // Clean up auth profiles for this provider
     await this.authProfilesManager.deleteProviderProfiles(agentId, providerId);
+    const reconciled = reconcileModelSelectionForInstalledProviders({
+      model: settings?.model,
+      modelSelection: settings?.modelSelection,
+      providerModelPreferences: settings?.providerModelPreferences,
+      installedProviders: filtered,
+    });
 
     await this.agentSettingsStore.updateSettings(agentId, {
       installedProviders: filtered,
+      ...reconciled,
     });
 
     logger.info(`Uninstalled provider ${providerId} for agent ${agentId}`);
@@ -160,9 +176,16 @@ export class ProviderCatalogService {
         reordered.push(ip);
       }
     }
+    const reconciled = reconcileModelSelectionForInstalledProviders({
+      model: settings?.model,
+      modelSelection: settings?.modelSelection,
+      providerModelPreferences: settings?.providerModelPreferences,
+      installedProviders: reordered,
+    });
 
     await this.agentSettingsStore.updateSettings(agentId, {
       installedProviders: reordered,
+      ...reconciled,
     });
 
     logger.info(

@@ -8,6 +8,7 @@
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { McpRegistryService } from "../../services/mcp-registry";
 import { SkillRegistryCoordinator } from "../../services/skill-registry";
+import type { SystemConfigResolver } from "../../services/system-config-resolver";
 import { verifySettingsSession } from "./settings-auth";
 
 const TAG = "Integrations";
@@ -132,10 +133,16 @@ const skillFetchRoute = createRoute({
   },
 });
 
-export function createIntegrationsRoutes(): OpenAPIHono {
+export interface IntegrationsRoutesConfig {
+  configResolver?: SystemConfigResolver;
+}
+
+export function createIntegrationsRoutes(
+  config: IntegrationsRoutesConfig = {}
+): OpenAPIHono {
   const app = new OpenAPIHono();
   const coordinator = new SkillRegistryCoordinator();
-  const mcpRegistry = new McpRegistryService();
+  const mcpRegistry = new McpRegistryService(config.configResolver);
 
   app.openapi(registryRoute, async (c): Promise<any> => {
     const { q, limit } = c.req.valid("query");
@@ -145,7 +152,7 @@ export function createIntegrationsRoutes(): OpenAPIHono {
     const maxLimit = Math.min(parseInt(limit || "20", 10), 50);
 
     if (q) {
-      const mcpResults = mcpRegistry.search(q, maxLimit);
+      const mcpResults = await mcpRegistry.search(q, maxLimit);
       return c.json({
         mcps: mcpResults.map((m) => ({
           id: m.id,
@@ -157,7 +164,7 @@ export function createIntegrationsRoutes(): OpenAPIHono {
       });
     }
 
-    const mcps = mcpRegistry.getCurated();
+    const mcps = await mcpRegistry.getCurated();
     return c.json({
       mcps: mcps.map((m) => ({
         id: m.id,

@@ -8,11 +8,12 @@
  */
 
 import { OpenAPIHono } from "@hono/zod-openapi";
-import { createLogger } from "@lobu/core";
+import { type AuthProfile, createLogger } from "@lobu/core";
 import type {
   AgentMetadata,
   AgentMetadataStore,
 } from "../../auth/agent-metadata-store";
+import type { OAuthStateStore } from "../../auth/oauth/state-store";
 import { collectProviderModelOptions } from "../../auth/provider-model-options";
 import type { AgentSettingsStore } from "../../auth/settings";
 import type { ClaimService } from "../../auth/settings/claim-service";
@@ -21,10 +22,10 @@ import type {
   PrefillMcpServer,
   SettingsTokenPayload,
 } from "../../auth/settings/token-service";
-import type { OAuthStateStore } from "../../auth/oauth/state-store";
 import type { UserAgentsStore } from "../../auth/user-agents-store";
 import type { ChannelBindingService } from "../../channels";
 import { getModelProviderModules } from "../../modules/module-system";
+import { platformAgentId } from "../../spaces";
 import { verifyTelegramWebAppData } from "../../telegram/webapp-auth";
 import {
   clearSettingsSessionCookie,
@@ -131,10 +132,17 @@ async function verifyAgentAccess(
     return session.agentId === agentId;
   }
 
-  // Channel-based session: check ownership via user-agents index
+  // For deterministic platforms, the agent is inherently owned by the platform user
+  const isDeterministic =
+    session.platform === "telegram" || session.platform === "whatsapp";
+  const lookupUserId = isDeterministic
+    ? session.userId
+    : session.oauthUserId || session.userId;
+
+  // Check ownership via user-agents index
   const owns = await config.userAgentsStore.ownsAgent(
     session.platform,
-    session.oauthUserId || session.userId,
+    lookupUserId,
     agentId
   );
   if (owns) return true;
@@ -143,10 +151,10 @@ async function verifyAgentAccess(
   const metadata = await config.agentMetadataStore.getMetadata(agentId);
   if (!metadata) return false;
 
-  const isOwner =
+  return (
     metadata.owner?.platform === session.platform &&
-    metadata.owner?.userId === (session.oauthUserId || session.userId);
-  return isOwner;
+    metadata.owner?.userId === lookupUserId
+  );
 }
 
 export interface SettingsPageConfig {
@@ -163,11 +171,156 @@ export interface SettingsPageConfig {
   settingsOAuthStateStore: OAuthStateStore<SettingsOAuthStateData>;
   /** Claim service for channel ownership verification (required) */
   claimService: ClaimService;
+  /** Platform registry for dispatching notifications */
+  platformRegistry?: { get(platform: string): any };
+}
+
+type ProviderCapability =
+  | "text"
+  | "image-generation"
+  | "speech-to-text"
+  | "text-to-speech";
+
+const PROVIDER_CAPABILITY_ORDER: ProviderCapability[] = [
+  "text",
+  "image-generation",
+  "speech-to-text",
+  "text-to-speech",
+];
+
+function orderedCapabilities(
+  capabilities: Set<ProviderCapability>
+): ProviderCapability[] {
+  return PROVIDER_CAPABILITY_ORDER.filter((capability) =>
+    capabilities.has(capability)
+  );
+}
+
+function parseJwtScopes(token: string): Set<string> | null {
+  const parts = token.split(".");
+  if (parts.length < 2) return null;
+  try {
+    const payload = JSON.parse(
+      Buffer.from(parts[1] || "", "base64url").toString("utf-8")
+    ) as {
+      scope?: unknown;
+      scp?: unknown;
+    };
+    const scopes: string[] = [];
+
+    if (typeof payload.scope === "string") {
+      scopes.push(...payload.scope.split(/\s+/));
+    }
+    if (typeof payload.scp === "string") {
+      scopes.push(...payload.scp.split(/\s+/));
+    }
+    if (Array.isArray(payload.scp)) {
+      scopes.push(
+        ...payload.scp.filter(
+          (value): value is string => typeof value === "string"
+        )
+      );
+    }
+
+    const cleaned = scopes.map((scope) => scope.trim()).filter(Boolean);
+    return cleaned.length > 0 ? new Set(cleaned) : null;
+  } catch {
+    return null;
+  }
+}
+
+function chatGptHasAudioScope(profile: AuthProfile): boolean {
+  if (profile.authType === "api-key") return true;
+  const scopes = parseJwtScopes(profile.credential);
+  if (!scopes) return true;
+  return (
+    scopes.has("api.model.audio.request") || scopes.has("model.audio.request")
+  );
+}
+
+function chatGptHasImageGenerationScope(profile: AuthProfile): boolean {
+  if (profile.authType === "api-key") return true;
+  const scopes = parseJwtScopes(profile.credential);
+  if (!scopes) return true;
+  return (
+    scopes.has("api.model.image.request") ||
+    scopes.has("api.model.request") ||
+    scopes.has("model.image.request")
+  );
+}
+
+function getPrimaryValidProfile(
+  profiles: AuthProfile[] | undefined,
+  providerId: string
+): AuthProfile | undefined {
+  if (!Array.isArray(profiles) || profiles.length === 0) return undefined;
+  const now = Date.now();
+  return profiles.find((profile) => {
+    if (profile.provider !== providerId) return false;
+    const expiresAt = profile.metadata?.expiresAt;
+    return !expiresAt || expiresAt > now;
+  });
+}
+
+function applyCapabilityOverrides(
+  provider: ProviderMeta,
+  authProfiles: AuthProfile[] | undefined
+): ProviderMeta {
+  if (provider.id !== "chatgpt") return provider;
+
+  const primaryProfile = getPrimaryValidProfile(authProfiles, provider.id);
+  if (!primaryProfile) {
+    return provider;
+  }
+
+  const hasAudio = chatGptHasAudioScope(primaryProfile);
+  const hasImageGeneration = chatGptHasImageGenerationScope(primaryProfile);
+  if (hasAudio && hasImageGeneration) {
+    return provider;
+  }
+
+  return {
+    ...provider,
+    capabilities: (provider.capabilities || []).filter(
+      (capability) =>
+        capability === "text" ||
+        (capability === "image-generation" && hasImageGeneration) ||
+        ((capability === "speech-to-text" || capability === "text-to-speech") &&
+          hasAudio)
+    ),
+  };
 }
 
 function buildProviderMeta(
   m: ReturnType<typeof getModelProviderModules>[number]
 ): ProviderMeta {
+  const providerId = m.providerId.toLowerCase();
+  const capabilities = new Set<ProviderCapability>();
+
+  if (providerId !== "elevenlabs") {
+    capabilities.add("text");
+  }
+  if (providerId === "chatgpt" || providerId === "openai") {
+    capabilities.add("image-generation");
+  }
+  if (
+    providerId === "chatgpt" ||
+    providerId === "openai" ||
+    providerId === "gemini" ||
+    providerId === "elevenlabs" ||
+    providerId === "groq"
+  ) {
+    capabilities.add("speech-to-text");
+  }
+  if (
+    providerId === "chatgpt" ||
+    providerId === "openai" ||
+    providerId === "gemini" ||
+    providerId === "elevenlabs"
+  ) {
+    capabilities.add("text-to-speech");
+  }
+
   return {
     id: m.providerId,
     name: m.providerDisplayName,
@@ -180,6 +333,7 @@ function buildProviderMeta(
     apiKeyInstructions: m.apiKeyInstructions || "",
     apiKeyPlaceholder: m.apiKeyPlaceholder || "",
     catalogDescription: m.catalogDescription || "",
+    capabilities: orderedCapabilities(capabilities),
   };
 }
 
@@ -210,7 +364,10 @@ async function renderSettingsForPayload(
   const installedSet = new Set(installedIds);
   const installedProviders = installedIds
     .map((id) => allProviderMeta.find((p) => p.id === id))
-    .filter((p): p is ProviderMeta => p !== undefined);
+    .filter((p): p is ProviderMeta => p !== undefined)
+    .map((provider) =>
+      applyCapabilityOverrides(provider, settings?.authProfiles)
+    );
 
   // Catalog providers = all that are not installed
   const catalogProviders = allProviderMeta.filter(
@@ -222,8 +379,10 @@ async function renderSettingsForPayload(
     payload.userId
   );
 
-  // Determine if agent switcher should be shown
-  const showSwitcher = !!payload.channelId;
+  // Deterministic platforms (Telegram/WhatsApp) don't need agent switching
+  const isDeterministicPlatform =
+    payload.platform === "telegram" || payload.platform === "whatsapp";
+  const showSwitcher = !isDeterministicPlatform && !!payload.channelId;
 
   // Get agents list for switcher (only if switcher is enabled)
   const agents: (AgentMetadata & { channelCount: number })[] = [];
@@ -345,13 +504,23 @@ export function createSettingsPageRoutes(
       return c.json({ error: "Chat ID mismatch" }, 403);
     }
 
-    // Build session payload (1-hour session)
-    const sessionTtlMs = 60 * 60 * 1000;
+    // Check if this Telegram user has a linked OAuth identity
+    const linkedOAuthUserId = await claimService.getLinkedOAuthUserId(
+      "telegram",
+      userId
+    );
+
+    // Linked users get a 24h session with oauthUserId (same as OAuth sessions)
+    // Unlinked users get a 1h session without oauthUserId (current behavior)
+    const sessionTtlMs = linkedOAuthUserId
+      ? 24 * 60 * 60 * 1000
+      : 60 * 60 * 1000;
     const session: SettingsTokenPayload = {
       userId,
       platform: "telegram",
       channelId: chatId,
       exp: Date.now() + sessionTtlMs,
+      ...(linkedOAuthUserId && { oauthUserId: linkedOAuthUserId }),
     };
 
     setSettingsSessionCookie(c, session);
@@ -488,22 +657,24 @@ export function createSettingsPageRoutes(
       session = null;
     }
 
-    // 2. No session + ?claim= → redirect to OAuth login (preserving returnUrl)
-    if (!session && c.req.query("claim")) {
-      const currentUrl = new URL(c.req.url);
-      const returnUrl = `${currentUrl.pathname}${currentUrl.search}`;
-      return c.redirect(
-        `/settings/oauth/login?returnUrl=${encodeURIComponent(returnUrl)}`
-      );
-    }
-
-    // 3. No session + Telegram initData URL → render bootstrap page for Telegram
+    // 2. No session + Telegram initData URL → render bootstrap page for Telegram
+    // Must happen before claim handling, otherwise Telegram WebApp links that
+    // include claim=... will be redirected to OAuth login unnecessarily.
     if (!session) {
       const qp = c.req.query("platform");
       const chatId = c.req.query("chat");
       if (qp === "telegram" && chatId) {
         // Telegram WebApp - render a bootstrap page that extracts initData from hash
         return c.html(renderTelegramBootstrapPage());
+      }
+
+      // 3. No session + ?claim= → redirect to OAuth login (preserving returnUrl)
+      if (c.req.query("claim")) {
+        const currentUrl = new URL(c.req.url);
+        const returnUrl = `${currentUrl.pathname}${currentUrl.search}`;
+        return c.redirect(
+          `/settings/oauth/login?returnUrl=${encodeURIComponent(returnUrl)}`
+        );
       }
 
       return c.html(
@@ -527,21 +698,22 @@ export function createSettingsPageRoutes(
             claimData.channelId
           );
 
-          // Bind OAuth session to the claimed platform identity for subsequent
-          // authorization checks on config/auth APIs.
-          const claimedSession: SettingsTokenPayload = {
-            ...session,
-            platform: claimData.platform,
-            channelId: claimData.channelId,
-            userId: claimData.platformUserId,
-          };
-          setSettingsSessionCookie(c, claimedSession);
+          // Link platform identity → OAuth user for future initData sessions
+          await claimService.linkPlatformIdentity(
+            claimData.platform,
+            claimData.platformUserId,
+            oauthUserId
+          );
 
           logger.info("Claim processed, access granted", {
             oauthUserId,
             platform: claimData.platform,
             channelId: claimData.channelId,
           });
+
+          config.platformRegistry
+            ?.get(claimData.platform)
+            ?.notifyIdentityLinked?.(claimData.channelId);
 
           // Redirect to clean URL (strip claim param, keep agent/channel params)
           const cleanUrl = new URL(c.req.url);
@@ -565,6 +737,18 @@ export function createSettingsPageRoutes(
               });
           }
 
+          // Bind OAuth session to the claimed platform identity for subsequent
+          // authorization checks on config/auth APIs.
+          const resolvedAgentId = c.req.query("agent") || binding?.agentId;
+          const claimedSession: SettingsTokenPayload = {
+            ...session,
+            platform: claimData.platform,
+            channelId: claimData.channelId,
+            userId: claimData.platformUserId,
+            ...(resolvedAgentId && { agentId: resolvedAgentId }),
+          };
+          setSettingsSessionCookie(c, claimedSession);
+
           // If no agent was specified, resolve from the claimed channel binding.
           if (!cleanUrl.searchParams.has("agent") && binding) {
             cleanUrl.searchParams.set("agent", binding.agentId);
@@ -575,6 +759,7 @@ export function createSettingsPageRoutes(
           if (!cleanUrl.searchParams.has("channel")) {
             cleanUrl.searchParams.set("channel", claimData.channelId);
           }
+
           return c.redirect(`${cleanUrl.pathname}${cleanUrl.search}`, 303);
         } else {
           logger.warn("Invalid or expired claim code", { claimCode });
@@ -617,7 +802,7 @@ export function createSettingsPageRoutes(
       }
     }
 
-    // For Telegram sessions with channelId, resolve agent via binding
+    // For sessions with channelId, resolve agent via binding or deterministic ID
     if (!agentId && session.channelId && session.platform) {
       const binding = await config.channelBindingService.getBinding(
         session.platform,
@@ -625,39 +810,57 @@ export function createSettingsPageRoutes(
       );
       if (binding) {
         agentId = binding.agentId;
+      } else if (
+        session.platform === "telegram" ||
+        session.platform === "whatsapp"
+      ) {
+        // Deterministic agent ID for Telegram/WhatsApp — no binding needed
+        const isGroup = session.channelId.startsWith("-");
+        agentId = platformAgentId(
+          session.platform,
+          session.userId,
+          session.channelId,
+          isGroup
+        );
       }
     }
 
     // Verify OAuth sessions have access to the resolved agent
     if (agentId && session.oauthUserId) {
-      const channels = await claimService.getAccessibleChannels(
-        session.oauthUserId
-      );
-      if (channels.length === 0) {
-        return c.html(
-          renderErrorPage(
-            "No channels configured. Use /configure in a chat first."
-          ),
-          403
-        );
-      }
+      // Deterministic platform agents are owned by the session user — no binding check needed
+      const isDeterministicAgent =
+        session.platform === "telegram" || session.platform === "whatsapp";
 
-      // Check the agent is reachable from an accessible channel
-      const accessibleAgentIds = new Set<string>();
-      for (const ch of channels) {
-        const binding = await config.channelBindingService.getBinding(
-          ch.platform,
-          ch.channelId
+      if (!isDeterministicAgent && session.agentId !== agentId) {
+        const channels = await claimService.getAccessibleChannels(
+          session.oauthUserId
         );
-        if (binding) accessibleAgentIds.add(binding.agentId);
-      }
-      if (!accessibleAgentIds.has(agentId)) {
-        return c.html(
-          renderErrorPage(
-            "You don't have access to this agent. Use /configure in the chat to get access."
-          ),
-          403
-        );
+        if (channels.length === 0) {
+          return c.html(
+            renderErrorPage(
+              "No channels configured. Use /configure in a chat first."
+            ),
+            403
+          );
+        }
+
+        // Check the agent is reachable from an accessible channel
+        const accessibleAgentIds = new Set<string>();
+        for (const ch of channels) {
+          const binding = await config.channelBindingService.getBinding(
+            ch.platform,
+            ch.channelId
+          );
+          if (binding) accessibleAgentIds.add(binding.agentId);
+        }
+        if (!accessibleAgentIds.has(agentId)) {
+          return c.html(
+            renderErrorPage(
+              "You don't have access to this agent. Use /configure in the chat to get access."
+            ),
+            403
+          );
+        }
       }
     }
 
@@ -704,10 +907,18 @@ export function createSettingsPageRoutes(
           return c.redirect(`/settings?agent=${agents[0].agentId}`, 303);
         }
 
-        // Build a synthetic payload for the picker page
+        // Build a synthetic payload for the picker page.
+        // Prefer human-readable identifiers: email > name > platform userId > oauthUserId
+        const displayUserId =
+          session.email ||
+          session.name ||
+          (session.userId !== session.oauthUserId ? session.userId : null) ||
+          session.oauthUserId ||
+          session.userId;
         const syntheticPayload: SettingsTokenPayload = {
-          userId: session.oauthUserId,
-          platform: channels[0]?.platform || "unknown",
+          userId: displayUserId,
+          platform: channels[0]?.platform || session.platform || "unknown",
+          channelId: session.channelId || channels[0]?.channelId,
           exp: session.exp,
         };
         return c.html(renderPickerPage(syntheticPayload, agents));
@@ -749,9 +960,15 @@ export function createSettingsPageRoutes(
     }
 
     // Build payload for rendering
+    // For Telegram/WhatsApp, use the platform userId (e.g. "6570514069"), not the opaque OAuth ID
+    const effectivePlatform = platformParam || session.platform || "unknown";
+    const isDeterministic =
+      effectivePlatform === "telegram" || effectivePlatform === "whatsapp";
     const payload: SettingsTokenPayload = {
-      userId: session.oauthUserId || session.userId,
-      platform: platformParam || session.platform || "unknown",
+      userId: isDeterministic
+        ? session.userId
+        : session.oauthUserId || session.userId,
+      platform: effectivePlatform,
       channelId: channelParam || session.channelId,
       agentId,
       exp: session.exp,
@@ -840,6 +1057,16 @@ export function createSettingsPageRoutes(
     return c.json({ success: true });
   });
 
+  // GET /settings/logout — Clear session cookie (for testing/re-auth)
+  app.get("/settings/logout", async (c) => {
+    clearSettingsSessionCookie(c);
+    return c.html(
+      renderErrorPage(
+        "Session cleared. Use /configure to get a new settings link."
+      )
+    );
+  });
+
   return app;
 }
 
@@ -903,11 +1130,15 @@ function renderTelegramBootstrapPage(): string {
           body: JSON.stringify({ initData: initData, chatId: chatId })
         });
         if (resp.ok) {
-          var url = new URL(window.location.href);
-          url.hash = '';
-          url.search = '';
-          window.history.replaceState({}, '', url.pathname);
-          window.location.replace('/settings');
+          var rp = new URLSearchParams(window.location.search);
+          rp.delete('platform');
+          rp.delete('chat');
+          var redirectUrl = '/settings' + (rp.toString() ? '?' + rp.toString() : '');
+          var cleanUrl = new URL(window.location.href);
+          cleanUrl.hash = '';
+          cleanUrl.search = '';
+          window.history.replaceState({}, '', cleanUrl.pathname);
+          window.location.replace(redirectUrl);
           return;
         }
         var result = await resp.json().catch(function () { return {}; });

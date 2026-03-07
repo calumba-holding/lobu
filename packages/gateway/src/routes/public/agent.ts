@@ -55,7 +55,7 @@ const NixConfigSchema = z.object({
 const CreateAgentRequestSchema = z.object({
   provider: z.string().default("claude").optional(),
   model: z.string().optional(),
-  agentId: z.string().optional(),
+  agentId: z.string().min(1).optional(),
   networkConfig: NetworkConfigSchema.optional(),
   mcpServers: z.record(z.string(), McpServerConfigSchema).optional(),
   nix: NixConfigSchema.optional(),
@@ -459,7 +459,7 @@ export function createAgentApi(
       if (error) return c.json({ success: false, error }, 400);
     }
 
-    const agentId = requestedAgentId || randomUUID();
+    const agentId = requestedAgentId?.trim() || randomUUID();
     const conversationId = agentId;
     const channelId = `api-${agentId.slice(0, 8)}`;
     const deploymentName = `api-${agentId.slice(0, 8)}`;

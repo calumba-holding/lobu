@@ -19,12 +19,12 @@ import {
 import type { AgentMetadataStore } from "../../auth/agent-metadata-store";
 import type { AgentSettingsStore } from "../../auth/settings";
 import {
-  type ClaimService,
   buildClaimSettingsUrl,
+  type ClaimService,
 } from "../../auth/settings/claim-service";
 import type { UserAgentsStore } from "../../auth/user-agents-store";
-import type { ChannelBindingService } from "../../channels";
 import type { QueueProducer } from "../../infrastructure/queue/queue-producer";
+import type { SystemMessageLimiter } from "../../infrastructure/redis/system-message-limiter";
 import {
   buildMessagePayload,
   resolveAgentId,
@@ -78,12 +78,12 @@ export class WhatsAppMessageHandler {
   private isRunning = false;
   private authAdapter?: WhatsAppAuthAdapter;
   private fileHandler?: WhatsAppFileHandler;
-  private channelBindingService?: ChannelBindingService;
   private agentSettingsStore?: AgentSettingsStore;
   private transcriptionService?: TranscriptionService;
   private userAgentsStore?: UserAgentsStore;
   private agentMetadataStore?: AgentMetadataStore;
   private claimService?: ClaimService;
+  private systemMessageLimiter?: SystemMessageLimiter;
 
   constructor(
     private client: BaileysClient,
@@ -92,13 +92,6 @@ export class WhatsAppMessageHandler {
     _sessionManager: ISessionManager, // Reserved for future use
     private agentOptions: AgentOptions
   ) {}
-
-  /**
-   * Set the channel binding service (optional)
-   */
-  setChannelBindingService(service: ChannelBindingService): void {
-    this.channelBindingService = service;
-  }
 
   /**
    * Set the agent settings store (optional)
@@ -126,43 +119,78 @@ export class WhatsAppMessageHandler {
     this.claimService = service;
   }
 
+  setSystemMessageLimiter(limiter: SystemMessageLimiter): void {
+    this.systemMessageLimiter = limiter;
+  }
+
   /**
-   * Send a configuration prompt for WhatsApp.
-   * WhatsApp always uses first-user fallback for groups (limited admin API).
+   * Send a setup prompt when the agent has no provider configured.
+   * Throttled to avoid spamming the user on repeated messages.
    */
-  private async sendWhatsAppConfigPrompt(
-    context: WhatsAppContext
-  ): Promise<boolean> {
-    if (!this.userAgentsStore || !this.agentMetadataStore) {
-      return false;
+  private async sendProviderSetupPrompt(
+    context: WhatsAppContext,
+    agentId: string
+  ): Promise<void> {
+    if (!this.claimService) {
+      logger.warn("ClaimService not available for provider setup prompt");
+      return;
     }
 
-    try {
-      if (!this.claimService) {
-        logger.warn("ClaimService not available for config prompt");
-        return false;
-      }
-
+    const sendPrompt = async () => {
       const userId = context.senderE164 || context.senderJid;
-
-      const claimCode = await this.claimService.createClaim(
+      const claimCode = await this.claimService!.createClaim(
         "whatsapp",
         context.chatJid,
         userId
       );
       const configUrl = buildClaimSettingsUrl(claimCode);
-
       await this.client.sendMessage(context.chatJid, {
-        text: `Welcome! To get started, please configure which agent should handle messages here.\n\nConfigure: ${configUrl}`,
+        text: `Welcome! To get started, set up an AI provider (like Claude or OpenAI) so I can respond to your messages.\n\nSet up: ${configUrl}`,
       });
-
       logger.info(
-        `Sent WhatsApp configuration prompt to ${userId} in ${context.chatJid}`
+        { agentId, userId, chatJid: context.chatJid },
+        "Sent provider setup prompt"
       );
-      return true;
+    };
+
+    await this.sendThrottled(
+      `provider_setup:whatsapp:${context.chatJid}:${agentId}`,
+      sendPrompt,
+      { chatJid: context.chatJid, agentId }
+    );
+  }
+
+  /**
+   * Run a send function with optional throttling via systemMessageLimiter.
+   */
+  private async sendThrottled(
+    dedupeKey: string,
+    sendFn: () => Promise<void>,
+    logContext: Record<string, unknown>
+  ): Promise<void> {
+    if (!this.systemMessageLimiter) {
+      try {
+        await sendFn();
+      } catch (error) {
+        logger.warn(
+          { error: String(error), ...logContext },
+          "Failed to send throttled message"
+        );
+      }
+      return;
+    }
+
+    try {
+      await this.systemMessageLimiter.sendOnce(dedupeKey, sendFn, {
+        sentTtlSeconds: 3600,
+        lockTtlSeconds: 30,
+        failOpen: false,
+      });
     } catch (error) {
-      logger.error("Failed to send WhatsApp config prompt", { error });
-      return false;
+      logger.warn(
+        { error: String(error), ...logContext },
+        "Failed to send throttled message"
+      );
     }
   }
 
@@ -713,17 +741,44 @@ export class WhatsAppMessageHandler {
       "Message received"
     );
 
-    // Resolve agent ID from channel binding or space fallback
-    const resolved = await resolveAgentId({
+    // Resolve agent ID (deterministic for WhatsApp)
+    const { agentId } = await resolveAgentId({
       platform: "whatsapp",
       userId: context.senderE164 || context.senderJid,
       channelId: context.chatJid,
       isGroup: context.isGroup,
-      channelBindingService: this.channelBindingService,
-      sendConfigPrompt: () => this.sendWhatsAppConfigPrompt(context),
     });
-    if (resolved.promptSent) return;
-    const agentId = resolved.agentId;
+
+    // Auto-create agent metadata on first message
+    if (this.agentMetadataStore) {
+      const existing = await this.agentMetadataStore.getMetadata(agentId);
+      if (!existing) {
+        const userId = context.senderE164 || context.senderJid;
+        const agentName = context.isGroup
+          ? `WhatsApp Group ${context.groupSubject || context.chatJid}`
+          : `WhatsApp ${context.senderName || userId}`;
+        await this.agentMetadataStore.createAgent(
+          agentId,
+          agentName,
+          "whatsapp",
+          userId
+        );
+        await this.userAgentsStore?.addAgent("whatsapp", userId, agentId);
+        logger.info(
+          { agentId, userId },
+          "Auto-created agent for WhatsApp user"
+        );
+      }
+    }
+
+    // Check if agent has providers configured — send setup prompt if not
+    if (this.agentSettingsStore) {
+      const settings = await this.agentSettingsStore.getSettings(agentId);
+      if (!settings?.installedProviders?.length) {
+        await this.sendProviderSetupPrompt(context, agentId);
+        return;
+      }
+    }
 
     // Handle /configure command - send settings magic link
     if (body.trim().toLowerCase() === "/configure") {
@@ -815,13 +870,14 @@ Please let the user know:
           // Transcription not configured or failed - provide context for Claude
           const providers = result.availableProviders;
           if (result.error.includes("No transcription provider configured")) {
+            await this.sendProviderSetupPrompt(context, agentId);
             transcribedBody = `[Voice message received - transcription unavailable]
 
 The user sent a voice message but no transcription provider is configured.
 Available providers that can be configured: ${providers.join(", ")}
 
 To enable voice transcription:
-1. Use the Configure tool to generate a settings link for the user
+1. Use the Sudo tool to generate a settings link for the user
 2. They can add their preferred provider's API key (OPENAI_API_KEY, GOOGLE_API_KEY, or ELEVENLABS_API_KEY)
 3. Optionally set TRANSCRIPTION_PROVIDER to choose a specific provider (openai, gemini, elevenlabs)
 
