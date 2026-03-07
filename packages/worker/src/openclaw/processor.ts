@@ -125,9 +125,7 @@ export class OpenClawProgressProcessor {
       }
 
       case "auto_compaction_start": {
-        this.chronologicalOutput +=
-          "🗜️ *Compacting context...*\n" +
-          "📝 *[Memory flush] Context is about to be compacted. Save important information to your memory before context is lost.*\n";
+        this.chronologicalOutput += "🗜️ *Compacting context...*\n";
         return true;
       }
 
@@ -201,6 +199,10 @@ export class OpenClawProgressProcessor {
 
   getCurrentThinking(): string | null {
     return this.currentThinking || null;
+  }
+
+  getOutputSnapshot(): string {
+    return this.chronologicalOutput.trim();
   }
 
   reset(): void {

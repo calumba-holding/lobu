@@ -1,3 +1,9 @@
+import type {
+  LinkMemoryRequest,
+  RecallMemoryRequest,
+  SaveMemoryRequest,
+  UpdateMemoryRequest,
+} from "@lobu/core";
 import { createLogger } from "@lobu/core";
 import { Type } from "@sinclair/typebox";
 
@@ -10,6 +16,7 @@ type PluginLogger = {
 
 const AUTH_REQUIRED_MSG =
   'Owletto memory is not connected. Ask the user to authenticate by calling ConnectService(id="owletto").';
+const MEMORY_MCP_ID = "memory";
 
 const fallbackLogger = createLogger("openclaw-owletto-plugin");
 
@@ -54,13 +61,13 @@ function getHookRegistrar(
 }
 
 /**
- * Call an Owletto MCP tool through the gateway proxy.
+ * Call a typed memory tool through the gateway's virtual `memory` MCP.
  *
  * Returns `{ content, isError }` on success, or `null` when the MCP is
  * unreachable / not configured.  Throws on auth failure so callers can
  * surface the login prompt.
  */
-async function callOwlettoTool(
+async function callMemoryTool(
   gatewayUrl: string,
   workerToken: string,
   toolName: string,
@@ -69,7 +76,7 @@ async function callOwlettoTool(
   content: Array<{ type: string; text: string }>;
   isError: boolean;
 } | null> {
-  const url = `${gatewayUrl}/mcp/owletto/tools/${encodeURIComponent(toolName)}`;
+  const url = `${gatewayUrl}/mcp/${MEMORY_MCP_ID}/tools/${encodeURIComponent(toolName)}`;
   const response = await fetch(url, {
     method: "POST",
     headers: {
@@ -117,8 +124,22 @@ async function callOwlettoTool(
     throw new Error(errMsg || "Unknown MCP error");
   }
 
-  const content = Array.isArray(data.content) ? data.content : [];
-  return { content, isError: !!data.isError };
+  if (data.isError === true) {
+    const errMsg = String(data.error || "Memory call failed");
+    if (
+      /ConnectService|invalid.token|expired|unauthorized|authentication/i.test(
+        errMsg
+      )
+    ) {
+      throw new OwlettoAuthError(errMsg);
+    }
+    throw new Error(errMsg);
+  }
+
+  const content = Array.isArray(data.content)
+    ? (data.content as Array<{ type: string; text: string }>)
+    : [];
+  return { content, isError: false };
 }
 
 class OwlettoAuthError extends Error {
@@ -135,6 +156,46 @@ function extractTextFromContent(
     .filter((c) => c.type === "text" && typeof c.text === "string")
     .map((c) => c.text)
     .join("\n");
+}
+
+async function executeMemoryTool(
+  gatewayUrl: string,
+  workerToken: string,
+  toolName: string,
+  args: Record<string, unknown>,
+  failurePrefix: string
+) {
+  try {
+    const result = await callMemoryTool(
+      gatewayUrl,
+      workerToken,
+      toolName,
+      args
+    );
+    if (!result) {
+      return {
+        content: [{ type: "text", text: AUTH_REQUIRED_MSG }],
+        details: {},
+      };
+    }
+    return { content: result.content, details: {} };
+  } catch (err) {
+    if (err instanceof OwlettoAuthError) {
+      return {
+        content: [{ type: "text", text: AUTH_REQUIRED_MSG }],
+        details: {},
+      };
+    }
+    return {
+      content: [
+        {
+          type: "text",
+          text: `${failurePrefix}: ${err instanceof Error ? err.message : String(err)}`,
+        },
+      ],
+      details: {},
+    };
+  }
 }
 
 const plugin = {
@@ -167,12 +228,14 @@ const plugin = {
       if (typeof prompt !== "string" || !prompt.trim()) return;
 
       try {
-        const result = await callOwlettoTool(
+        const result = await callMemoryTool(
           gatewayUrl,
           workerToken,
-          "search",
+          "RecallMemory",
           {
             query: prompt,
+            limit: 6,
+            sort: { field: "updatedAt", direction: "desc" },
           }
         );
 
@@ -261,7 +324,8 @@ const plugin = {
         if (combined.length < 16 || combined.includes("<owletto-memory>"))
           return;
 
-        await callOwlettoTool(gatewayUrl, workerToken, "save_content", {
+        await callMemoryTool(gatewayUrl, workerToken, "SaveMemory", {
+          type: "observation",
           content: combined,
         });
       } catch {
@@ -273,104 +337,126 @@ const plugin = {
     // Register explicit tools
     if (registerTool) {
       registerTool({
-        name: "search_memory",
-        label: "Search Memory",
+        name: "RecallMemory",
+        label: "Recall Memory",
         description:
-          "Search long-term memory for relevant past conversations and facts. " +
-          "Use when the user asks what you remember, references past discussions, " +
-          "or when context from previous sessions would help.",
+          "Recall long-term memories using semantic query + optional filters.",
         parameters: Type.Object({
           query: Type.String({
-            description: "Search query — keywords or a question",
+            description: "Recall query — keywords or a question",
           }),
+          limit: Type.Optional(
+            Type.Number({
+              description: "Maximum number of memories to retrieve",
+            })
+          ),
         }),
-        execute: async (_toolCallId: string, args: { query: string }) => {
-          try {
-            const result = await callOwlettoTool(
-              gatewayUrl,
-              workerToken,
-              "search",
-              { query: args.query }
-            );
-            if (!result) {
-              return {
-                content: [{ type: "text", text: AUTH_REQUIRED_MSG }],
-                details: {},
-              };
-            }
-            if (result.content.length === 0) {
-              return {
-                content: [
-                  { type: "text", text: "No memories found for that query." },
-                ],
-                details: {},
-              };
-            }
-            return { content: result.content, details: {} };
-          } catch (err) {
-            if (err instanceof OwlettoAuthError) {
-              return {
-                content: [{ type: "text", text: AUTH_REQUIRED_MSG }],
-                details: {},
-              };
-            }
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: `Memory search failed: ${err instanceof Error ? err.message : String(err)}`,
-                },
-              ],
-              details: {},
-            };
-          }
-        },
+        execute: async (_toolCallId: string, args: RecallMemoryRequest) =>
+          executeMemoryTool(
+            gatewayUrl,
+            workerToken,
+            "RecallMemory",
+            args as Record<string, unknown>,
+            "Memory recall failed"
+          ),
       });
 
       registerTool({
-        name: "save_content",
-        label: "Store Memory",
-        description:
-          "Explicitly save an important fact or piece of information to long-term memory. " +
-          "Use when the user asks you to remember something specific.",
+        name: "SaveMemory",
+        label: "Save Memory",
+        description: "Persist a typed long-term memory record.",
         parameters: Type.Object({
-          text: Type.String({
-            description: "The fact or information to remember",
+          type: Type.String({
+            description:
+              "Memory type: identity, preference, decision, fact, event, observation, todo",
+          }),
+          content: Type.String({
+            description: "Memory content",
+          }),
+          tags: Type.Optional(
+            Type.Array(Type.String(), {
+              description: "Optional tags",
+            })
+          ),
+          importance: Type.Optional(
+            Type.Number({
+              description: "Optional priority score",
+            })
+          ),
+        }),
+        execute: async (_toolCallId: string, args: SaveMemoryRequest) =>
+          executeMemoryTool(
+            gatewayUrl,
+            workerToken,
+            "SaveMemory",
+            args as unknown as Record<string, unknown>,
+            "Memory save failed"
+          ),
+      });
+
+      registerTool({
+        name: "UpdateMemory",
+        label: "Update Memory",
+        description: "Update an existing memory record by ID.",
+        parameters: Type.Object({
+          memoryId: Type.String({
+            description: "Memory record ID to update",
+          }),
+          type: Type.Optional(
+            Type.String({
+              description: "Optional updated memory type",
+            })
+          ),
+          content: Type.Optional(
+            Type.String({
+              description: "Updated content",
+            })
+          ),
+          tags: Type.Optional(
+            Type.Array(Type.String(), {
+              description: "Updated tags",
+            })
+          ),
+          importance: Type.Optional(
+            Type.Number({
+              description: "Updated importance",
+            })
+          ),
+        }),
+        execute: async (_toolCallId: string, args: UpdateMemoryRequest) =>
+          executeMemoryTool(
+            gatewayUrl,
+            workerToken,
+            "UpdateMemory",
+            args as unknown as Record<string, unknown>,
+            "Memory update failed"
+          ),
+      });
+
+      registerTool({
+        name: "LinkMemory",
+        label: "Link Memory",
+        description: "Create a relation between two memory records.",
+        parameters: Type.Object({
+          fromMemoryId: Type.String({
+            description: "Source memory ID",
+          }),
+          toMemoryId: Type.String({
+            description: "Target memory ID",
+          }),
+          relation: Type.String({
+            description:
+              "Relation type: related_to, updates, contradicts, caused_by, result_of, part_of",
           }),
         }),
-        execute: async (_toolCallId: string, args: { text: string }) => {
-          try {
-            const result = await callOwlettoTool(
-              gatewayUrl,
-              workerToken,
-              "save_content",
-              { content: args.text }
-            );
-            if (!result) {
-              return {
-                content: [{ type: "text", text: AUTH_REQUIRED_MSG }],
-                details: {},
-              };
-            }
-            return { content: result.content, details: {} };
-          } catch (err) {
-            if (err instanceof OwlettoAuthError) {
-              return {
-                content: [{ type: "text", text: AUTH_REQUIRED_MSG }],
-                details: {},
-              };
-            }
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: `Memory store failed: ${err instanceof Error ? err.message : String(err)}`,
-                },
-              ],
-              details: {},
-            };
-          }
-        },
+        execute: async (_toolCallId: string, args: LinkMemoryRequest) =>
+          executeMemoryTool(
+            gatewayUrl,
+            workerToken,
+            "LinkMemory",
+            args as unknown as Record<string, unknown>,
+            "Memory link failed"
+          ),
       });
     }
 

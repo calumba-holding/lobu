@@ -24,7 +24,7 @@ export const DEFAULT_PROVIDER_BASE_URL_ENV: Record<string, string> = {
 export const DEFAULT_PROVIDER_MODELS: Record<string, string> = {
   anthropic: "claude-sonnet-4-20250514",
   openai: "gpt-4.1",
-  "openai-codex": "gpt-5.1-codex-mini",
+  "openai-codex": "gpt-5.1-codex-max",
   google: "gemini-2.5-pro",
   "z-ai": "glm-4.7",
 };

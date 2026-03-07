@@ -10,12 +10,12 @@ import {
   connectService,
   disconnectService,
   generateAudio,
+  generateImage,
   getChannelHistory,
-  configure,
-  installSkill,
   listReminders,
   scheduleReminder,
   searchSkills,
+  sudo,
   uploadUserFile,
 } from "../shared/tool-implementations";
 
@@ -151,45 +151,41 @@ export function createOpenClawCustomTools(params: {
     }),
 
     defineTool({
-      name: "InstallSkill",
+      name: "Sudo",
       description:
-        "Install or upgrade a skill/MCP server. Resolves the full manifest and sends a settings link for the user to confirm. Dependencies (nix packages, network permissions, MCP servers) are pre-filled. Use upgrade=true for already-installed skills to re-fetch the latest version.",
+        "Elevated setup tool for installing/upgrading capabilities and opening settings approvals. Use id+optional upgrade to install or update a skill/MCP from SearchSkills. Use reason (+ optional setup keys) for package requests, provider auth, MCP setup, and network grants.",
       parameters: Type.Object({
-        id: Type.String({
-          description: "Skill or MCP server ID from SearchSkills results",
-        }),
+        id: Type.Optional(
+          Type.String({
+            description:
+              "Skill or MCP server ID from SearchSkills results (for install/upgrade flow)",
+          })
+        ),
         upgrade: Type.Optional(
           Type.Boolean({
             description:
               "Set to true to upgrade an already-installed skill to the latest version from its registry",
           })
         ),
-      }),
-      run: (args) => installSkill(gw, args),
-    }),
-
-    defineTool({
-      name: "Configure",
-      description:
-        "Open the agent settings page for the user to configure their agent. Use when the user needs to add API keys, enable skills, configure MCP servers, approve network domains, or change other settings. Also use when a network request fails with 'Domain not allowed' — pass the blocked domain in prefillGrants.",
-      parameters: Type.Object({
-        reason: Type.String({
-          description:
-            "Brief explanation of what the user should configure (e.g., 'add your OpenAI API key for voice transcription')",
-        }),
+        reason: Type.Optional(
+          Type.String({
+            description:
+              "Brief explanation of what the user should approve/configure (required when id is not provided)",
+          })
+        ),
         message: Type.Optional(
           Type.String({
             description:
               "Optional message to display on the settings page with instructions",
           })
         ),
-        prefillProviders: Type.Optional(
+        providers: Type.Optional(
           Type.Array(Type.String(), {
             description:
-              "Optional provider IDs to pre-fill auth setup (e.g., 'openai', 'claude')",
+              "Optional provider IDs to open auth setup (e.g., 'openai', 'claude')",
           })
         ),
-        prefillSkills: Type.Optional(
+        skills: Type.Optional(
           Type.Array(
             Type.Object({
               repo: Type.String({
@@ -204,10 +200,10 @@ export function createOpenClawCustomTools(params: {
                 })
               ),
             }),
-            { description: "Optional list of skills to pre-fill" }
+            { description: "Optional list of skills to add in settings" }
           )
         ),
-        prefillMcpServers: Type.Optional(
+        mcpServers: Type.Optional(
           Type.Array(
             Type.Object({
               id: Type.String({
@@ -237,23 +233,81 @@ export function createOpenClawCustomTools(params: {
                 })
               ),
             }),
-            { description: "Optional list of MCP servers to pre-fill" }
+            { description: "Optional list of MCP servers to add in settings" }
           )
         ),
-        prefillNixPackages: Type.Optional(
+        nixPackages: Type.Optional(
           Type.Array(Type.String(), {
             description:
-              "Optional list of nix packages to pre-fill (e.g., 'ffmpeg', 'imagemagick')",
+              "Optional list of nix packages to add (e.g., 'ffmpeg', 'imagemagick')",
           })
         ),
-        prefillGrants: Type.Optional(
+        grants: Type.Optional(
           Type.Array(Type.String(), {
             description:
-              "Optional list of domain patterns to pre-fill as grants (e.g., 'api.example.com')",
+              "Optional list of domain patterns to request as grants (e.g., 'api.example.com')",
           })
         ),
       }),
-      run: (args) => configure(gw, args),
+      run: (args) => sudo(gw, args),
+    }),
+
+    defineTool({
+      name: "GenerateImage",
+      description:
+        "Generate an image from a text prompt and send it to the user. Use when the user asks for image generation, visual concepts, posters, illustrations, or edits that can be done from prompt instructions.",
+      parameters: Type.Object({
+        prompt: Type.String({
+          description: "The image prompt to generate",
+        }),
+        size: Type.Optional(
+          Type.Union(
+            [
+              Type.Literal("1024x1024"),
+              Type.Literal("1024x1536"),
+              Type.Literal("1536x1024"),
+              Type.Literal("auto"),
+            ],
+            {
+              description: "Output image size (default: 1024x1024)",
+            }
+          )
+        ),
+        quality: Type.Optional(
+          Type.Union(
+            [
+              Type.Literal("low"),
+              Type.Literal("medium"),
+              Type.Literal("high"),
+              Type.Literal("auto"),
+            ],
+            {
+              description: "Image quality (default: auto)",
+            }
+          )
+        ),
+        background: Type.Optional(
+          Type.Union(
+            [
+              Type.Literal("transparent"),
+              Type.Literal("opaque"),
+              Type.Literal("auto"),
+            ],
+            {
+              description: "Background style (default: auto)",
+            }
+          )
+        ),
+        format: Type.Optional(
+          Type.Union(
+            [Type.Literal("png"), Type.Literal("jpeg"), Type.Literal("webp")],
+            {
+              description: "Output image format (default: png)",
+            }
+          )
+        ),
+      }),
+      run: (args) => generateImage(gw, args),
     }),
 
     defineTool({

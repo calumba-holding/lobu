@@ -14,6 +14,35 @@ export type ToolPolicy = {
   bashPolicy: BashCommandPolicy;
 };
 
+const DEFAULT_PACKAGE_MANAGER_DENY_PREFIXES = [
+  "apt ",
+  "apt-get ",
+  "yum ",
+  "dnf ",
+  "apk ",
+  "pacman ",
+  "zypper ",
+  "brew ",
+  "nix-shell ",
+  "nix-env ",
+  "nix profile ",
+  "sudo apt ",
+  "sudo apt-get ",
+  "sudo yum ",
+  "sudo dnf ",
+  "sudo apk ",
+  "sudo pacman ",
+  "sudo zypper ",
+  "sudo brew ",
+  "sudo nix-shell ",
+  "sudo nix-env ",
+  "sudo nix profile ",
+];
+
+const PACKAGE_MANAGER_HINT_PREFIXES = DEFAULT_PACKAGE_MANAGER_DENY_PREFIXES.map(
+  (prefix) => prefix.toLowerCase()
+);
+
 function normalizePattern(pattern: string): string {
   return pattern.trim();
 }
@@ -99,7 +128,10 @@ export function buildToolPolicy(params: {
     bashPolicy: {
       allowAll: bashAllowAll,
       allowPrefixes: bashAllowPrefixes,
-      denyPrefixes: bashDenyPrefixes,
+      denyPrefixes: [
+        ...DEFAULT_PACKAGE_MANAGER_DENY_PREFIXES,
+        ...bashDenyPrefixes,
+      ],
     },
   };
 }
@@ -149,10 +181,18 @@ export function enforceBashCommandPolicy(
   }
 
   const normalizedCommand = trimmed.toLowerCase();
-  const denyMatch = policy.denyPrefixes.some((prefix) =>
+  const denyMatchPrefix = policy.denyPrefixes.find((prefix) =>
     normalizedCommand.startsWith(prefix.toLowerCase())
   );
-  if (denyMatch) {
+  if (denyMatchPrefix) {
+    const needsSudoToolHint = PACKAGE_MANAGER_HINT_PREFIXES.some((prefix) =>
+      denyMatchPrefix.toLowerCase().startsWith(prefix)
+    );
+    if (needsSudoToolHint) {
+      throw new Error(
+        "Direct package manager commands are blocked in Bash. Use the Sudo tool with nixPackages instead."
+      );
+    }
     throw new Error("Bash command denied by policy");
   }
 

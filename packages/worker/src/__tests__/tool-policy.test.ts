@@ -57,7 +57,8 @@ describe("buildToolPolicy", () => {
     expect(policy.strictMode).toBe(false);
     expect(policy.bashPolicy.allowAll).toBe(false);
     expect(policy.bashPolicy.allowPrefixes).toEqual([]);
-    expect(policy.bashPolicy.denyPrefixes).toEqual([]);
+    expect(policy.bashPolicy.denyPrefixes).toContain("apt-get ");
+    expect(policy.bashPolicy.denyPrefixes).toContain("nix-shell ");
   });
 
   test("merges toolsConfig with params", () => {
@@ -88,7 +89,8 @@ describe("buildToolPolicy", () => {
     const policy = buildToolPolicy({
       disallowedTools: ["Bash(rm:*)"],
     });
-    expect(policy.bashPolicy.denyPrefixes).toEqual(["rm"]);
+    expect(policy.bashPolicy.denyPrefixes).toContain("rm");
+    expect(policy.bashPolicy.denyPrefixes).toContain("apt ");
   });
 
   test("detects bash allowAll when Bash is in allowed patterns", () => {
@@ -201,6 +203,15 @@ describe("enforceBashCommandPolicy", () => {
     };
     expect(() => enforceBashCommandPolicy("RM -rf /", policy)).toThrow(
       "Bash command denied by policy"
+    );
+  });
+
+  test("package manager commands are blocked with sudo guidance", () => {
+    const policy = buildToolPolicy({});
+    expect(() =>
+      enforceBashCommandPolicy("apt-get install -y ffmpeg", policy.bashPolicy)
+    ).toThrow(
+      "Direct package manager commands are blocked in Bash. Use the Sudo tool with nixPackages instead."
     );
   });
 

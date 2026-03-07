@@ -29,10 +29,15 @@ import type {
 import { WorkspaceManager } from "../core/workspace";
 import { HttpWorkerTransport } from "../gateway/gateway-integration";
 import { generateCustomInstructions } from "../instructions/builder";
+import { fetchAudioProviderSuggestions } from "../shared/audio-provider-suggestions";
 import {
   getApiKeyEnvVarForProvider,
   getProviderAuthHintFromError,
 } from "../shared/provider-auth-hints";
+import {
+  type GatewayParams,
+  generateImage,
+} from "../shared/tool-implementations";
 import { createOpenClawCustomTools } from "./custom-tools";
 import { OpenClawCoreInstructionProvider } from "./instructions";
 import {
@@ -58,6 +63,186 @@ import {
 import { createOpenClawTools } from "./tools";
 
 const logger = createLogger("worker");
+
+const MEMORY_FLUSH_STATE_CUSTOM_TYPE = "lobu.memory_flush_state";
+const APPROX_IMAGE_TOKENS = 1200;
+
+interface ResolvedMemoryFlushConfig {
+  enabled: boolean;
+  softThresholdTokens: number;
+  systemPrompt: string;
+  prompt: string;
+}
+
+interface MemoryFlushStateData {
+  compactionCount: number;
+  outcome: "no_reply" | "stored";
+  timestamp: number;
+}
+
+const DEFAULT_MEMORY_FLUSH_CONFIG: ResolvedMemoryFlushConfig = {
+  enabled: true,
+  softThresholdTokens: 4000,
+  systemPrompt: "Session nearing compaction. Store durable memories now.",
+  prompt:
+    "Write any lasting notes to memory using available memory tools. Reply with NO_REPLY if nothing to store.",
+};
+
+function isLikelyImageGenerationRequest(prompt: string): boolean {
+  const lower = prompt.toLowerCase();
+  const explicitToolInstruction =
+    lower.includes("generateimage tool") || lower.includes("use generateimage");
+  const directShortcutEnabled =
+    process.env.WORKER_ENABLE_DIRECT_IMAGE_SHORTCUT === "true";
+  return directShortcutEnabled && explicitToolInstruction;
+}
+
+function extractToolTextContent(result: {
+  content?: Array<{ type?: string; text?: string }>;
+}): string {
+  if (!Array.isArray(result.content)) return "";
+  return result.content
+    .filter(
+      (item): item is { type: string; text: string } =>
+        item?.type === "text" && typeof item.text === "string"
+    )
+    .map((item) => item.text)
+    .join("\n")
+    .trim();
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function readStringOrFallback(
+  value: unknown,
+  fallback: string,
+  allowEmpty = false
+): string {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+  const trimmed = value.trim();
+  if (!trimmed && !allowEmpty) {
+    return fallback;
+  }
+  return allowEmpty ? value : trimmed;
+}
+
+function readNonNegativeNumberOrFallback(
+  value: unknown,
+  fallback: number
+): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return fallback;
+  }
+  return value;
+}
+
+function countCompactionsOnCurrentBranch(
+  sessionManager: Awaited<ReturnType<typeof openOrCreateSessionManager>>
+): number {
+  const branch = sessionManager.getBranch();
+  return branch.reduce((count, entry) => {
+    if (entry.type === "compaction") {
+      return count + 1;
+    }
+    return count;
+  }, 0);
+}
+
+function readLastFlushedCompactionCount(
+  sessionManager: Awaited<ReturnType<typeof openOrCreateSessionManager>>
+): number | null {
+  const branch = sessionManager.getBranch();
+  for (let i = branch.length - 1; i >= 0; i--) {
+    const entry = branch[i];
+    if (!entry) continue;
+    if (entry.type !== "custom") continue;
+    if (entry.customType !== MEMORY_FLUSH_STATE_CUSTOM_TYPE) continue;
+    if (!isRecord(entry.data)) continue;
+    const compactionCount = entry.data.compactionCount;
+    if (
+      typeof compactionCount === "number" &&
+      Number.isFinite(compactionCount) &&
+      compactionCount >= 0
+    ) {
+      return compactionCount;
+    }
+  }
+  return null;
+}
+
+function getLatestAssistantText(
+  messages: unknown[]
+): { text: string; normalizedNoReply: boolean } | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (!isRecord(message) || message.role !== "assistant") continue;
+    const content = message.content;
+
+    let text = "";
+    if (typeof content === "string") {
+      text = content;
+    } else if (Array.isArray(content)) {
+      text = content
+        .flatMap((block) => {
+          if (!isRecord(block)) return [];
+          if (block.type !== "text") return [];
+          return typeof block.text === "string" ? [block.text] : [];
+        })
+        .join("");
+    }
+
+    const normalized = text.trim().toUpperCase();
+    return {
+      text,
+      normalizedNoReply: normalized === "NO_REPLY",
+    };
+  }
+  return null;
+}
+
+export function estimatePromptTokenCost(
+  promptText: string,
+  imageCount: number
+): number {
+  const textTokens = Math.ceil(promptText.length / 4);
+  const imageTokens = Math.max(0, imageCount) * APPROX_IMAGE_TOKENS;
+  return textTokens + imageTokens;
+}
+
+export function resolveMemoryFlushConfig(
+  rawOptions: Record<string, unknown>
+): ResolvedMemoryFlushConfig {
+  const compaction = isRecord(rawOptions.compaction)
+    ? rawOptions.compaction
+    : undefined;
+  const memoryFlush =
+    compaction && isRecord(compaction.memoryFlush)
+      ? compaction.memoryFlush
+      : undefined;
+
+  return {
+    enabled:
+      typeof memoryFlush?.enabled === "boolean"
+        ? memoryFlush.enabled
+        : DEFAULT_MEMORY_FLUSH_CONFIG.enabled,
+    softThresholdTokens: readNonNegativeNumberOrFallback(
+      memoryFlush?.softThresholdTokens,
+      DEFAULT_MEMORY_FLUSH_CONFIG.softThresholdTokens
+    ),
+    systemPrompt: readStringOrFallback(
+      memoryFlush?.systemPrompt,
+      DEFAULT_MEMORY_FLUSH_CONFIG.systemPrompt
+    ),
+    prompt: readStringOrFallback(
+      memoryFlush?.prompt,
+      DEFAULT_MEMORY_FLUSH_CONFIG.prompt
+    ),
+  };
+}
 
 export class OpenClawWorker implements WorkerExecutor {
   private workspaceManager: WorkspaceManager;
@@ -199,6 +384,34 @@ export class OpenClawWorker implements WorkerExecutor {
         `[TIMING] Total worker startup time: ${aiStartTime - executeStartTime}ms`
       );
 
+      if (isLikelyImageGenerationRequest(userPrompt)) {
+        logger.info("Direct image-generation shortcut triggered");
+        const gatewayUrl = process.env.DISPATCHER_URL;
+        const workerToken = process.env.WORKER_TOKEN;
+        if (!gatewayUrl || !workerToken) {
+          throw new Error(
+            "DISPATCHER_URL and WORKER_TOKEN are required for image generation"
+          );
+        }
+
+        const gatewayParams: GatewayParams = {
+          gatewayUrl,
+          workerToken,
+          channelId: this.config.channelId,
+          conversationId: this.config.conversationId,
+          platform: this.config.platform,
+        };
+        const toolResult = await generateImage(gatewayParams, {
+          prompt: userPrompt,
+        });
+        const toolText =
+          extractToolTextContent(toolResult) || "Image request processed.";
+        await this.workerTransport.sendStreamDelta(toolText, false, true);
+        await this.workerTransport.signalDone();
+        logger.info("Direct image-generation shortcut completed");
+        return;
+      }
+
       let firstOutputLogged = false;
 
       const result = await Sentry.startSpan(
@@ -252,15 +465,36 @@ export class OpenClawWorker implements WorkerExecutor {
 
       // Handle result
       if (result.success) {
+        const outputSnapshot = this.progressProcessor.getOutputSnapshot();
+        const hintGatewayUrl = process.env.DISPATCHER_URL;
+        const hintWorkerToken = process.env.WORKER_TOKEN;
+        const audioPermissionHint =
+          hintGatewayUrl && hintWorkerToken
+            ? await this.maybeBuildAudioPermissionHintMessage(
+                outputSnapshot,
+                hintGatewayUrl,
+                hintWorkerToken
+              )
+            : null;
+
         const finalResult = this.progressProcessor.getFinalResult();
         if (finalResult) {
+          const finalText = audioPermissionHint
+            ? `${finalResult.text}\n\n${audioPermissionHint}`
+            : finalResult.text;
           logger.info(
-            `📤 Sending final result (${finalResult.text.length} chars) with deduplication flag`
+            `📤 Sending final result (${finalText.length} chars) with deduplication flag`
           );
           await this.workerTransport.sendStreamDelta(
-            finalResult.text,
+            finalText,
             false,
             finalResult.isFinal
+          );
+        } else if (audioPermissionHint) {
+          logger.info("📤 Sending audio permission settings hint to user");
+          await this.workerTransport.sendStreamDelta(
+            `\n\n${audioPermissionHint}`,
+            false
           );
         } else {
           logger.info(
@@ -312,6 +546,87 @@ export class OpenClawWorker implements WorkerExecutor {
     return this.workspaceManager.getCurrentWorkingDirectory();
   }
 
+  private async maybeRunPreCompactionMemoryFlush(params: {
+    session: Awaited<ReturnType<typeof createAgentSession>>["session"];
+    sessionManager: Awaited<ReturnType<typeof openOrCreateSessionManager>>;
+    settingsManager: SettingsManager;
+    memoryFlushConfig: ResolvedMemoryFlushConfig;
+    incomingPromptText: string;
+    incomingImageCount: number;
+    runSilentPrompt: (prompt: string) => Promise<void>;
+  }): Promise<void> {
+    const {
+      session,
+      sessionManager,
+      settingsManager,
+      memoryFlushConfig,
+      incomingPromptText,
+      incomingImageCount,
+      runSilentPrompt,
+    } = params;
+
+    if (!memoryFlushConfig.enabled) {
+      return;
+    }
+
+    if (!settingsManager.getCompactionEnabled()) {
+      return;
+    }
+
+    const contextUsage = session.getContextUsage();
+    if (!contextUsage) {
+      return;
+    }
+
+    const reserveTokens = settingsManager.getCompactionReserveTokens();
+    const currentCompactionCount =
+      countCompactionsOnCurrentBranch(sessionManager);
+    const lastFlushedCompactionCount =
+      readLastFlushedCompactionCount(sessionManager);
+
+    if (lastFlushedCompactionCount === currentCompactionCount) {
+      return;
+    }
+
+    const incomingPromptTokens = estimatePromptTokenCost(
+      incomingPromptText,
+      incomingImageCount
+    );
+    const thresholdTokens =
+      contextUsage.contextWindow -
+      reserveTokens -
+      memoryFlushConfig.softThresholdTokens;
+    const projectedContextTokens = contextUsage.tokens + incomingPromptTokens;
+
+    if (projectedContextTokens < thresholdTokens) {
+      return;
+    }
+
+    const flushPrompt = `${memoryFlushConfig.systemPrompt}\n\n${memoryFlushConfig.prompt}`;
+    logger.info(
+      `Running silent pre-compaction memory flush: projected=${projectedContextTokens}, threshold=${thresholdTokens}, compactionCount=${currentCompactionCount}`
+    );
+
+    try {
+      await runSilentPrompt(flushPrompt);
+      const lastAssistant = getLatestAssistantText(
+        session.messages as unknown[]
+      );
+      const outcome: MemoryFlushStateData["outcome"] =
+        lastAssistant?.normalizedNoReply === true ? "no_reply" : "stored";
+
+      sessionManager.appendCustomEntry(MEMORY_FLUSH_STATE_CUSTOM_TYPE, {
+        compactionCount: currentCompactionCount,
+        outcome,
+        timestamp: Date.now(),
+      } satisfies MemoryFlushStateData);
+    } catch (error) {
+      logger.warn(
+        `Silent pre-compaction memory flush failed, continuing main prompt: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // AI session
   // ---------------------------------------------------------------------------
@@ -326,6 +641,7 @@ export class OpenClawWorker implements WorkerExecutor {
       unknown
     >;
     const verboseLogging = rawOptions.verboseLogging === true;
+    const memoryFlushConfig = resolveMemoryFlushConfig(rawOptions);
 
     this.progressProcessor.setVerboseLogging(verboseLogging);
 
@@ -680,10 +996,9 @@ Use it when the user references past discussions or you need context.`);
       const basePrompt = session.systemPrompt;
       session.agent.setSystemPrompt(`${basePrompt}\n\n${finalInstructions}`);
 
-      let doneResolve: (() => void) | undefined;
-      const done = new Promise<void>((resolve) => {
-        doneResolve = resolve;
-      });
+      let resolveTurnDone: (() => void) | null = null;
+      let turnNonce = 0;
+      let suppressProgressOutput = false;
 
       // Wire events through progress processor with delta batching
       let pendingDelta = "";
@@ -715,7 +1030,53 @@ Use it when the user references past discussions or you need context.`);
         }
       };
 
+      const runPromptTurn = async (
+        promptText: string,
+        options?: { images?: ImageContent[]; silent?: boolean }
+      ): Promise<void> => {
+        const currentSession = session;
+        if (!currentSession) {
+          throw new Error("OpenClaw session is not initialized");
+        }
+
+        turnNonce += 1;
+        const currentTurnNonce = turnNonce;
+
+        const turnDone = new Promise<void>((resolve) => {
+          resolveTurnDone = () => {
+            if (currentTurnNonce !== turnNonce) {
+              return;
+            }
+            resolveTurnDone = null;
+            resolve();
+          };
+        });
+
+        suppressProgressOutput = options?.silent === true;
+
+        try {
+          if (options?.images) {
+            await currentSession.prompt(promptText, { images: options.images });
+          } else {
+            await currentSession.prompt(promptText);
+          }
+          await turnDone;
+        } finally {
+          suppressProgressOutput = false;
+          if (resolveTurnDone && currentTurnNonce === turnNonce) {
+            resolveTurnDone = null;
+          }
+        }
+      };
+
       session.subscribe((event) => {
+        if (suppressProgressOutput) {
+          if (event.type === "agent_end") {
+            resolveTurnDone?.();
+          }
+          return;
+        }
+
         const hasUpdate = this.progressProcessor.processEvent(event);
         if (hasUpdate) {
           const delta = this.progressProcessor.getDelta();
@@ -727,10 +1088,10 @@ Use it when the user references past discussions or you need context.`);
 
         if (event.type === "agent_end") {
           flushDelta()
-            .then(() => doneResolve?.())
+            .then(() => resolveTurnDone?.())
             .catch((err) => {
               logger.error("Failed to flush final delta:", err);
-              doneResolve?.();
+              resolveTurnDone?.();
             });
         }
       });
@@ -807,8 +1168,20 @@ Use it when the user references past discussions or you need context.`);
       if (images.length > 0) {
         logger.info(`Including ${images.length} image(s) in prompt for vision`);
       }
-      await session.prompt(effectivePromptText, { images });
-      await done;
+
+      await this.maybeRunPreCompactionMemoryFlush({
+        session,
+        sessionManager,
+        settingsManager,
+        memoryFlushConfig,
+        incomingPromptText: effectivePromptText,
+        incomingImageCount: images.length,
+        runSilentPrompt: async (prompt) => {
+          await runPromptTurn(prompt, { silent: true });
+        },
+      });
+
+      await runPromptTurn(effectivePromptText, { images });
 
       const sessionError = this.progressProcessor.consumeFatalErrorMessage();
       if (sessionError) {
@@ -1109,7 +1482,7 @@ ${fileListing}
         },
         body: JSON.stringify({
           reason: `Connect your ${authHint.providerName} account to use ${modelId} models`,
-          prefillProviders: [authHint.providerName],
+          providers: [authHint.providerName],
         }),
       });
 
@@ -1125,5 +1498,70 @@ ${fileListing}
     }
 
     return errorMessage;
+  }
+
+  private async maybeBuildAudioPermissionHintMessage(
+    outputText: string,
+    gatewayUrl: string,
+    workerToken: string
+  ): Promise<string | null> {
+    const lower = outputText.toLowerCase();
+    if (!lower.includes("api.model.audio.request")) {
+      return null;
+    }
+
+    if (
+      lower.includes("settings button has been sent") ||
+      lower.includes("open settings")
+    ) {
+      return null;
+    }
+
+    try {
+      const suggestions = await fetchAudioProviderSuggestions({
+        gatewayUrl,
+        workerToken,
+      });
+      const providers = suggestions.providerIds;
+      const providerList =
+        suggestions.providerDisplayList || "an audio-capable provider";
+
+      const resp = await fetch(`${gatewayUrl}/internal/settings-link`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${workerToken}`,
+        },
+        body: JSON.stringify({
+          reason: "Fix OpenAI audio permission for voice generation",
+          message: `Your current OpenAI token is missing api.model.audio.request. Switch ChatGPT auth to an API key with audio permission, or connect an available audio provider (${providerList}).`,
+          providers: providers.length > 0 ? providers : undefined,
+        }),
+      });
+
+      if (!resp.ok) {
+        return null;
+      }
+
+      const payload = (await resp.json()) as {
+        type?: string;
+        url?: string;
+      };
+
+      if (payload.type === "settings_link") {
+        return `I sent a settings button in chat. Tap it to connect an audio-capable provider (${providerList}).`;
+      }
+
+      if (payload.url) {
+        return `Open settings to fix voice generation permissions: ${payload.url}`;
+      }
+    } catch (error) {
+      logger.error(
+        "Failed to generate settings link for missing audio permission",
+        error
+      );
+    }
+
+    return null;
   }
 }

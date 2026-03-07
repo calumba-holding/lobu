@@ -3,6 +3,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { createLogger } from "@lobu/core";
 import FormData from "form-data";
+import { fetchAudioProviderSuggestions } from "./audio-provider-suggestions";
 
 const logger = createLogger("shared-tools");
 
@@ -18,6 +19,25 @@ function textResult(text: string): TextResult {
 
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function formatInstallSkillPayload(payload: {
+  reason: string;
+  message?: string;
+  providers?: string[];
+  skills?: Array<{ repo: string; name?: string; description?: string }>;
+  mcpServers?: Array<{
+    id: string;
+    name?: string;
+    url?: string;
+    type?: string;
+    command?: string;
+    args?: string[];
+  }>;
+  nixPackages?: string[];
+  grants?: string[];
+}): string {
+  return JSON.stringify(payload);
 }
 
 function withErrorHandling(
@@ -650,6 +670,131 @@ async function listInstalledCapabilities(
 // InstallSkill (resolve manifest, generate settings link for user confirmation)
 // ============================================================================
 
+export interface ConfigureArgs {
+  reason: string;
+  message?: string;
+  providers?: string[];
+  skills?: Array<{
+    repo: string;
+    name?: string;
+    description?: string;
+  }>;
+  nixPackages?: string[];
+  grants?: string[];
+  mcpServers?: Array<{
+    id: string;
+    name?: string;
+    url?: string;
+    type?: string;
+    command?: string;
+    args?: string[];
+  }>;
+}
+
+export interface InstallSkillArgs {
+  id?: string;
+  upgrade?: boolean;
+  reason?: string;
+  message?: string;
+  providers?: string[];
+  skills?: Array<{ repo: string; name?: string; description?: string }>;
+  nixPackages?: string[];
+  grants?: string[];
+  mcpServers?: Array<{
+    id: string;
+    name?: string;
+    url?: string;
+    type?: string;
+    command?: string;
+    args?: string[];
+  }>;
+}
+
+export async function installSkillTool(
+  gw: GatewayParams,
+  args: InstallSkillArgs
+): Promise<TextResult> {
+  return sudo(gw, args);
+}
+
+export async function sudo(
+  gw: GatewayParams,
+  args: InstallSkillArgs
+): Promise<TextResult> {
+  const id = args.id?.trim();
+  if (id) {
+    return installSkill(gw, {
+      id,
+      upgrade: args.upgrade,
+    });
+  }
+
+  if (!args.reason?.trim()) {
+    return textResult(
+      "Error: InstallSkill requires either an id (to install/upgrade a capability) or a reason (to open a settings link)."
+    );
+  }
+
+  return configure(gw, {
+    reason: args.reason!,
+    message: args.message,
+    providers: args.providers,
+    skills: args.skills,
+    nixPackages: args.nixPackages,
+    grants: args.grants,
+    mcpServers: args.mcpServers,
+  });
+}
+
+export async function installPackage(
+  gw: GatewayParams,
+  args: { packages: string[]; reason: string }
+): Promise<TextResult> {
+  return withErrorHandling("InstallPackage", async () => {
+    logger.info(`InstallPackage: ${args.packages.join(", ")} — ${args.reason}`);
+
+    interface SettingsLinkResult {
+      type?: string;
+      message?: string;
+    }
+
+    const { data, error } = await gatewayFetch<SettingsLinkResult>(
+      gw,
+      "/internal/settings-link",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          nixPackages: args.packages,
+          reason: args.reason,
+        }),
+      },
+      "Failed to request package install"
+    );
+    if (error) return error;
+    const result = data!;
+
+    if (result.type === "inline_package") {
+      return textResult(
+        "Approval buttons have been sent to the user in chat. Stop working and wait for the user's response — packages will be available after approval on the next message."
+      );
+    }
+
+    return textResult(
+      result.message || "Package install request sent to user."
+    );
+  });
+}
+
+export async function requestNetworkAccess(
+  gw: GatewayParams,
+  args: { domains: string[]; reason: string }
+): Promise<TextResult> {
+  return configure(gw, {
+    reason: args.reason,
+    grants: args.domains,
+  });
+}
+
 export async function installSkill(
   gw: GatewayParams,
   args: { id: string; upgrade?: boolean }
@@ -690,12 +835,12 @@ export async function installSkill(
     const typeLabel = manifest.type === "skill" ? "skill" : "MCP server";
 
     // Build settings link prefill from manifest
-    const prefill: Record<string, unknown> = {
+    const prefill: ConfigureArgs = {
       reason: `${action} ${typeLabel} "${manifest.name}"`,
     };
 
     if (manifest.type === "skill") {
-      prefill.prefillSkills = [
+      prefill.skills = [
         {
           repo: manifest.id,
           name: manifest.name,
@@ -713,19 +858,19 @@ export async function installSkill(
         }
       }
       if (grants.length) {
-        prefill.prefillGrants = [...new Set(grants)];
+        prefill.grants = [...new Set(grants)];
       }
 
       if (manifest.nixPackages?.length) {
-        prefill.prefillNixPackages = manifest.nixPackages;
+        prefill.nixPackages = manifest.nixPackages;
       }
       if (manifest.providers?.length) {
-        prefill.prefillProviders = manifest.providers;
+        prefill.providers = manifest.providers;
       }
 
       // Pre-fill MCP servers from skill manifest
       if (manifest.mcpServers?.length) {
-        prefill.prefillMcpServers = manifest.mcpServers.map((m) => ({
+        prefill.mcpServers = manifest.mcpServers.map((m) => ({
           id: m.id,
           name: m.name,
           url: m.url,
@@ -735,11 +880,11 @@ export async function installSkill(
         }));
       }
     } else if (manifest.type === "mcp" && manifest.prefillMcpServer) {
-      prefill.prefillMcpServers = [manifest.prefillMcpServer];
+      prefill.mcpServers = [manifest.prefillMcpServer];
     }
 
     // Generate settings link for user confirmation
-    return configure(gw, prefill as Parameters<typeof configure>[1]);
+    return configure(gw, prefill);
   });
 }
 
@@ -749,26 +894,7 @@ export async function installSkill(
 
 export async function configure(
   gw: GatewayParams,
-  args: {
-    reason: string;
-    message?: string;
-    prefillProviders?: string[];
-    prefillSkills?: Array<{
-      repo: string;
-      name?: string;
-      description?: string;
-    }>;
-    prefillNixPackages?: string[];
-    prefillGrants?: string[];
-    prefillMcpServers?: Array<{
-      id: string;
-      name?: string;
-      url?: string;
-      type?: "sse" | "stdio";
-      command?: string;
-      args?: string[];
-    }>;
-  }
+  args: ConfigureArgs
 ): Promise<TextResult> {
   return withErrorHandling("Configure", async () => {
     logger.info(`Configure: ${args.reason}`);
@@ -788,11 +914,11 @@ export async function configure(
         body: JSON.stringify({
           reason: args.reason,
           message: args.message,
-          prefillProviders: args.prefillProviders,
-          prefillNixPackages: args.prefillNixPackages,
-          prefillGrants: args.prefillGrants,
-          prefillSkills: args.prefillSkills,
-          prefillMcpServers: args.prefillMcpServers,
+          providers: args.providers,
+          nixPackages: args.nixPackages,
+          grants: args.grants,
+          skills: args.skills,
+          mcpServers: args.mcpServers,
         }),
       },
       "Failed to generate settings link"
@@ -829,6 +955,164 @@ export async function configure(
 }
 
 // ============================================================================
+// GenerateImage
+// ============================================================================
+
+function imageExtFromMime(mimeType: string): string {
+  if (mimeType.includes("jpeg")) return "jpg";
+  if (mimeType.includes("webp")) return "webp";
+  return "png";
+}
+
+export async function generateImage(
+  gw: GatewayParams,
+  args: {
+    prompt: string;
+    size?: "1024x1024" | "1024x1536" | "1536x1024" | "auto";
+    quality?: "low" | "medium" | "high" | "auto";
+    background?: "transparent" | "opaque" | "auto";
+    format?: "png" | "jpeg" | "webp";
+  }
+): Promise<TextResult> {
+  return withErrorHandling("GenerateImage", async () => {
+    logger.info(`GenerateImage: ${args.prompt.substring(0, 80)}...`);
+    const providers = ["chatgpt", "openai"];
+
+    const capResponse = await fetch(
+      `${gw.gatewayUrl}/internal/images/capabilities`,
+      {
+        headers: { Authorization: `Bearer ${gw.workerToken}` },
+      }
+    );
+
+    if (capResponse.ok) {
+      const capabilities = (await capResponse.json()) as {
+        available: boolean;
+        providers?: Array<{ provider: string; name: string }>;
+      };
+      if (!capabilities.available) {
+        const providerList =
+          capabilities.providers?.map((p) => p.name).join(", ") || "OpenAI";
+        const sudoPayload = formatInstallSkillPayload({
+          reason: "Set up image generation",
+          message:
+            "Add an OpenAI or ChatGPT API key to enable image generation.",
+          providers,
+        });
+        return textResult(
+          `Image generation is not configured. Supported providers: ${providerList}.\n\nCall Sudo next with this payload: ${sudoPayload}`
+        );
+      }
+    }
+
+    const response = await fetch(`${gw.gatewayUrl}/internal/images/generate`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${gw.workerToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        prompt: args.prompt,
+        size: args.size,
+        quality: args.quality,
+        background: args.background,
+        format: args.format,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = (await parseErrorBody(response)) as {
+        error?: string;
+        availableProviders?: string[];
+      };
+      const errorMessage = errorData.error || "Unknown error";
+      const lowerError = errorMessage.toLowerCase();
+      const missingImagePermission =
+        lowerError.includes("missing scopes") ||
+        lowerError.includes("missing_scope") ||
+        (lowerError.includes("scope") &&
+          (lowerError.includes("image") ||
+            lowerError.includes("model.request")));
+
+      if (errorData.availableProviders?.length) {
+        const sudoPayload = formatInstallSkillPayload({
+          reason: "Set up image generation",
+          message:
+            "Add an OpenAI or ChatGPT API key to enable image generation.",
+          providers,
+        });
+        return textResult(
+          `Image generation failed: ${errorMessage}.\n\nCall Sudo next with this payload: ${sudoPayload}`
+        );
+      }
+
+      if (missingImagePermission) {
+        const sudoPayload = formatInstallSkillPayload({
+          reason: "Fix OpenAI image-generation permission",
+          message:
+            "Your current ChatGPT/OpenAI credential cannot generate images. Switch to an OpenAI API key with image generation access.",
+          providers,
+        });
+        return textResult(
+          `Image generation failed because the current credential lacks required image permissions.\n\nCall Sudo next with this payload: ${sudoPayload}`
+        );
+      }
+
+      return textResult(`Error generating image: ${errorMessage}`);
+    }
+
+    const imageBuffer = await response.arrayBuffer();
+    const mimeType = response.headers.get("Content-Type") || "image/png";
+    const provider = response.headers.get("X-Image-Provider") || "unknown";
+    const ext = imageExtFromMime(mimeType);
+
+    let tempPath: string | null = null;
+    try {
+      tempPath = `/tmp/image_${Date.now()}.${ext}`;
+      await fs.writeFile(tempPath, Buffer.from(imageBuffer));
+
+      const formData = new FormData();
+      formData.append("file", nodeFs.createReadStream(tempPath), {
+        filename: `generated_image.${ext}`,
+        contentType: mimeType,
+      });
+      formData.append("filename", `generated_image.${ext}`);
+      formData.append("comment", "Generated image");
+
+      const formDataBuffer = await formDataToBuffer(formData);
+      const fdHeaders = formData.getHeaders();
+
+      const uploadResponse = await fetch(
+        `${gw.gatewayUrl}/internal/files/upload`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${gw.workerToken}`,
+            "X-Channel-Id": gw.channelId,
+            "X-Conversation-Id": gw.conversationId,
+            ...fdHeaders,
+            "Content-Length": formDataBuffer.length.toString(),
+          },
+          body: formDataBuffer,
+        }
+      );
+
+      if (!uploadResponse.ok) {
+        const uploadError = await uploadResponse.text();
+        return textResult(`Generated image but failed to send: ${uploadError}`);
+      }
+    } finally {
+      if (tempPath) {
+        await fs.unlink(tempPath).catch(() => undefined);
+      }
+    }
+
+    logger.info(`Image generated and sent using ${provider}`);
+    return textResult(`Image sent successfully (generated with ${provider}).`);
+  });
+}
+
+// ============================================================================
 // GenerateAudio
 // ============================================================================
 
@@ -845,33 +1129,23 @@ export async function generateAudio(
   return withErrorHandling("GenerateAudio", async () => {
     logger.info(`GenerateAudio: ${args.text.substring(0, 50)}...`);
 
-    const capResponse = await fetch(
-      `${gw.gatewayUrl}/internal/audio/capabilities`,
-      {
-        headers: { Authorization: `Bearer ${gw.workerToken}` },
-      }
-    );
+    const suggestions = await fetchAudioProviderSuggestions({
+      gatewayUrl: gw.gatewayUrl,
+      workerToken: gw.workerToken,
+    });
+    const providers = suggestions.providerIds;
+    const providerList =
+      suggestions.providerDisplayList || "an audio-capable provider";
 
-    if (capResponse.ok) {
-      const capabilities = (await capResponse.json()) as {
-        available: boolean;
-        provider?: string;
-        providers?: Array<{
-          provider: string;
-          name: string;
-          envVar: string;
-        }>;
-      };
-
-      if (!capabilities.available) {
-        const providerList =
-          capabilities.providers
-            ?.map((p) => `${p.name} (${p.envVar})`)
-            .join(", ") || "openai, gemini, elevenlabs";
-        return textResult(
-          `Audio generation is not configured. To enable it, add an API key for one of these providers: ${providerList}. Use the Configure tool to help the user configure this.`
-        );
-      }
+    if (suggestions.available === false) {
+      const sudoPayload = formatInstallSkillPayload({
+        reason: "Set up text-to-speech for voice responses",
+        message: `Add credentials for an available audio provider (${providerList}) to enable voice generation.`,
+        providers: providers.length > 0 ? providers : undefined,
+      });
+      return textResult(
+        `Audio generation is not configured. To enable it, connect one of the available providers: ${providerList}.\n\nCall Sudo next with this payload: ${sudoPayload}`
+      );
     }
 
     const response = await fetch(`${gw.gatewayUrl}/internal/audio/synthesize`, {
@@ -892,16 +1166,36 @@ export async function generateAudio(
         error?: string;
         availableProviders?: string[];
       };
+      const errorMessage = errorData.error || "Unknown error";
+      const lowerError = errorMessage.toLowerCase();
+      const missingOpenAiAudioScope =
+        (lowerError.includes("missing scopes") ||
+          lowerError.includes("missing_scope")) &&
+        lowerError.includes("api.model.audio.request");
 
       if (errorData.availableProviders?.length) {
+        const sudoPayload = formatInstallSkillPayload({
+          reason: "Set up text-to-speech for voice responses",
+          message: `Add credentials for an available audio provider (${providerList}) to enable voice generation.`,
+          providers: providers.length > 0 ? providers : undefined,
+        });
         return textResult(
-          `Audio generation failed: ${errorData.error}. No provider configured. Use Configure to help the user add an API key.`
+          `Audio generation failed: ${errorMessage}. No provider configured.\n\nCall Sudo next with this payload: ${sudoPayload}`
         );
       }
 
-      return textResult(
-        `Error generating audio: ${errorData.error || "Unknown error"}`
-      );
+      if (missingOpenAiAudioScope) {
+        const sudoPayload = formatInstallSkillPayload({
+          reason: "Fix OpenAI audio permission for voice generation",
+          message: `Your current OpenAI token is missing api.model.audio.request. Switch ChatGPT auth to an API key with audio permission, or connect an available audio provider (${providerList}).`,
+          providers: providers.length > 0 ? providers : undefined,
+        });
+        return textResult(
+          `Audio generation failed because the current OpenAI token lacks api.model.audio.request.\n\nCall Sudo next with this payload: ${sudoPayload}`
+        );
+      }
+
+      return textResult(`Error generating audio: ${errorMessage}`);
     }
 
     const audioBuffer = await response.arrayBuffer();

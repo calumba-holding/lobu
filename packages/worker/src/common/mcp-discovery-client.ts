@@ -87,7 +87,7 @@ export function createMcpDiscoveryClient(
       },
       body: JSON.stringify({
         reason: installReason,
-        prefillMcpServers: [mcp.prefillMcpServer],
+        mcpServers: [mcp.prefillMcpServer],
       }),
     });
 
