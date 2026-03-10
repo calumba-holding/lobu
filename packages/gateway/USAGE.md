@@ -99,7 +99,7 @@ This document describes all environment variables used by the Lobu Gateway.
 
 #### `WORKER_IMAGE_REPOSITORY`
 **Description**: Worker Docker image repository
-**Default**: `buremba/lobu-worker`
+**Default**: `ghcr.io/lobu-ai/lobu-worker-base`
 **Used by**: Worker container deployment
 
 #### `WORKER_IMAGE_TAG`

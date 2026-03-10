@@ -32,7 +32,7 @@ Lobu supports two deployment patterns for workers:
 
 ```dockerfile
 # Extends our curated base image
-FROM buremba/lobu-worker-base:0.1.0
+FROM ghcr.io/lobu-ai/lobu-worker-base:0.1.0
 
 # Add your customizations
 RUN pip install pandas
@@ -131,7 +131,7 @@ docker compose build worker
 ### Dockerfile.worker (Base Image Mode)
 
 ```dockerfile
-FROM buremba/lobu-worker-base:0.1.0
+FROM ghcr.io/lobu-ai/lobu-worker-base:0.1.0
 
 # Add system packages
 RUN apt-get update && apt-get install -y postgresql-client
@@ -198,8 +198,8 @@ docker compose down
 
 The CLI version locks to base image versions:
 
-- CLI `0.1.0` -> `buremba/lobu-worker-base:0.1.0`
-- CLI `0.2.0` -> `buremba/lobu-worker-base:0.2.0`
+- CLI `0.1.0` -> `ghcr.io/lobu-ai/lobu-worker-base:0.1.0`
+- CLI `0.2.0` -> `ghcr.io/lobu-ai/lobu-worker-base:0.2.0`
 
 This ensures compatibility between CLI and runtime images.
 
@@ -208,7 +208,7 @@ This ensures compatibility between CLI and runtime images.
 Lobu uses a dual distribution pattern:
 
 **Day 0 (Quick Start):**
-- Use `buremba/lobu-worker-base` Docker image
+- Use `ghcr.io/lobu-ai/lobu-worker-base` Docker image
 - Extend with Dockerfile
 - Perfect for learning, prototypes
 
@@ -219,13 +219,13 @@ Lobu uses a dual distribution pattern:
 
 ## Published Artifacts
 
-**Docker Hub:**
+**GHCR:**
 ```bash
 # For production (gateway)
-docker pull buremba/lobu-gateway:0.1.0
+docker pull ghcr.io/lobu-ai/lobu-gateway:0.1.0
 
 # For quick start (extend this)
-docker pull buremba/lobu-worker-base:0.1.0
+docker pull ghcr.io/lobu-ai/lobu-worker-base:0.1.0
 ```
 
 **NPM Registry:**

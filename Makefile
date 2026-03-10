@@ -101,7 +101,7 @@ deploy:
 	fi; \
 	echo "📋 Final values file: $$VALUES_FILE"; \
 	if [ -n "$$GITHUB_ACTIONS" ]; then \
-		IMAGE_REPO="$${DOCKER_NAMESPACE:-buremba}"; \
+		IMAGE_REPO="$${DOCKER_NAMESPACE:-ghcr.io/lobu-ai}"; \
 		IMAGE_TAG="$${IMAGE_TAG:-latest}"; \
 		WORKER_IMAGE_DIGEST="$${WORKER_IMAGE_DIGEST:-}"; \
 		WORKER_IMAGE_REPO="$$IMAGE_REPO/lobu-worker-base"; \

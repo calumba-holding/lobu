@@ -1,4 +1,4 @@
-name: Build and Push to Docker Hub
+name: Build and Push Docker Images
 
 on:
   push:
@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
 
 env:
-  DOCKER_NAMESPACE: ${{ secrets.DOCKER_USERNAME || 'buremba' }}
+  DOCKER_NAMESPACE: ghcr.io/lobu-ai
 
 jobs:
   build-and-push:
@@ -24,12 +24,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: production
+    permissions:
+      contents: read
+      packages: write
 
     outputs:
       gateway-image: ${{ steps.meta-gateway.outputs.tags }}
       worker-base-image: ${{ steps.meta-worker-base.outputs.tags }}
       image-tag: ${{ steps.tag.outputs.tag }}
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -53,17 +56,18 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to Docker Hub
+      - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata for Gateway
         id: meta-gateway
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.DOCKER_NAMESPACE }}/lobu-gateway
+          images: ghcr.io/lobu-ai/lobu-gateway
           tags: |
             type=sha,prefix={{branch}}-
             type=raw,value=latest,enable={{is_default_branch}}
@@ -78,17 +82,17 @@ jobs:
           tags: ${{ steps.meta-gateway.outputs.tags }}
           cache-from: |
             type=gha
-            type=registry,ref=${{ env.DOCKER_NAMESPACE }}/lobu-gateway:buildcache
+            type=registry,ref=ghcr.io/lobu-ai/lobu-gateway:buildcache
           cache-to: |
             type=gha,mode=max
-            type=registry,ref=${{ env.DOCKER_NAMESPACE }}/lobu-gateway:buildcache,mode=max
+            type=registry,ref=ghcr.io/lobu-ai/lobu-gateway:buildcache,mode=max
           platforms: linux/amd64,linux/arm64
 
       - name: Extract metadata for Worker Base
         id: meta-worker-base
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.DOCKER_NAMESPACE }}/lobu-worker-base
+          images: ghcr.io/lobu-ai/lobu-worker-base
           tags: |
             type=sha,prefix={{branch}}-
             type=raw,value=latest,enable={{is_default_branch}}
@@ -104,10 +108,10 @@ jobs:
           tags: ${{ steps.meta-worker-base.outputs.tags }}
           cache-from: |
             type=gha
-            type=registry,ref=${{ env.DOCKER_NAMESPACE }}/lobu-worker-base:buildcache
+            type=registry,ref=ghcr.io/lobu-ai/lobu-worker-base:buildcache
           cache-to: |
             type=gha,mode=max
-            type=registry,ref=${{ env.DOCKER_NAMESPACE }}/lobu-worker-base:buildcache,mode=max
+            type=registry,ref=ghcr.io/lobu-ai/lobu-worker-base:buildcache,mode=max
           # Only amd64 - Nix installation fails under QEMU arm64 emulation (seccomp BPF issue)
           platforms: linux/amd64
 

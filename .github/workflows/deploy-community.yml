@@ -27,7 +27,7 @@ on:
 env:
   NAMESPACE: lobu
   DEPLOYMENT_NAME: lobu
-  DOCKER_NAMESPACE: ${{ secrets.DOCKER_USERNAME || 'buremba' }}
+  DOCKER_NAMESPACE: ghcr.io/lobu-ai
 
 jobs:
   deploy:
