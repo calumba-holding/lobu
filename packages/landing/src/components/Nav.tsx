@@ -3,7 +3,7 @@ const GITHUB_STARS_BADGE =
   "https://img.shields.io/github/stars/lobu-ai/lobu?style=social";
 
 const leftLinks = [
-  { label: "Skills", href: "/skills-as-saas" },
+  { label: "Skills", href: "/skills" },
   { label: "Pricing", href: "/serverless-openclaw" },
 ];
 

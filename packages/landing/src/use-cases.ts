@@ -69,7 +69,7 @@ export const useCases: UseCase[] = [
     title: "Skills and integrations",
     description:
       "Users install skills that bundle MCP servers and integrations. OAuth and API-key auth handled for you.",
-    learnMoreUrl: "/skills-as-saas",
+    learnMoreUrl: "/skills",
     settingsLabel: "Review skills, MCP servers, and auth",
     chatLabel: "Agent configures dependencies",
     botName: "OpsTriage",

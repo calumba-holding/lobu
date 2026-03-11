@@ -72,7 +72,7 @@ export function CTA() {
           style={{ color: "var(--color-page-text-muted)" }}
         >
           <a
-            href="/skills-as-saas"
+            href="/skills"
             class="hover:underline underline-offset-2"
             style={{ color: "var(--color-tg-accent)" }}
           >

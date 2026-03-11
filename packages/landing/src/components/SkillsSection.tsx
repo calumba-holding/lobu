@@ -1,5 +1,3 @@
-import { ScheduleCallButton } from "./ScheduleDialog";
-
 const GITHUB_URL = "https://github.com/lobu-ai/lobu";
 
 const PROMPT_TEXT = `I am new to Lobu and want to set up a Telegram assistant.
@@ -252,7 +250,7 @@ function OutputPanel() {
                 name: "lobu.toml",
                 comment: "# providers, skills, network",
                 color: "#7dcfff",
-                href: "/skills-as-saas",
+                href: "/skills",
               },
               {
                 name: "IDENTITY.md",
@@ -671,25 +669,37 @@ export function SkillsSection() {
             and integrations, all bundled into one installable unit.
           </p>
           <div class="flex flex-wrap gap-3 justify-center">
-            <a
-              href="/getting-started/skills/"
-              class="inline-flex items-center gap-2 text-sm font-semibold px-5 py-2.5 rounded-lg transition-all hover:opacity-90"
+            <button
+              type="button"
+              class="skills-hero-copy inline-flex items-center gap-2 text-sm font-semibold px-5 py-2.5 rounded-lg transition-all hover:opacity-90 cursor-pointer"
               style={{
                 backgroundColor: "var(--color-page-text)",
                 color: "var(--color-page-bg)",
               }}
+              onClick={(e) => {
+                const button = e.currentTarget as HTMLButtonElement;
+                navigator.clipboard.writeText(PROMPT_TEXT).then(() => {
+                  const original = button.innerHTML;
+                  button.textContent = "Copied!";
+                  setTimeout(() => {
+                    button.innerHTML = original;
+                  }, 2000);
+                });
+              }}
             >
-              Start building
-            </a>
-            <ScheduleCallButton
+              <CopyIcon />
+              Copy getting started prompt
+            </button>
+            <a
+              href="/getting-started/skills/"
               class="inline-flex items-center gap-2 text-sm font-medium px-5 py-2.5 rounded-lg transition-all hover:opacity-90"
               style={{
                 color: "var(--color-page-text-muted)",
                 border: "1px solid var(--color-page-border)",
               }}
             >
-              Talk to Founder
-            </ScheduleCallButton>
+              Getting Started
+            </a>
           </div>
 
           <div class="flex flex-col md:flex-row items-center md:items-stretch gap-2 md:gap-0 max-w-4xl mx-auto mt-10">
@@ -1210,14 +1220,15 @@ export function SkillsSection() {
               </svg>
               View on GitHub
             </a>
-            <ScheduleCallButton
+            <a
+              href="/getting-started/skills/"
               class="inline-flex items-center gap-2 text-xs font-medium px-4 py-2 rounded-lg transition-all hover:opacity-80"
               style={{
                 color: "var(--color-tg-accent)",
               }}
             >
-              Talk to Founder →
-            </ScheduleCallButton>
+              Getting Started →
+            </a>
           </div>
         </div>
       </div>

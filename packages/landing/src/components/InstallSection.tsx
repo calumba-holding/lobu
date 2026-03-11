@@ -264,7 +264,7 @@ export function InstallSection() {
           </a>
           , or self-host on your own infra. Browse{" "}
           <a
-            href="/skills-as-saas"
+            href="/skills"
             class="underline decoration-dotted underline-offset-2 hover:opacity-80"
             style={{ color: "var(--color-tg-accent)" }}
           >

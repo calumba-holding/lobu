@@ -43,7 +43,7 @@ export function HeroSection() {
           class="text-4xl sm:text-5xl font-bold tracking-tight leading-[1.1] mb-5"
           style={{ color: "var(--color-page-text)" }}
         >
-          Serverless{" "}
+          Multi-tenant{" "}
           <span style={{ whiteSpace: "nowrap" }}>
             <span
               style={{
@@ -78,7 +78,7 @@ export function HeroSection() {
           </a>{" "}
           and{" "}
           <a
-            href="/skills-as-saas"
+            href="/skills"
             class="underline decoration-dotted underline-offset-2 transition-opacity hover:opacity-80"
             style={{ color: "var(--color-page-text-muted)" }}
           >
