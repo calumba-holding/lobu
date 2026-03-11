@@ -371,11 +371,11 @@ export function createOpenClawCustomTools(params: {
     defineTool({
       name: "ConnectService",
       description:
-        "Authenticate with a third-party service (OAuth integration or MCP server). Sends a login button to the user. Session ends after posting — user authenticates and your next message arrives after they return.",
+        "Connect a service: OAuth integration, MCP server, or AI provider (e.g., 'claude', 'gemini'). Sends a setup button to the user. Use this whenever the user asks to connect or configure any service, including AI providers.",
       parameters: Type.Object({
         id: Type.String({
           description:
-            "Service ID — integration ID (e.g., 'google') or MCP server ID (e.g., 'owletto')",
+            "Service ID — integration ID (e.g., 'google'), MCP server ID (e.g., 'owletto'), or provider ID (e.g., 'claude', 'gemini', 'chatgpt')",
         }),
         scopes: Type.Optional(
           Type.Array(Type.String(), {

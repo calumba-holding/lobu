@@ -1299,7 +1299,7 @@ export async function connectService(
 
     // If 404, fall back to MCP login
     if (integrationResponse.status === 404) {
-      const { data, error } = await gatewayFetch<{
+      const mcpResponse = await gatewayFetch<{
         type?: string;
         message?: string;
         url?: string;
@@ -1312,8 +1312,33 @@ export async function connectService(
         },
         "Failed to connect service"
       );
-      if (error) return error;
-      return textResult(data?.message || "Login link sent to the user.");
+      if (!mcpResponse.error) {
+        return textResult(
+          mcpResponse.data?.message || "Login link sent to the user."
+        );
+      }
+
+      // MCP login also failed — fall back to settings link as provider
+      const { data: settingsData, error: settingsError } = await gatewayFetch<{
+        type?: string;
+        message?: string;
+      }>(
+        gw,
+        "/internal/settings-link",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            reason: args.reason || `Connect ${args.id}`,
+            providers: [args.id],
+          }),
+        },
+        "Failed to send settings link"
+      );
+      if (settingsError) return settingsError;
+      return textResult(
+        settingsData?.message ||
+          "Settings link sent to the user to configure the provider."
+      );
     }
 
     // Other error
