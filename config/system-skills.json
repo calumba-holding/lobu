@@ -252,6 +252,75 @@
       ]
     },
     {
+      "id": "reddit",
+      "name": "Reddit",
+      "description": "Reddit posts, comments, subreddits, and user data",
+      "integrations": [
+        {
+          "id": "reddit",
+          "label": "Reddit",
+          "authType": "oauth",
+          "oauth": {
+            "authUrl": "https://www.reddit.com/api/v1/authorize?duration=permanent",
+            "tokenUrl": "https://www.reddit.com/api/v1/access_token",
+            "clientId": "${env:REDDIT_CLIENT_ID}",
+            "clientSecret": "${env:REDDIT_CLIENT_SECRET}",
+            "tokenEndpointAuthMethod": "client_secret_basic"
+          },
+          "scopesConfig": {
+            "default": ["identity", "read"],
+            "available": [
+              "submit",
+              "vote",
+              "edit",
+              "save",
+              "history",
+              "mysubreddits",
+              "subscribe",
+              "flair"
+            ]
+          },
+          "apiDomains": ["oauth.reddit.com"],
+          "apiBase": "https://oauth.reddit.com",
+          "apiHints": "User: /api/v1/me; Subreddit posts: /r/{subreddit}/hot; Submit: /api/submit; Vote: /api/vote; Comments: /r/{subreddit}/comments/{article}"
+        }
+      ]
+    },
+    {
+      "id": "twitter",
+      "name": "X (Twitter)",
+      "description": "Tweets, timelines, users, and direct messages",
+      "integrations": [
+        {
+          "id": "twitter",
+          "label": "X (Twitter)",
+          "authType": "oauth",
+          "oauth": {
+            "authUrl": "https://twitter.com/i/oauth2/authorize",
+            "tokenUrl": "https://api.twitter.com/2/oauth2/token",
+            "clientId": "${env:TWITTER_CLIENT_ID}",
+            "clientSecret": "${env:TWITTER_CLIENT_SECRET}",
+            "tokenEndpointAuthMethod": "client_secret_basic"
+          },
+          "scopesConfig": {
+            "default": ["tweet.read", "users.read", "offline.access"],
+            "available": [
+              "tweet.write",
+              "follows.read",
+              "follows.write",
+              "like.read",
+              "like.write",
+              "dm.read",
+              "dm.write"
+            ]
+          },
+          "apiDomains": ["api.twitter.com"],
+          "apiBase": "https://api.twitter.com/2",
+          "apiHints": "User: /users/me; Tweets: /tweets/{id}; Timeline: /users/{id}/tweets; Post tweet: /tweets; Search: /tweets/search/recent?query={q}"
+        }
+      ]
+    },
+    {
       "id": "owletto",
       "name": "Owletto Memory",
       "description": "Long-term memory across conversations",
