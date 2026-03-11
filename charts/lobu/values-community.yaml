@@ -3,6 +3,7 @@
 # Global configuration
 global:
   imagePullSecrets: []
+  imageRegistry: "ghcr.io/"
 
 # Kubernetes namespace
 kubernetes:

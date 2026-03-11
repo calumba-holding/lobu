@@ -68,10 +68,6 @@ export function shouldUseWebhook(
  * Build Telegram config from environment variables.
  */
 export function buildTelegramConfig(): TelegramConfig | null {
-  if (!getOptionalBoolean("TELEGRAM_ENABLED", false)) {
-    return null;
-  }
-
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
   if (!botToken) {
     return null;

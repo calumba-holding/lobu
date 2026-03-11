@@ -134,16 +134,13 @@ spec:
               value: "/etc/whatsapp/credentials.txt"
             {{- end }}
 
-            {{- if .Values.secrets.telegramBotToken }}
-            # Telegram configuration
-            - name: TELEGRAM_ENABLED
-              value: "true"
+            # Telegram configuration (auto-enabled when token is present)
             - name: TELEGRAM_BOT_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ include "lobu.fullname" . }}-secrets
                   key: telegram-bot-token
-            {{- end }}
+                  optional: true
 
             # Kubernetes configuration
             - name: DEPLOYMENT_MODE
