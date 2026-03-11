@@ -15,6 +15,7 @@ export interface PostedQuestion {
   conversationId: string;
   channelId: string;
   teamId?: string;
+  connectionId?: string;
   question: string;
   options: string[];
 }
@@ -28,6 +29,7 @@ export interface PostedLinkButton {
   conversationId: string;
   channelId: string;
   teamId?: string;
+  connectionId?: string;
   platform: string;
   url: string;
   label: string;
@@ -44,6 +46,7 @@ export interface PostedGrantRequest {
   conversationId: string;
   channelId: string;
   teamId?: string;
+  connectionId?: string;
   domains: string[];
   reason: string;
 }
@@ -92,6 +95,7 @@ export class InteractionService extends EventEmitter {
     conversationId: string,
     channelId: string,
     teamId: string | undefined,
+    connectionId: string | undefined,
     question: string,
     options: string[]
   ): Promise<PostedQuestion> {
@@ -105,6 +109,7 @@ export class InteractionService extends EventEmitter {
       conversationId,
       channelId,
       teamId,
+      connectionId,
       question,
       options,
     };
@@ -127,6 +132,7 @@ export class InteractionService extends EventEmitter {
     conversationId: string,
     channelId: string,
     teamId: string | undefined,
+    connectionId: string | undefined,
     domains: string[],
     reason: string
   ): Promise<PostedGrantRequest> {
@@ -141,6 +147,7 @@ export class InteractionService extends EventEmitter {
       conversationId,
       channelId,
       teamId,
+      connectionId,
       domains,
       reason,
     };
@@ -198,6 +205,7 @@ export class InteractionService extends EventEmitter {
     conversationId: string,
     channelId: string,
     teamId: string | undefined,
+    connectionId: string | undefined,
     platform: string,
     url: string,
     label: string,
@@ -213,6 +221,7 @@ export class InteractionService extends EventEmitter {
       conversationId,
       channelId,
       teamId,
+      connectionId,
       platform,
       url,
       label,

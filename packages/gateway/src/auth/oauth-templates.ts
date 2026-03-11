@@ -40,10 +40,24 @@ function escapeHtml(value: string): string {
  */
 export function renderOAuthSuccessPage(
   name: string,
-  settingsUrl?: string
+  settingsUrl?: string,
+  options?: {
+    title?: string;
+    description?: string;
+    details?: string;
+    closeNote?: string;
+  }
 ): string {
   const safeName = escapeHtml(name);
   const safeSettingsUrl = settingsUrl ? escapeHtml(settingsUrl) : "";
+  const safeTitle = escapeHtml(options?.title || "Connected!");
+  const safeDescription = escapeHtml(
+    options?.description || `Successfully authenticated with ${name}`
+  );
+  const safeDetails = options?.details ? escapeHtml(options.details) : "";
+  const safeCloseNote = escapeHtml(
+    options?.closeNote || "You can close this tab and return to your chat."
+  );
 
   return `
     <!DOCTYPE html>
@@ -88,10 +102,11 @@ export function renderOAuthSuccessPage(
       <body>
         <div class="container">
           <div class="icon">&#9989;</div>
-          <h1>Connected!</h1>
-          <p>Successfully authenticated with <strong>${safeName}</strong></p>
+          <h1>${safeTitle}</h1>
+          <p>${safeDescription.includes(safeName) ? safeDescription : `${safeDescription} <strong>${safeName}</strong>`}</p>
+          ${safeDetails ? `<p>${safeDetails}</p>` : ""}
           ${safeSettingsUrl ? `<a class="btn" href="${safeSettingsUrl}">Open Settings</a>` : ""}
-          <p class="close-note">You can close this tab and return to your chat.</p>
+          <p class="close-note">${safeCloseNote}</p>
         </div>
         <script>
           // Auto-close for Telegram in-app browser

@@ -324,8 +324,11 @@ export class CoreServices {
 
     // Initialize settings OAuth client if configured
     this.settingsOAuthClient =
-      SettingsOAuthClient.fromEnv(this.config.mcp.publicGatewayUrl) ??
-      undefined;
+      SettingsOAuthClient.fromEnv(this.config.mcp.publicGatewayUrl, {
+        get: (key) => redisClient.get(key),
+        set: (key, value, ttlSeconds) =>
+          redisClient.setex(key, ttlSeconds, value),
+      }) ?? undefined;
     if (this.settingsOAuthClient) {
       this.settingsOAuthStateStore = new OAuthStateStore(
         redisClient,

@@ -1,0 +1,371 @@
+/**
+ * Message handler bridge — connects Chat SDK events to the message queue.
+ * Bridges all 9 feature gaps: history, agent auto-creation, provider setup,
+ * settings links, allowlist, audio transcription, etc.
+ */
+
+import { createLogger, generateTraceId } from "@lobu/core";
+import type Redis from "ioredis";
+import type { CommandDispatcher } from "../commands/command-dispatcher";
+import { createChatReply } from "../commands/command-reply-adapters";
+import type { CoreServices } from "../platform";
+import {
+  buildMessagePayload,
+  resolveAgentId,
+  resolveAgentOptions,
+} from "../services/platform-helpers";
+import type { ChatInstanceManager } from "./chat-instance-manager";
+import type { PlatformConnection } from "./types";
+
+const logger = createLogger("chat-message-bridge");
+
+const MAX_HISTORY_MESSAGES = 10;
+const HISTORY_TTL_SECONDS = 86400; // 24 hours
+
+interface HistoryEntry {
+  role: "user" | "assistant";
+  content: string;
+  authorName?: string;
+  timestamp: number;
+}
+
+/**
+ * Register Chat SDK event handlers for a connection.
+ */
+export function registerMessageHandlers(
+  chat: any,
+  connection: PlatformConnection,
+  services: CoreServices,
+  manager: ChatInstanceManager,
+  commandDispatcher?: CommandDispatcher
+): void {
+  const handler = new MessageHandlerBridge(
+    connection,
+    services,
+    manager,
+    commandDispatcher
+  );
+
+  chat.onNewMention(async (thread: any, message: any) => {
+    await handler.handleMessage(thread, message, "mention");
+  });
+
+  chat.onDirectMessage(async (thread: any, message: any) => {
+    await handler.handleMessage(thread, message, "dm");
+  });
+
+  chat.onSubscribedMessage(async (thread: any, message: any) => {
+    await handler.handleMessage(thread, message, "subscribed");
+  });
+}
+
+class MessageHandlerBridge {
+  private redis: Redis;
+
+  constructor(
+    private connection: PlatformConnection,
+    private services: CoreServices,
+    private manager: ChatInstanceManager,
+    private commandDispatcher?: CommandDispatcher
+  ) {
+    this.redis = services.getQueue().getRedisClient();
+  }
+
+  async handleMessage(
+    thread: any,
+    message: any,
+    source: "mention" | "dm" | "subscribed"
+  ): Promise<void> {
+    const { connection } = this;
+    const platform = connection.platform;
+    const userId = message.author?.userId ?? "unknown";
+    const channelId = thread.channelId ?? thread.id ?? "unknown";
+    const messageId = message.id ?? String(Date.now());
+    const isGroup = source === "mention" || source === "subscribed";
+
+    logger.info(
+      {
+        connectionId: connection.id,
+        platform,
+        userId,
+        channelId,
+        messageId,
+        source,
+      },
+      "Processing inbound message"
+    );
+
+    // Gap 6: Allowlist check
+    if (connection.settings.allowFrom?.length) {
+      if (!connection.settings.allowFrom.includes(userId)) {
+        logger.info({ userId }, "Blocked by allowlist");
+        return;
+      }
+    }
+
+    // Gap 6: Group check
+    if (isGroup && connection.settings.allowGroups === false) {
+      logger.info({ channelId }, "Groups not allowed");
+      return;
+    }
+
+    // Subscribe to thread for follow-up messages
+    if (source === "mention" || source === "dm") {
+      try {
+        await thread.subscribe();
+      } catch {
+        // some platforms may not support subscribe
+      }
+    }
+
+    // Gap 2: Resolve agent ID
+    const { agentId } = await resolveAgentId({
+      platform,
+      userId,
+      channelId,
+      isGroup,
+    });
+
+    // Gap 2: Auto-create agent metadata
+    const agentMetadataStore = this.services.getAgentMetadataStore();
+    const userAgentsStore = this.services.getUserAgentsStore();
+    if (agentMetadataStore) {
+      const existing = await agentMetadataStore.getMetadata(agentId);
+      if (!existing) {
+        const agentName = isGroup
+          ? `${platform} Group ${channelId}`
+          : `${platform} ${message.author?.fullName || userId}`;
+        await agentMetadataStore.createAgent(
+          agentId,
+          agentName,
+          platform,
+          userId
+        );
+        await userAgentsStore?.addAgent(platform, userId, agentId);
+        logger.info({ agentId, userId }, "Auto-created agent");
+      }
+    }
+
+    // Gap 3: Check if agent has providers configured
+    const agentSettingsStore = this.services.getAgentSettingsStore();
+    if (agentSettingsStore) {
+      const settings = await agentSettingsStore.getSettings(agentId);
+      if (!settings?.installedProviders?.length) {
+        await this.sendProviderSetupPrompt(thread, channelId, isGroup, agentId);
+        return;
+      }
+    }
+
+    // Gap 7: Audio transcription
+    let messageText = message.text ?? "";
+    const transcriptionService = this.services.getTranscriptionService();
+    if (transcriptionService && message.attachments?.length) {
+      for (const attachment of message.attachments) {
+        const mime = attachment.mimeType ?? "";
+        if (
+          mime.startsWith("audio/") ||
+          mime === "application/ogg" ||
+          mime.startsWith("video/note")
+        ) {
+          try {
+            const data = await attachment.fetchData?.();
+            if (data) {
+              const result = await transcriptionService.transcribe(
+                Buffer.from(data),
+                agentId,
+                mime
+              );
+              if ("text" in result && result.text) {
+                messageText = messageText
+                  ? `${messageText}\n\n[Voice message]: ${result.text}`
+                  : result.text;
+              }
+            }
+          } catch (error) {
+            logger.warn(
+              { error: String(error), messageId },
+              "Audio transcription failed"
+            );
+          }
+        }
+      }
+    }
+
+    // Remove bot mention from text
+    const botUsername = this.manager.getInstance(this.connection.id)?.connection
+      .metadata.botUsername;
+    if (botUsername) {
+      messageText = messageText.replace(`@${botUsername}`, "").trim();
+    }
+
+    // Slash command dispatch — intercept before queueing to worker
+    if (this.commandDispatcher) {
+      const handled = await this.commandDispatcher.tryHandleSlashText(
+        messageText,
+        {
+          platform,
+          userId,
+          channelId,
+          isGroup,
+          conversationId: messageId,
+          reply: createChatReply((content) => thread.post(content)),
+        }
+      );
+      if (handled) return;
+    }
+
+    // Gap 1: Retrieve conversation history from Redis
+    const historyKey = `chat:history:${this.connection.id}:${channelId}`;
+    const conversationHistory = await this.getHistory(historyKey);
+
+    // Gap 1: Store inbound message
+    await this.appendHistory(historyKey, {
+      role: "user",
+      content: messageText,
+      authorName: message.author?.fullName,
+      timestamp: Date.now(),
+    });
+
+    // Build payload and enqueue
+    const traceId = generateTraceId(messageId);
+    const agentOptions = await resolveAgentOptions(
+      agentId,
+      {},
+      agentSettingsStore
+    );
+
+    const payload = buildMessagePayload({
+      platform,
+      userId,
+      botId: platform,
+      conversationId: isGroup ? messageId : channelId,
+      teamId: isGroup ? channelId : platform,
+      agentId,
+      messageId,
+      messageText,
+      channelId,
+      platformMetadata: {
+        traceId,
+        agentId,
+        chatId: channelId,
+        senderId: userId,
+        senderUsername: message.author?.userName,
+        senderDisplayName: message.author?.fullName,
+        isGroup,
+        connectionId: this.connection.id,
+        responseChannel: channelId,
+        responseId: messageId,
+        conversationHistory:
+          conversationHistory.length > 0 ? conversationHistory : undefined,
+      },
+      agentOptions,
+    });
+
+    const queueProducer = this.services.getQueueProducer();
+    await queueProducer.enqueueMessage(payload);
+
+    logger.info(
+      { traceId, messageId, agentId, connectionId: this.connection.id },
+      "Message enqueued via Chat SDK bridge"
+    );
+
+    // Show typing indicator
+    try {
+      await thread.startTyping?.("Processing...");
+    } catch {
+      // best effort
+    }
+  }
+
+  // Gap 3+4: Send provider setup prompt with settings link
+  private async sendProviderSetupPrompt(
+    thread: any,
+    channelId: string,
+    isGroup: boolean,
+    agentId: string
+  ): Promise<void> {
+    const baseUrl =
+      this.services.getPublicGatewayUrl() || "http://localhost:8080";
+    const settingsUrl = new URL("/settings", baseUrl);
+    settingsUrl.searchParams.set("platform", this.connection.platform);
+    settingsUrl.searchParams.set("chat", channelId);
+    const configUrl = settingsUrl.toString();
+
+    const message =
+      "Welcome! To get started, set up an AI provider (like Claude or OpenAI) so I can respond to your messages.";
+
+    // Gap 4: Settings link generation
+    if (isGroup) {
+      const claimService = this.services.getClaimService();
+      if (claimService) {
+        const claimCode = await claimService.createClaim(
+          this.connection.platform,
+          channelId,
+          "" // no specific user for group claims
+        );
+        const { buildClaimSettingsUrl } = await import(
+          "../auth/settings/claim-service"
+        );
+        const claimUrl = buildClaimSettingsUrl(claimCode, { agentId });
+        await thread.post(`${message}\n\nSet up: ${claimUrl}`);
+      } else {
+        await thread.post(`${message}\n\nSet up: ${configUrl}`);
+      }
+    } else {
+      await thread.post(`${message}\n\nSet up: ${configUrl}`);
+    }
+
+    logger.info({ agentId, channelId }, "Sent provider setup prompt");
+  }
+
+  // Gap 1: Redis-backed conversation history
+
+  private async getHistory(
+    key: string
+  ): Promise<
+    Array<{ role: "user" | "assistant"; content: string; name?: string }>
+  > {
+    const raw = await this.redis.lrange(key, 0, MAX_HISTORY_MESSAGES - 1);
+    return raw.map((entry) => {
+      const parsed = JSON.parse(entry) as HistoryEntry;
+      return {
+        role: parsed.role,
+        content: parsed.content,
+        name: parsed.authorName,
+      };
+    });
+  }
+
+  private async appendHistory(key: string, entry: HistoryEntry): Promise<void> {
+    await this.redis
+      .pipeline()
+      .rpush(key, JSON.stringify(entry))
+      .ltrim(key, -MAX_HISTORY_MESSAGES, -1)
+      .expire(key, HISTORY_TTL_SECONDS)
+      .exec();
+  }
+}
+
+/**
+ * Store an outgoing bot response in conversation history.
+ * Called from the response bridge.
+ */
+export async function storeOutgoingHistory(
+  redis: Redis,
+  connectionId: string,
+  channelId: string,
+  text: string
+): Promise<void> {
+  const key = `chat:history:${connectionId}:${channelId}`;
+  const entry: HistoryEntry = {
+    role: "assistant",
+    content: text,
+    timestamp: Date.now(),
+  };
+  await redis
+    .pipeline()
+    .rpush(key, JSON.stringify(entry))
+    .ltrim(key, -MAX_HISTORY_MESSAGES, -1)
+    .expire(key, HISTORY_TTL_SECONDS)
+    .exec();
+}

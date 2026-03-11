@@ -72,7 +72,7 @@ export interface CoreServices {
  */
 export interface PlatformAdapter {
   /**
-   * Platform name (e.g., "slack", "discord")
+   * Platform name
    */
   readonly name: string;
 

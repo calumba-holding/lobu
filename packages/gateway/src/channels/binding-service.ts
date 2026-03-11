@@ -7,7 +7,7 @@ const logger = createLogger("channel-binding-service");
  * Channel binding - links a platform channel to a specific agent
  */
 export interface ChannelBinding {
-  platform: string; // Platform identifier (e.g., "slack", "whatsapp", "discord", etc.)
+  platform: string; // Platform identifier
   channelId: string;
   agentId: string;
   teamId?: string; // Optional workspace/team ID for multi-tenant platforms

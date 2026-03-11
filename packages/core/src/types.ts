@@ -389,6 +389,7 @@ export interface ThreadResponsePayload {
   moduleData?: Record<string, unknown>;
   botResponseId?: string;
   ephemeral?: boolean; // If true, message should be sent as ephemeral (only visible to user)
+  platformMetadata?: Record<string, unknown>;
   statusUpdate?: {
     elapsedSeconds: number;
     state: string; // e.g., "is running" or "is scheduling"

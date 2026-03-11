@@ -17,6 +17,7 @@ type WorkerContext = {
       channelId: string;
       teamId?: string;
       agentId?: string;
+      connectionId?: string;
       platform?: string;
     };
   };
@@ -187,19 +188,20 @@ export function createIntegrationRoutes(
             channelId: worker.channelId,
             conversationId: worker.conversationId,
             teamId: worker.teamId || "",
-            platform: worker.platform || "slack",
+            platform: worker.platform || "api",
           }
         );
         const oauthUrl = `${publicGatewayUrl}/api/v1/auth/integration/init/${integration}?token=${encodeURIComponent(token)}`;
 
         // Send login link to user via InteractionService
         if (interactionService) {
-          const platform = worker.platform || "slack";
+          const platform = worker.platform || "api";
           await interactionService.postLinkButton(
             worker.userId,
             worker.conversationId,
             worker.channelId,
             worker.teamId,
+            worker.connectionId,
             platform,
             oauthUrl,
             `Connect ${config.label}`,

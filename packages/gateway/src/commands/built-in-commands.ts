@@ -12,6 +12,7 @@ import {
   getModelSelectionState,
   resolveEffectiveModelRef,
 } from "../auth/settings/model-selection";
+import { getAuthMethod } from "../connections/platform-auth-methods";
 
 const logger = createLogger("built-in-commands");
 
@@ -40,10 +41,14 @@ export function registerBuiltInCommands(
         return;
       }
 
-      // Telegram DMs: check if user has a linked OAuth identity
-      if (ctx.platform === "telegram" && !ctx.channelId.startsWith("-")) {
+      // DMs on webapp-initdata platforms: check if user has a linked OAuth identity
+      const authMethod = getAuthMethod(ctx.platform);
+      if (
+        authMethod.type === "webapp-initdata" &&
+        !ctx.channelId.startsWith("-")
+      ) {
         const linkedOAuthUserId = await deps.claimService.getLinkedOAuthUserId(
-          "telegram",
+          ctx.platform,
           ctx.userId
         );
 
@@ -52,7 +57,7 @@ export function registerBuiltInCommands(
           const baseUrl =
             process.env.PUBLIC_GATEWAY_URL || "http://localhost:8080";
           const settingsUrl = new URL("/settings", baseUrl);
-          settingsUrl.searchParams.set("platform", "telegram");
+          settingsUrl.searchParams.set("platform", ctx.platform);
           settingsUrl.searchParams.set("chat", ctx.channelId);
           await ctx.reply("Tap the button below to open settings.", {
             url: settingsUrl.toString(),
@@ -62,7 +67,7 @@ export function registerBuiltInCommands(
           return;
         }
 
-        // Not linked: claim URL with url button (opens in Telegram's browser for OAuth)
+        // Not linked: claim URL with url button (opens in browser for OAuth)
         const claimCode = await deps.claimService.createClaim(
           ctx.platform,
           ctx.channelId,

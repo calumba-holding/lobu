@@ -20,6 +20,7 @@ type WorkerContext = {
       channelId: string;
       teamId?: string;
       agentId?: string;
+      connectionId?: string;
       deploymentName: string;
       platform?: string;
     };
@@ -94,6 +95,7 @@ export function createMcpLoginRoutes(
         worker.conversationId,
         worker.channelId,
         worker.teamId,
+        worker.connectionId,
         platform || "unknown",
         mcpStatus.loginUrl,
         `Login to ${mcpStatus.name}`,

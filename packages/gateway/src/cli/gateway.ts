@@ -11,10 +11,6 @@ import { secureHeaders } from "hono/secure-headers";
 import type { GatewayConfig } from "../config";
 import { getModelProviderModules } from "../modules/module-system";
 import { registerAutoOpenApiRoutes } from "../routes/openapi-auto";
-import type { SlackConfig } from "../slack";
-import { TELEGRAM_WEBHOOK_PATH, type TelegramConfig } from "../telegram/config";
-import type { TelegramPlatform } from "../telegram/platform";
-import type { WhatsAppConfig } from "../whatsapp/config";
 
 const logger = createLogger("gateway-startup");
 
@@ -30,8 +26,7 @@ function setupServer(
   interactionService?: any,
   platformRegistry?: any,
   coreServices?: any,
-  telegramPlatform?: TelegramPlatform | null,
-  slackExpressApp?: any
+  chatInstanceManager?: import("../connections").ChatInstanceManager | null
 ) {
   if (httpServer) return;
 
@@ -146,47 +141,6 @@ function setupServer(
     logger.info("MCP proxy routes enabled at :8080/mcp/*");
   }
 
-  // Telegram webhook route
-  const telegramWebhookRoute = telegramPlatform?.getWebhookRoute();
-  if (telegramWebhookRoute) {
-    app.route(TELEGRAM_WEBHOOK_PATH, telegramWebhookRoute);
-    logger.info(
-      `Telegram webhook route enabled at :8080${TELEGRAM_WEBHOOK_PATH}`
-    );
-  }
-
-  // Slack OAuth routes for multi-workspace distribution
-  if (platformRegistry) {
-    const slackAdapter = platformRegistry.get?.("slack");
-    const slackInstallationStore = slackAdapter?.getInstallationStore?.();
-    const slackClientId = process.env.SLACK_CLIENT_ID;
-    const slackClientSecret = process.env.SLACK_CLIENT_SECRET;
-    const publicGatewayUrl = process.env.PUBLIC_GATEWAY_URL;
-
-    if (
-      slackInstallationStore &&
-      slackClientId &&
-      slackClientSecret &&
-      publicGatewayUrl
-    ) {
-      const { createSlackOAuthRoutes } = require("../slack/oauth-routes");
-      const redis = coreServices?.getQueue?.()?.getRedisClient?.();
-      if (redis) {
-        const slackOAuthRouter = createSlackOAuthRoutes({
-          clientId: slackClientId,
-          clientSecret: slackClientSecret,
-          installationStore: slackInstallationStore,
-          redis,
-          publicGatewayUrl,
-        });
-        app.route("/slack", slackOAuthRouter);
-        logger.info(
-          "Slack OAuth routes enabled at :8080/slack/install and :8080/slack/oauth_callback"
-        );
-      }
-    }
-  }
-
   // File routes (already Hono) - uses platform registry for per-platform file handling
   if (platformRegistry) {
     const { createFileRoutes } = require("../routes/internal/files");
@@ -198,10 +152,7 @@ function setupServer(
   // History routes (already Hono)
   {
     const { createHistoryRoutes } = require("../routes/internal/history");
-    // Pass Slack installation store for multi-workspace token resolution
-    const slackAdapter = platformRegistry?.get?.("slack");
-    const slackInstallationStore = slackAdapter?.getInstallationStore?.();
-    const historyRouter = createHistoryRoutes(slackInstallationStore);
+    const historyRouter = createHistoryRoutes();
     app.route("/internal", historyRouter);
     logger.info("History routes enabled at :8080/internal/history");
   }
@@ -836,6 +787,30 @@ function setupServer(
     // Agent selector is now handled by the unified settings page (/settings)
   }
 
+  // Chat SDK connection routes (webhook + CRUD)
+  if (chatInstanceManager) {
+    const {
+      createSlackRoutes,
+      createConnectionWebhookRoutes,
+      createConnectionCrudRoutes,
+    } = {
+      ...require("../routes/public/slack"),
+      ...require("../routes/public/connections"),
+    };
+    app.route("", createSlackRoutes(chatInstanceManager));
+    app.route("", createConnectionWebhookRoutes(chatInstanceManager));
+    app.route(
+      "",
+      createConnectionCrudRoutes(chatInstanceManager, {
+        userAgentsStore: coreServices.getUserAgentsStore(),
+        agentMetadataStore: coreServices.getAgentMetadataStore(),
+      })
+    );
+    logger.info(
+      "Slack and connection routes enabled at :8080/slack/*, :8080/api/v1/connections/*, and :8080/api/chat/webhook/*"
+    );
+  }
+
   // Auto-register any non-openapi routes so everything shows up in the schema
   registerAutoOpenApiRoutes(app);
 
@@ -905,6 +880,11 @@ Agents can be configured with custom MCP (Model Context Protocol) servers:
           "Bind agents to messaging platform channels (Slack, Telegram, WhatsApp).",
       },
       {
+        name: "Connections",
+        description:
+          "Manage Chat SDK-backed platform connections and their lifecycle.",
+      },
+      {
         name: "Schedules",
         description: "Scheduled wakeups and recurring reminders.",
       },
@@ -942,15 +922,7 @@ Agents can be configured with custom MCP (Model Context Protocol) servers:
   const port = 8080;
   const honoListener = getRequestListener(app.fetch);
 
-  httpServer = createServer((incoming, outgoing) => {
-    // Route Slack event webhooks to the Bolt Express receiver
-    if (slackExpressApp && incoming.url?.startsWith("/slack/events")) {
-      slackExpressApp(incoming, outgoing);
-      return;
-    }
-    // Everything else goes through Hono
-    honoListener(incoming, outgoing);
-  });
+  httpServer = createServer(honoListener);
 
   httpServer.listen(port);
   logger.info(`Server listening on port ${port}`);
@@ -1163,12 +1135,7 @@ function createExpressAdapter(honoApp: any) {
 /**
  * Start the gateway with the provided configuration
  */
-export async function startGateway(
-  config: GatewayConfig,
-  slackConfig: SlackConfig | null,
-  whatsappConfig?: WhatsAppConfig | null,
-  telegramConfig?: TelegramConfig | null
-): Promise<void> {
+export async function startGateway(config: GatewayConfig): Promise<void> {
   logger.info("Starting Lobu Gateway");
 
   // Start filtering proxy for worker network isolation (if enabled)
@@ -1188,79 +1155,22 @@ export async function startGateway(
   // Create Gateway
   const gateway = new Gateway(config);
 
-  const agentOptions = {
-    allowedTools: config.agentDefaults.allowedTools,
-    disallowedTools: config.agentDefaults.disallowedTools,
-    runtime: config.agentDefaults.runtime,
-    model: config.agentDefaults.model,
-    timeoutMinutes: config.agentDefaults.timeoutMinutes,
-    compaction: config.agentDefaults.compaction,
-    pluginsConfig: config.agentDefaults.pluginsConfig,
-  };
-
-  // Register Slack platform if configured
-  let slackPlatform: any = null;
-  if (slackConfig) {
-    const { SlackPlatform } = await import("../slack");
-
-    const slackPlatformConfig = {
-      slack: slackConfig,
-      logLevel: config.logLevel as any,
-      health: config.health,
-    };
-
-    slackPlatform = new SlackPlatform(
-      slackPlatformConfig,
-      agentOptions,
-      config.sessionTimeoutMinutes
-    );
-    gateway.registerPlatform(slackPlatform);
-    logger.info("Slack platform registered");
-  }
-
-  // Register WhatsApp platform if enabled
-  let whatsappPlatform: any = null;
-  logger.debug("WhatsApp config", { enabled: whatsappConfig?.enabled });
-  if (whatsappConfig?.enabled) {
-    const { WhatsAppPlatform } = await import("../whatsapp");
-
-    const whatsappPlatformConfig = {
-      whatsapp: whatsappConfig,
-    };
-
-    whatsappPlatform = new WhatsAppPlatform(
-      whatsappPlatformConfig,
-      agentOptions,
-      config.sessionTimeoutMinutes
-    );
-    gateway.registerPlatform(whatsappPlatform);
-    logger.info("WhatsApp platform registered");
-  }
-
-  // Register Telegram platform if enabled
-  let telegramPlatform: any = null;
-  logger.debug("Telegram config", { enabled: telegramConfig?.enabled });
-  if (telegramConfig?.enabled) {
-    const { TelegramPlatform } = await import("../telegram");
-
-    const telegramPlatformConfig = {
-      telegram: telegramConfig,
-    };
-
-    telegramPlatform = new TelegramPlatform(
-      telegramPlatformConfig,
-      agentOptions,
-      config.sessionTimeoutMinutes
-    );
-    gateway.registerPlatform(telegramPlatform);
-    logger.info("Telegram platform registered");
-  }
-
   // Register API platform (always enabled)
   const { ApiPlatform } = await import("../api");
   const apiPlatform = new ApiPlatform();
   gateway.registerPlatform(apiPlatform);
   logger.info("API platform registered");
+
+  const { ChatPlatformAdapter } = await import("../connections");
+  const chatPlatformAdapters = [
+    new ChatPlatformAdapter("slack", null),
+    new ChatPlatformAdapter("telegram", null),
+    new ChatPlatformAdapter("whatsapp", null),
+  ];
+  for (const adapter of chatPlatformAdapters) {
+    gateway.registerPlatform(adapter);
+  }
+  logger.info("Chat SDK platform adapters registered");
 
   // Start gateway
   await gateway.start();
@@ -1281,9 +1191,38 @@ export async function startGateway(
   await orchestrator.injectCoreServices(
     coreServices.getQueue().getRedisClient(),
     coreServices.getProviderCatalogService(),
-    coreServices.getGrantStore() ?? undefined
+    coreServices.getGrantStore() ?? undefined,
+    coreServices.getClaimService()
   );
   logger.info("Orchestrator configured with core services");
+
+  // Initialize Chat SDK connection manager (API-driven platform connections)
+  const { bootstrapConnectionsFromEnv, ChatInstanceManager } = await import(
+    "../connections"
+  );
+  const { ChatResponseBridge } = await import("../connections");
+  const chatInstanceManager = new ChatInstanceManager();
+  try {
+    await chatInstanceManager.initialize(coreServices);
+    await bootstrapConnectionsFromEnv(chatInstanceManager);
+    for (const adapter of chatPlatformAdapters) {
+      adapter.setManager(chatInstanceManager);
+    }
+    logger.info("ChatInstanceManager initialized");
+
+    // Wire ChatResponseBridge into unified thread consumer
+    const unifiedConsumer = gateway.getUnifiedConsumer();
+    if (unifiedConsumer) {
+      const chatResponseBridge = new ChatResponseBridge(chatInstanceManager);
+      unifiedConsumer.setChatResponseBridge(chatResponseBridge);
+      logger.info("ChatResponseBridge wired to unified thread consumer");
+    }
+  } catch (error) {
+    logger.warn(
+      { error: String(error) },
+      "ChatInstanceManager initialization failed — connections feature disabled"
+    );
+  }
 
   // Setup server on port 8080 (single port for all HTTP traffic)
   setupServer(
@@ -1293,8 +1232,7 @@ export async function startGateway(
     coreServices.getInteractionService(),
     gateway.getPlatformRegistry(),
     coreServices,
-    telegramPlatform,
-    slackPlatform?.getExpressApp()
+    chatInstanceManager
   );
 
   logger.info("Lobu Gateway is running!");
@@ -1310,6 +1248,7 @@ export async function startGateway(
     }, 30_000);
     hardDeadline.unref();
 
+    await chatInstanceManager.shutdown();
     await orchestrator.stop();
     await gateway.stop();
     if (httpServer) {

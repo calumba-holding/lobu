@@ -33,6 +33,7 @@ type WorkerContext = {
       channelId: string;
       teamId?: string;
       agentId?: string;
+      connectionId?: string;
       deploymentName: string;
       platform?: string;
     };
@@ -135,6 +136,7 @@ export function createSettingsLinkRoutes(
           worker.conversationId,
           worker.channelId,
           worker.teamId,
+          worker.connectionId,
           grants,
           reason || "Domain access requested"
         );
@@ -236,6 +238,7 @@ export function createSettingsLinkRoutes(
           worker.conversationId,
           worker.channelId,
           worker.teamId,
+          worker.connectionId,
           platform,
           url,
           buttonLabel,

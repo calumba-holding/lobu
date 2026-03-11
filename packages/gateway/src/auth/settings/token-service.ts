@@ -1,3 +1,5 @@
+import { resolvePublicUrl } from "../../utils/public-url";
+
 /**
  * Pre-filled skill configuration for settings page
  */
@@ -87,6 +89,8 @@ export interface SettingsTokenPayload {
  * so the URL never expires and can be reused across button taps.
  */
 export function buildTelegramSettingsUrl(chatId: string): string {
-  const baseUrl = process.env.PUBLIC_GATEWAY_URL || "http://localhost:8080";
-  return `${baseUrl}/settings?platform=telegram&chat=${encodeURIComponent(chatId)}`;
+  const url = new URL(resolvePublicUrl("/settings"));
+  url.searchParams.set("platform", "telegram");
+  url.searchParams.set("chat", chatId);
+  return url.toString();
 }

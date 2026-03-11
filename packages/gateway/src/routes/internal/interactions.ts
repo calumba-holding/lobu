@@ -13,6 +13,7 @@ type WorkerContext = {
       conversationId: string;
       channelId: string;
       teamId: string;
+      connectionId?: string;
     };
   };
 };
@@ -50,7 +51,8 @@ export function createInteractionRoutes(
     async (c) => {
       try {
         const worker = c.get("worker");
-        const { userId, conversationId, channelId, teamId } = worker;
+        const { userId, conversationId, channelId, teamId, connectionId } =
+          worker;
         const { question, options } = await c.req.json();
 
         logger.info(`Posting question for conversation ${conversationId}`);
@@ -60,6 +62,7 @@ export function createInteractionRoutes(
           conversationId,
           channelId,
           teamId,
+          connectionId,
           question,
           options || []
         );

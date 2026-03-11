@@ -613,7 +613,17 @@ export abstract class BaseDeploymentManager {
       userId,
       conversationId,
       deploymentName,
-      { channelId, teamId, platform, agentId, traceId }
+      {
+        channelId,
+        teamId,
+        platform,
+        agentId,
+        connectionId:
+          typeof platformMetadata?.connectionId === "string"
+            ? platformMetadata.connectionId
+            : undefined,
+        traceId,
+      }
     );
 
     const dispatcherHost = this.getDispatcherHost();

@@ -234,6 +234,18 @@ export class WorkerGateway {
     try {
       const body = await c.req.json();
       const { jobId, ...responseData } = body;
+      const enrichedResponse =
+        auth.tokenData.connectionId &&
+        (!responseData.platformMetadata ||
+          typeof responseData.platformMetadata === "object")
+          ? {
+              ...responseData,
+              platformMetadata: {
+                ...(responseData.platformMetadata || {}),
+                connectionId: auth.tokenData.connectionId,
+              },
+            }
+          : responseData;
 
       // Acknowledge job completion if jobId provided
       if (jobId) {
@@ -241,22 +253,22 @@ export class WorkerGateway {
       }
 
       // Delivery receipts (worker ACKs) have no message payload — just acknowledge and return
-      if (responseData.received) {
+      if (enrichedResponse.received) {
         return c.json({ success: true });
       }
 
       // Log for debugging
       logger.info(
-        `[WORKER-GATEWAY] Received response with fields: ${Object.keys(responseData).join(", ")}`
+        `[WORKER-GATEWAY] Received response with fields: ${Object.keys(enrichedResponse).join(", ")}`
       );
-      if (responseData.delta) {
+      if (enrichedResponse.delta) {
         logger.info(
-          `[WORKER-GATEWAY] Stream delta: deltaLength=${responseData.delta.length}`
+          `[WORKER-GATEWAY] Stream delta: deltaLength=${enrichedResponse.delta.length}`
         );
       }
 
       // Send response to thread_response queue
-      await this.queue.send("thread_response", responseData);
+      await this.queue.send("thread_response", enrichedResponse);
 
       return c.json({ success: true });
     } catch (error) {

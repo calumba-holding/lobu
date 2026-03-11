@@ -14,6 +14,7 @@ export interface WorkerTokenData {
   channelId: string;
   teamId?: string; // Optional - not all platforms have teams
   agentId?: string; // Space ID for multi-tenant isolation
+  connectionId?: string;
   deploymentName: string;
   timestamp: number;
   platform?: string;
@@ -32,6 +33,7 @@ export function generateWorkerToken(
     channelId: string;
     teamId?: string;
     agentId?: string;
+    connectionId?: string;
     platform?: string;
     sessionKey?: string;
     traceId?: string; // Trace ID for end-to-end observability
@@ -49,6 +51,7 @@ export function generateWorkerToken(
     channelId: options.channelId,
     teamId: options.teamId, // Can be undefined - that's ok
     agentId: options.agentId, // Space ID for multi-tenant credential lookup
+    connectionId: options.connectionId,
     deploymentName,
     timestamp,
     platform: options.platform,

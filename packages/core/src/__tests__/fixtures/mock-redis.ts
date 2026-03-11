@@ -86,6 +86,14 @@ export class MockRedisClient {
     return deleted;
   }
 
+  async getdel(key: string): Promise<string | null> {
+    const value = await this.get(key);
+    if (value !== null) {
+      await this.del(key);
+    }
+    return value;
+  }
+
   async expire(key: string, seconds: number): Promise<number> {
     if (this.store.has(key)) {
       const entry = this.store.get(key)!;

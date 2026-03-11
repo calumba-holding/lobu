@@ -5,6 +5,7 @@ export * from "./impl";
 import { createLogger, moduleRegistry } from "@lobu/core";
 import type Redis from "ioredis";
 import type { ProviderCatalogService } from "../auth/provider-catalog";
+import type { ClaimService } from "../auth/settings/claim-service";
 import {
   getModelProviderModules,
   type ModelProviderModule,
@@ -47,7 +48,8 @@ export class Orchestrator {
   async injectCoreServices(
     redisClient?: Redis,
     providerCatalogService?: ProviderCatalogService,
-    grantStore?: GrantStore
+    grantStore?: GrantStore,
+    claimService?: ClaimService
   ): Promise<void> {
     // Inject Redis client into deployment manager for secret placeholder generation
     if (redisClient) {
@@ -64,6 +66,8 @@ export class Orchestrator {
       this.deploymentManager.setProviderCatalogService(providerCatalogService);
       this.queueConsumer.setProviderCatalogService(providerCatalogService);
     }
+
+    this.queueConsumer.setClaimService(claimService);
 
     // Refresh provider modules after gateway/core services have registered them.
     const providerModules = getModelProviderModules();

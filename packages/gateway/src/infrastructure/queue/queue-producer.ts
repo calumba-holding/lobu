@@ -32,7 +32,7 @@ export interface MessagePayload {
 
   // Bot & platform info (passed through to worker)
   botId: string; // Bot identifier
-  platform: string; // Platform name (e.g., "slack", "discord")
+  platform: string; // Platform name
 
   // Message content (used by worker)
   messageText: string; // The actual message text
@@ -125,7 +125,7 @@ export class QueueProducer {
         retryLimit: options?.retryLimit || 3,
         retryDelay: options?.retryDelay || 30,
         expireInSeconds: options?.expireInSeconds || 300, // 5 minutes = 300 seconds
-        singletonKey: `message-${payload.platform}-${payload.channelId}-${payload.conversationId}-${payload.messageId || Date.now()}`, // Prevent duplicates within canonical conversation identity
+        singletonKey: `message-${payload.platform}-${payload.channelId}-${payload.conversationId}-${String(payload.messageId || Date.now()).replace(/:/g, "-")}`, // Prevent duplicates within canonical conversation identity
       });
 
       logger.info(

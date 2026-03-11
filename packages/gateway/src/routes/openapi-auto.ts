@@ -26,6 +26,7 @@ const EXCLUDED_PREFIXES = [
   "/ready", // K8s readiness probe
   "/metrics", // Prometheus scraping
   "/api/telegram", // Telegram webhook
+  "/api/chat/webhook", // Chat SDK connection webhooks
   "/slack/", // Slack events
   "/settings/oauth", // Settings OAuth flow
 ];

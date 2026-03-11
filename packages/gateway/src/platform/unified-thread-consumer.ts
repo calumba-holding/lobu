@@ -5,6 +5,7 @@
  */
 
 import { createLogger } from "@lobu/core";
+import type { ChatResponseBridge } from "../connections/chat-response-bridge";
 import type {
   IMessageQueue,
   QueueJob,
@@ -22,10 +23,16 @@ const logger = createLogger("unified-thread-consumer");
 export class UnifiedThreadResponseConsumer {
   private isRunning = false;
 
+  private chatResponseBridge?: ChatResponseBridge;
+
   constructor(
     private queue: IMessageQueue,
     private platformRegistry: PlatformRegistry
   ) {}
+
+  setChatResponseBridge(bridge: ChatResponseBridge): void {
+    this.chatResponseBridge = bridge;
+  }
 
   /**
    * Start consuming thread_response messages.
@@ -67,6 +74,18 @@ export class UnifiedThreadResponseConsumer {
 
     if (!data || !data.messageId) {
       logger.error(`Invalid thread response data: ${JSON.stringify(data)}`);
+      return;
+    }
+
+    // Check if this response belongs to a Chat SDK connection — handle before legacy routing
+    if (this.chatResponseBridge?.canHandle(data)) {
+      const sessionKey = `${data.userId}:${data.originalMessageId || data.messageId}`;
+      try {
+        await this.routeToRenderer(this.chatResponseBridge, data, sessionKey);
+      } catch (error) {
+        logger.error("Error processing Chat SDK response:", error);
+        throw error;
+      }
       return;
     }
 

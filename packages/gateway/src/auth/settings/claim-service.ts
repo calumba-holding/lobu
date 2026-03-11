@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { createLogger } from "@lobu/core";
 import type Redis from "ioredis";
+import { resolvePublicUrl } from "../../utils/public-url";
 
 const logger = createLogger("settings-claim-service");
 
@@ -158,8 +159,7 @@ export function buildClaimSettingsUrl(
   claimCode: string,
   opts?: { agentId?: string }
 ): string {
-  const baseUrl = process.env.PUBLIC_GATEWAY_URL || "http://localhost:8080";
-  const url = new URL("/settings", baseUrl);
+  const url = new URL(resolvePublicUrl("/settings"));
   url.searchParams.set("claim", claimCode);
   if (opts?.agentId) {
     url.searchParams.set("agent", opts.agentId);

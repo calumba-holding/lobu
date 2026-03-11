@@ -281,6 +281,7 @@ export class OpenClawWorker implements WorkerExecutor {
       botResponseTs: config.botResponseId,
       teamId: config.teamId,
       platform: config.platform,
+      platformMetadata: config.platformMetadata,
     });
   }
 

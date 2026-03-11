@@ -7,7 +7,7 @@ import type Redis from "ioredis";
  * Pattern: {keyPrefix}:{state}
  * TTL: 5 minutes
  */
-export class OAuthStateStore<T extends { userId: string }> {
+export class OAuthStateStore<T extends object> {
   private static readonly TTL_SECONDS = 5 * 60; // 5 minutes
   protected logger: Logger;
 
@@ -38,7 +38,14 @@ export class OAuthStateStore<T extends { userId: string }> {
       JSON.stringify(stateData)
     );
 
-    this.logger.info(`Created OAuth state for user ${data.userId}`, { state });
+    const userId =
+      typeof (data as { userId?: unknown }).userId === "string"
+        ? (data as { userId: string }).userId
+        : undefined;
+    this.logger.info(
+      userId ? `Created OAuth state for user ${userId}` : "Created OAuth state",
+      { state }
+    );
     return state;
   }
 
@@ -60,9 +67,17 @@ export class OAuthStateStore<T extends { userId: string }> {
 
     try {
       const stateData = JSON.parse(data) as T & { createdAt: number };
-      this.logger.info(`Consumed OAuth state for user ${stateData.userId}`, {
-        state,
-      });
+      const stateDataWithUser = stateData as unknown as { userId?: unknown };
+      const userId =
+        typeof stateDataWithUser.userId === "string"
+          ? stateDataWithUser.userId
+          : undefined;
+      this.logger.info(
+        userId
+          ? `Consumed OAuth state for user ${userId}`
+          : "Consumed OAuth state",
+        { state }
+      );
       return stateData;
     } catch (error) {
       this.logger.error(`Failed to parse OAuth state: ${state}`, { error });
@@ -118,6 +133,18 @@ export function createOAuthStateStore(
     `${providerId}:oauth_state`,
     `${providerId}-oauth-state`
   );
+}
+
+export interface SlackInstallStateData {
+  redirectUri: string;
+}
+
+export type SlackInstallState = SlackInstallStateData & { createdAt: number };
+
+export function createSlackInstallStateStore(
+  redis: Redis
+): OAuthStateStore<SlackInstallStateData> {
+  return new OAuthStateStore(redis, "slack:oauth:state", "slack-install-state");
 }
 
 // ============================================================================

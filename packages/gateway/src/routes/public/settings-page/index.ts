@@ -5,6 +5,7 @@
 import type { AgentMetadata } from "../../../auth/agent-metadata-store";
 import type { AgentSettings } from "../../../auth/settings";
 import type { SettingsTokenPayload } from "../../../auth/settings/token-service";
+import { getAuthMethod } from "../../../connections/platform-auth-methods";
 import type { ModelOption } from "../../../modules/module-system";
 import { settingsPageCSS } from "../settings-page-styles";
 import { escapeHtml, formatUserId, getPlatformDisplay } from "./utils";
@@ -172,7 +173,10 @@ export function renderSettingsPage(
   <meta name="referrer" content="no-referrer">
   <title>Agent Settings - Lobu</title>
   <style>${settingsPageCSS}</style>
-  ${payload.platform === "telegram" ? '<script src="https://telegram.org/js/telegram-web-app.js"></script>' : ""}
+  ${(() => {
+    const s = getAuthMethod(payload.platform).scriptUrl;
+    return s ? `<script src="${s}"></script>` : "";
+  })()}
 </head>
 <body class="min-h-screen bg-gradient-to-br from-slate-700 to-slate-900 p-4">
   <div class="max-w-xl mx-auto bg-white rounded-2xl shadow-2xl p-6">
@@ -198,7 +202,10 @@ export function renderPickerPage(
   <meta name="referrer" content="no-referrer">
   <title>Configure Agent - Lobu</title>
   <style>${settingsPageCSS}</style>
-  ${payload.platform === "telegram" ? '<script src="https://telegram.org/js/telegram-web-app.js"></script>' : ""}
+  ${(() => {
+    const s = getAuthMethod(payload.platform).scriptUrl;
+    return s ? `<script src="${s}"></script>` : "";
+  })()}
 </head>
 <body class="min-h-screen bg-gradient-to-br from-slate-700 to-slate-900 p-4">
   <div class="max-w-xl mx-auto bg-white rounded-2xl shadow-2xl p-6">

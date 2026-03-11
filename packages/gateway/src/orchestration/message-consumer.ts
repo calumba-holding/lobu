@@ -10,8 +10,11 @@ import {
   SpanStatusCode,
 } from "@lobu/core";
 import * as Sentry from "@sentry/node";
-import { platformAuthRegistry } from "../auth/platform-auth";
 import type { ProviderCatalogService } from "../auth/provider-catalog";
+import {
+  buildClaimSettingsUrl,
+  type ClaimService,
+} from "../auth/settings/claim-service";
 import type {
   IMessageQueue,
   QueueJob as SharedQueueJob,
@@ -40,6 +43,7 @@ export class MessageConsumer {
   private providerModules: ModelProviderModule[];
   private providerCatalogService?: ProviderCatalogService;
   private systemMessageLimiter?: SystemMessageLimiter;
+  private claimService?: ClaimService;
 
   constructor(
     config: OrchestratorConfig,
@@ -121,6 +125,10 @@ export class MessageConsumer {
 
   setProviderCatalogService(service: ProviderCatalogService): void {
     this.providerCatalogService = service;
+  }
+
+  setClaimService(service: ClaimService | undefined): void {
+    this.claimService = service;
   }
 
   private async getEffectiveProviders(
@@ -261,30 +269,17 @@ export class MessageConsumer {
           didSend = await this.getSystemMessageLimiter().sendOnce(
             dedupeKey,
             async () => {
-              // Build list of unauthenticated providers
-              const unauthProviders = await this.getUnauthenticatedProviders(
-                data.agentId,
-                agentModel
+              const unauthenticatedProviders =
+                await this.getUnauthenticatedProviders(
+                  data.agentId,
+                  agentModel
+                );
+              const authPrompt = await this.buildAuthPromptContent(
+                data,
+                unauthenticatedProviders
               );
 
-              // Use platform auth adapter if available
-              const authAdapter = platformAuthRegistry.get(data.platform);
-              if (authAdapter) {
-                // Platform-specific auth prompt (e.g., WhatsApp numbered list)
-                await authAdapter.sendAuthPrompt(
-                  data.userId,
-                  data.channelId,
-                  data.conversationId,
-                  unauthProviders,
-                  data.platformMetadata
-                );
-                logger.info(
-                  `✅ Sent platform-specific auth prompt for agent ${data.agentId} via ${data.platform} adapter`
-                );
-                return;
-              }
-
-              // Fallback: Send Slack-style ephemeral message for platforms without adapter
+              // Send ephemeral auth prompt via response queue
               const responseQueue = "thread_response";
               await this.queue.createQueue(responseQueue);
               await this.queue.send(responseQueue, {
@@ -295,22 +290,10 @@ export class MessageConsumer {
                 platform: data.platform,
                 platformMetadata: data.platformMetadata,
                 ephemeral: true,
-                content: JSON.stringify({
-                  blocks: [
-                    {
-                      type: "section",
-                      text: {
-                        type: "mrkdwn",
-                        text: "🔐 *Setup Required*\n\nYou need to add a model provider to use this bot. Please visit the settings page to configure.",
-                      },
-                    },
-                  ],
-                }),
+                content: authPrompt,
                 processedMessageIds: [data.messageId],
               });
-              logger.info(
-                `✅ Sent Slack-style auth prompt for agent ${data.agentId}`
-              );
+              logger.info(`✅ Sent auth prompt for agent ${data.agentId}`);
             },
             {
               sentTtlSeconds: throttleSeconds,
@@ -777,6 +760,38 @@ export class MessageConsumer {
       }
     }
     return unauthProviders;
+  }
+
+  private async buildAuthPromptContent(
+    data: MessagePayload,
+    unauthenticatedProviders: Array<{ id: string; name: string }>
+  ): Promise<string> {
+    const providerNames = unauthenticatedProviders.map(
+      (provider) => provider.name
+    );
+    const providerIds = unauthenticatedProviders.map((provider) => provider.id);
+    const providerLabel =
+      providerNames.length > 0 ? providerNames.join(", ") : "a model provider";
+    const message = `Setup required: add ${providerLabel} in settings before this bot can respond.`;
+
+    if (!this.claimService) {
+      return message;
+    }
+
+    const claimCode = await this.claimService.createClaim(
+      data.platform,
+      data.channelId,
+      data.userId
+    );
+    const settingsUrl = new URL(
+      buildClaimSettingsUrl(claimCode, { agentId: data.agentId })
+    );
+
+    if (providerIds.length > 0) {
+      settingsUrl.searchParams.set("providers", providerIds.join(","));
+    }
+
+    return `${message}\n\n[Open Settings](${settingsUrl.toString()})`;
   }
 
   /**

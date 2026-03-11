@@ -4,7 +4,8 @@
  * Serves the unified settings/agent-selector page.
  * OAuth + claims is the only auth path. No fallback to encrypted tokens.
  *
- * Telegram uses initData (HMAC-signed by bot token) for session creation.
+ * Platforms that support webapp-initdata auth (e.g. Telegram) use their
+ * platform-specific signed payloads for session creation.
  */
 
 import { OpenAPIHono } from "@hono/zod-openapi";
@@ -22,11 +23,13 @@ import type {
   PrefillMcpServer,
   SettingsTokenPayload,
 } from "../../auth/settings/token-service";
+import { verifyTelegramWebAppData } from "../../auth/telegram-webapp-auth";
 import type { UserAgentsStore } from "../../auth/user-agents-store";
 import type { ChannelBindingService } from "../../channels";
+import { getAuthMethod } from "../../connections/platform-auth-methods";
 import { getModelProviderModules } from "../../modules/module-system";
 import { platformAgentId } from "../../spaces";
-import { verifyTelegramWebAppData } from "../../telegram/webapp-auth";
+import { verifyAgentAccess } from "./agent-access";
 import {
   clearSettingsSessionCookie,
   setSettingsSessionCookie,
@@ -118,45 +121,6 @@ interface SettingsOAuthStateData {
   returnUrl: string;
 }
 
-/**
- * Verify that the authenticated session user is authorized to act on the given agent.
- * Mirrors the verifyToken pattern in agent-config.ts.
- */
-async function verifyAgentAccess(
-  session: SettingsTokenPayload,
-  agentId: string,
-  config: SettingsPageConfig
-): Promise<boolean> {
-  // If the session is scoped to a specific agent, it must match
-  if (session.agentId) {
-    return session.agentId === agentId;
-  }
-
-  // For deterministic platforms, the agent is inherently owned by the platform user
-  const isDeterministic =
-    session.platform === "telegram" || session.platform === "whatsapp";
-  const lookupUserId = isDeterministic
-    ? session.userId
-    : session.oauthUserId || session.userId;
-
-  // Check ownership via user-agents index
-  const owns = await config.userAgentsStore.ownsAgent(
-    session.platform,
-    lookupUserId,
-    agentId
-  );
-  if (owns) return true;
-
-  // Fallback: check canonical metadata owner
-  const metadata = await config.agentMetadataStore.getMetadata(agentId);
-  if (!metadata) return false;
-
-  return (
-    metadata.owner?.platform === session.platform &&
-    metadata.owner?.userId === lookupUserId
-  );
-}
-
 export interface SettingsPageConfig {
   agentSettingsStore: AgentSettingsStore;
   userAgentsStore: UserAgentsStore;
@@ -165,7 +129,7 @@ export interface SettingsPageConfig {
   integrationConfigService?: import("../../auth/integration/config-service").IntegrationConfigService;
   integrationCredentialStore?: import("../../auth/integration/credential-store").IntegrationCredentialStore;
   connectionManager?: import("../../gateway/connection-manager").WorkerConnectionManager;
-  /** Settings OAuth client (optional — Telegram initData auth works without it) */
+  /** Settings OAuth client (optional — webapp-initdata auth works without it) */
   settingsOAuthClient?: SettingsOAuthClient;
   /** Settings OAuth state store (optional — required only when OAuth client is set) */
   settingsOAuthStateStore?: OAuthStateStore<SettingsOAuthStateData>;
@@ -379,9 +343,9 @@ async function renderSettingsForPayload(
     payload.userId
   );
 
-  // Deterministic platforms (Telegram/WhatsApp) don't need agent switching
+  // Non-OAuth platforms don't need agent switching
   const isDeterministicPlatform =
-    payload.platform === "telegram" || payload.platform === "whatsapp";
+    getAuthMethod(payload.platform).type !== "oauth";
   const showSwitcher = !isDeterministicPlatform && !!payload.channelId;
 
   // Get agents list for switcher (only if switcher is enabled)
@@ -469,20 +433,32 @@ export function createSettingsPageRoutes(
   const claimService = config.claimService;
 
   // ====================================================================
-  // POST /settings/session — Telegram initData authentication only
+  // POST /settings/session — webapp-initdata authentication
   // ====================================================================
   app.post("/settings/session", async (c) => {
     const body = await c.req
-      .json<{ initData?: string; chatId?: string }>()
-      .catch((): { initData?: string; chatId?: string } => ({}));
+      .json<{ initData?: string; chatId?: string; platform?: string }>()
+      .catch(
+        (): { initData?: string; chatId?: string; platform?: string } => ({})
+      );
 
     if (!body.initData) {
       return c.json({ error: "Missing initData" }, 400);
     }
 
+    const platform = (body.platform ?? "").trim();
+    if (!platform) {
+      return c.json({ error: "Missing platform" }, 400);
+    }
+
+    const authMethod = getAuthMethod(platform);
+    if (authMethod.type !== "webapp-initdata") {
+      return c.json({ error: "Platform does not support initData auth" }, 400);
+    }
+
     const botToken = process.env.TELEGRAM_BOT_TOKEN;
     if (!botToken) {
-      return c.json({ error: "Telegram not configured" }, 500);
+      return c.json({ error: "Platform not configured" }, 500);
     }
 
     const chatId = (body.chatId ?? "").trim();
@@ -493,7 +469,7 @@ export function createSettingsPageRoutes(
     const webAppData = verifyTelegramWebAppData(body.initData, botToken);
     if (!webAppData) {
       clearSettingsSessionCookie(c);
-      return c.json({ error: "Invalid or expired Telegram data" }, 401);
+      return c.json({ error: "Invalid or expired initData" }, 401);
     }
 
     const userId = String(webAppData.user.id);
@@ -504,20 +480,19 @@ export function createSettingsPageRoutes(
       return c.json({ error: "Chat ID mismatch" }, 403);
     }
 
-    // Check if this Telegram user has a linked OAuth identity
     const linkedOAuthUserId = await claimService.getLinkedOAuthUserId(
-      "telegram",
+      platform,
       userId
     );
 
     // Linked users get a 24h session with oauthUserId (same as OAuth sessions)
-    // Unlinked users get a 1h session without oauthUserId (current behavior)
+    // Unlinked users get a 1h session without oauthUserId
     const sessionTtlMs = linkedOAuthUserId
       ? 24 * 60 * 60 * 1000
       : 60 * 60 * 1000;
     const session: SettingsTokenPayload = {
       userId,
-      platform: "telegram",
+      platform,
       channelId: chatId,
       exp: Date.now() + sessionTtlMs,
       ...(linkedOAuthUserId && { oauthUserId: linkedOAuthUserId }),
@@ -645,7 +620,7 @@ export function createSettingsPageRoutes(
     app.get("/settings/oauth/login", (c) =>
       c.html(
         renderErrorPage(
-          "OAuth login is not configured. Use Telegram to access settings."
+          "OAuth login is not configured. Use /configure in your chat to access settings."
         ),
         501
       )
@@ -667,22 +642,21 @@ export function createSettingsPageRoutes(
     let session = verifySettingsSession(c);
 
     // 1b. Claim-based flow: if the URL has ?claim= and the existing session
-    // lacks an oauthUserId (e.g. Telegram initData session), clear the stale
+    // lacks an oauthUserId (e.g. webapp-initdata session), clear the stale
     // session so the claim+OAuth flow can proceed properly.
     if (session && c.req.query("claim") && !session.oauthUserId) {
       clearSettingsSessionCookie(c);
       session = null;
     }
 
-    // 2. No session + Telegram initData URL → render bootstrap page for Telegram
-    // Must happen before claim handling, otherwise Telegram WebApp links that
+    // 2. No session + webapp-initdata platform URL → render bootstrap page
+    // Must happen before claim handling, otherwise WebApp links that
     // include claim=... will be redirected to OAuth login unnecessarily.
     if (!session) {
       const qp = c.req.query("platform");
       const chatId = c.req.query("chat");
-      if (qp === "telegram" && chatId) {
-        // Telegram WebApp - render a bootstrap page that extracts initData from hash
-        return c.html(renderTelegramBootstrapPage());
+      if (qp && chatId && getAuthMethod(qp).type === "webapp-initdata") {
+        return c.html(renderWebAppBootstrapPage());
       }
 
       // 3. No session + ?claim= → redirect to OAuth login (preserving returnUrl)
@@ -690,7 +664,7 @@ export function createSettingsPageRoutes(
         if (!oauthClient) {
           return c.html(
             renderErrorPage(
-              "OAuth login is not configured. Use Telegram to access settings."
+              "OAuth login is not configured. Use /configure in your chat to access settings."
             ),
             501
           );
@@ -842,11 +816,8 @@ export function createSettingsPageRoutes(
       );
       if (binding) {
         agentId = binding.agentId;
-      } else if (
-        session.platform === "telegram" ||
-        session.platform === "whatsapp"
-      ) {
-        // Deterministic agent ID for Telegram/WhatsApp — no binding needed
+      } else if (getAuthMethod(session.platform).type !== "oauth") {
+        // Deterministic agent ID for non-OAuth platforms — no binding needed
         const isGroup = session.channelId.startsWith("-");
         agentId = platformAgentId(
           session.platform,
@@ -859,9 +830,9 @@ export function createSettingsPageRoutes(
 
     // Verify OAuth sessions have access to the resolved agent
     if (agentId && session.oauthUserId) {
-      // Deterministic platform agents are owned by the session user — no binding check needed
+      // Non-OAuth platform agents are owned by the session user — no binding check needed
       const isDeterministicAgent =
-        session.platform === "telegram" || session.platform === "whatsapp";
+        getAuthMethod(session.platform).type !== "oauth";
 
       if (!isDeterministicAgent && session.agentId !== agentId) {
         const channels = await claimService.getAccessibleChannels(
@@ -956,7 +927,7 @@ export function createSettingsPageRoutes(
         return c.html(renderPickerPage(syntheticPayload, agents));
       }
 
-      // Telegram/non-OAuth session with channelId: show agent picker
+      // Non-OAuth session with channelId: show agent picker
       if (session.channelId && session.platform) {
         const agentIds = await config.userAgentsStore.listAgents(
           session.platform,
@@ -992,10 +963,9 @@ export function createSettingsPageRoutes(
     }
 
     // Build payload for rendering
-    // For Telegram/WhatsApp, use the platform userId (e.g. "6570514069"), not the opaque OAuth ID
+    // For non-OAuth platforms, use the platform userId directly, not the opaque OAuth ID
     const effectivePlatform = platformParam || session.platform || "unknown";
-    const isDeterministic =
-      effectivePlatform === "telegram" || effectivePlatform === "whatsapp";
+    const isDeterministic = getAuthMethod(effectivePlatform).type !== "oauth";
     const payload: SettingsTokenPayload = {
       userId: isDeterministic
         ? session.userId
@@ -1103,10 +1073,10 @@ export function createSettingsPageRoutes(
 }
 
 /**
- * Minimal bootstrap page for Telegram WebApp initData authentication.
+ * Minimal bootstrap page for webapp-initdata authentication.
  * Extracts initData from the URL hash fragment and POSTs to /settings/session.
  */
-function renderTelegramBootstrapPage(): string {
+function renderWebAppBootstrapPage(): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1144,14 +1114,15 @@ function renderTelegramBootstrapPage(): string {
 
       var qp = new URLSearchParams(window.location.search);
       var chatId = qp.get('chat');
+      var platform = qp.get('platform') || '';
 
-      // Telegram injects initData as #tgWebAppData=<url-encoded-initData>&...
+      // WebApp injects initData as #tgWebAppData=<url-encoded-initData>&...
       var hashStr = window.location.hash ? window.location.hash.slice(1) : '';
       var hashParams = new URLSearchParams(hashStr);
       var initData = hashParams.get('tgWebAppData') || '';
 
       if (!initData) {
-        showError('Could not authenticate with Telegram. Please open this link using the button in Telegram, not as a regular URL.');
+        showError('Could not authenticate. Please open this link using the button in your chat app, not as a regular URL.');
         return;
       }
 
@@ -1159,7 +1130,7 @@ function renderTelegramBootstrapPage(): string {
         var resp = await fetch('/settings/session', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ initData: initData, chatId: chatId })
+          body: JSON.stringify({ initData: initData, chatId: chatId, platform: platform })
         });
         if (resp.ok) {
           var rp = new URLSearchParams(window.location.search);
@@ -1174,7 +1145,7 @@ function renderTelegramBootstrapPage(): string {
           return;
         }
         var result = await resp.json().catch(function () { return {}; });
-        showError(result.error || 'Telegram authentication failed.');
+        showError(result.error || 'Authentication failed.');
       } catch (e) {
         showError('Network error while authenticating.');
       }

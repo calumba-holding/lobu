@@ -537,6 +537,7 @@ export class GatewayClient {
       originalMessageTs: execId,
       teamId: data.teamId || "api",
       platform: data.platform,
+      platformMetadata: data.platformMetadata,
     });
 
     let completed = false;

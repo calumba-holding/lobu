@@ -174,4 +174,11 @@ export class Gateway {
   getPlatformRegistry() {
     return platformRegistry;
   }
+
+  /**
+   * Get unified thread response consumer (for wiring Chat SDK response bridge)
+   */
+  getUnifiedConsumer() {
+    return this.unifiedConsumer;
+  }
 }

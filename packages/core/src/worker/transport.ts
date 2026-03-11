@@ -99,6 +99,9 @@ export interface WorkerTransportConfig {
   /** Platform identifier (slack, whatsapp, api, etc.) */
   platform?: string;
 
+  /** Platform-specific metadata needed for response routing */
+  platformMetadata?: Record<string, unknown>;
+
   /** IDs of messages already processed (for deduplication) */
   processedMessageIds?: string[];
 }
