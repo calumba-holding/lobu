@@ -18,6 +18,8 @@ export interface SkillRegistryResult {
   name: string;
   description?: string;
   installs?: number;
+  score?: number;
+  uri?: string;
   source: string;
   integrations?: SkillIntegration[];
 }
@@ -98,9 +100,7 @@ export class SkillRegistryCoordinator {
         const config = JSON.parse(raw) as RegistriesConfig;
 
         if (config.registries?.length) {
-          // Filter out "lobu" type entries
-          const filtered = config.registries.filter((e) => e.type !== "lobu");
-          return filtered
+          return config.registries
             .map((entry) => this.createRegistry(entry))
             .filter(Boolean) as SkillRegistry[];
         }
@@ -134,7 +134,6 @@ export class SkillRegistryCoordinator {
   private buildExtraRegistries(extras?: RegistryConfig[]): SkillRegistry[] {
     if (!extras?.length) return [];
     return extras
-      .filter((e) => e.type !== "lobu")
       .map((entry) => this.createRegistry(entry))
       .filter(Boolean) as SkillRegistry[];
   }
@@ -173,6 +172,7 @@ export class SkillRegistryCoordinator {
       }
     }
 
+    merged.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
     return merged.slice(0, limit);
   }
 
@@ -206,6 +206,10 @@ const registryFactories: Record<string, RegistryFactory> = {
   clawhub: (config) => {
     const { ClawHubRegistry } = require("./skills-fetcher");
     return new ClawHubRegistry(config.apiUrl);
+  },
+  lobu: (config) => {
+    const { SystemSkillsRegistry } = require("./system-skills-registry");
+    return new SystemSkillsRegistry(config.apiUrl);
   },
 };
 

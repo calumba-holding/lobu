@@ -110,6 +110,8 @@ export function createIntegrationsDiscoveryRoutes(
             name: content.name,
             description: content.description,
             source: result.source,
+            score: result.score,
+            uri: result.uri,
             installs: result.installs,
             integrations: content.integrations,
             mcpServers: content.mcpServers,
@@ -123,6 +125,8 @@ export function createIntegrationsDiscoveryRoutes(
             name: result.name,
             description: result.description,
             source: result.source,
+            score: result.score,
+            uri: result.uri,
             installs: result.installs,
           };
         }

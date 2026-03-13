@@ -420,6 +420,8 @@ interface SkillSearchResult {
   name: string;
   description: string;
   source: string;
+  score?: number;
+  uri?: string;
   integrations?: SkillIntegrationRef[];
   mcpServers?: SkillMcpServerRef[];
   nixPackages?: string[];
@@ -440,6 +442,7 @@ function formatSkillSearchResults(results: SkillSearchResult[]): string {
       const lines = [
         `${index + 1}. ${item.name} (${item.id})`,
         `   ${item.description || "No description"}`,
+        `   source: ${item.source}${item.score != null ? ` | score: ${Math.round(item.score * 100) / 100}` : ""}${item.uri ? ` | ${item.uri}` : ""}`,
       ];
       const deps: string[] = [];
       if (item.nixPackages?.length)
@@ -502,6 +505,8 @@ export async function searchSkills(
             name: string;
             description?: string;
             source: string;
+            score?: number;
+            uri?: string;
             integrations?: SkillIntegrationRef[];
             mcpServers?: SkillMcpServerRef[];
             nixPackages?: string[];
@@ -520,6 +525,8 @@ export async function searchSkills(
           name: s.name,
           description: s.description || "",
           source: s.source || "clawhub",
+          score: s.score,
+          uri: s.uri,
           integrations: s.integrations,
           mcpServers: s.mcpServers,
           nixPackages: s.nixPackages,
@@ -557,7 +564,9 @@ export async function searchSkills(
 
     return textResult(
       `${sections.join("\n\n")}\n\n` +
-        `Use InstallSkill with the selected id to generate an install link for the user.`
+        `Prefer system skills (source: system) — they are curated and pre-configured.\n` +
+        `Use InstallSkill with the selected id to install a skill from these results.\n` +
+        `If no result fits, you can define an inline skill with InstallSkill(reason, providers?, mcpServers?, skills?).`
     );
   });
 }
