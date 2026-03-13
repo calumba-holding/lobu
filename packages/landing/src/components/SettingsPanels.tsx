@@ -67,20 +67,20 @@ export function ConnectionsPanel() {
       platform: "telegram",
       icon: "✈️",
       iconBg: "bg-sky-100",
-      botName: "@yoursaasbot",
+      botName: "DevOps",
       online: true,
       chats: [
         { name: "Alice Chen", id: "8291045832" },
-        { name: "DevOps Team", id: "-100204817" },
+        { name: "Infra Team", id: "-100204817" },
       ],
     },
     {
-      platform: "slack",
-      icon: "💬",
-      iconBg: "bg-purple-100",
-      botName: "YourSaaS Bot",
+      platform: "discord",
+      icon: "🎮",
+      iconBg: "bg-indigo-100",
+      botName: "Marketing",
       online: true,
-      chats: [{ name: "#engineering", id: "C08NQKL" }],
+      chats: [{ name: "#campaigns", id: "109284710" }],
     },
   ];
 
