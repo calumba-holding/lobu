@@ -1,4 +1,4 @@
-import type { ComponentType } from "preact";
+import type { ComponentChildren, ComponentType } from "preact";
 import { useState } from "preact/hooks";
 import { useCases } from "../use-cases";
 import {
@@ -11,6 +11,41 @@ import {
   RemindersPanel,
 } from "./SettingsPanels";
 import { TelegramChat } from "./TelegramChat";
+import { TerminalLog } from "./TerminalLog";
+
+const PLATFORM_FAVICONS: Record<string, string> = {
+  Telegram: "telegram.org",
+  Slack: "slack.com",
+  Discord: "discord.com",
+  WhatsApp: "whatsapp.com",
+  Teams: "teams.microsoft.com",
+};
+
+const PLATFORM_PATTERN = new RegExp(
+  `(${Object.keys(PLATFORM_FAVICONS).join("|")})`,
+  "g"
+);
+
+function renderDescriptionWithIcons(text: string): ComponentChildren {
+  const parts = text.split(PLATFORM_PATTERN);
+  return parts.map((part) => {
+    const domain = PLATFORM_FAVICONS[part];
+    if (!domain) return part;
+    return (
+      <span class="inline-flex items-center gap-0.5" key={part}>
+        <img
+          src={`https://www.google.com/s2/favicons?domain=${domain}&sz=32`}
+          alt={part}
+          width={14}
+          height={14}
+          class="inline-block align-[-2px]"
+          loading="lazy"
+        />
+        {part}
+      </span>
+    );
+  });
+}
 
 const PANEL_MAP: Record<string, ComponentType> = {
   connections: ConnectionsPanel,
@@ -66,7 +101,7 @@ function FeatureRow({
           class="text-sm leading-relaxed md:ml-auto max-w-md"
           style={{ color: "var(--color-page-text-muted)" }}
         >
-          {uc.description}
+          {renderDescriptionWithIcons(uc.description)}
         </p>
         {uc.learnMoreUrl && (
           <a
@@ -127,7 +162,11 @@ function FeatureRow({
         >
           {uc.chatLabel}
         </p>
-        <TelegramChat useCase={uc} onButtonHover={setPanelHighlight} />
+        {uc.id === "connections" ? (
+          <TerminalLog />
+        ) : (
+          <TelegramChat useCase={uc} onButtonHover={setPanelHighlight} />
+        )}
       </div>
     </>
   );

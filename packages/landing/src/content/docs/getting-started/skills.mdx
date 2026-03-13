@@ -4,9 +4,12 @@ description: How skills work in Lobu — integrations, system packages, MCP serv
 ---
 
 import { SkillsRegistryTable } from "../../../components/SkillsRegistryTable";
+import { TerminalLog } from "../../../components/TerminalLog";
 import skillsConfig from "@skills-config";
 
 A **skill** is a self-contained capability definition for a Lobu agent. Skills declare what external services, system packages, MCP servers, network access, and tool permissions an agent session needs. The gateway resolves these declarations at session start, so the worker container launches with the right environment — no manual setup required.
+
+<TerminalLog client:load />
 
 ## How skills work
 

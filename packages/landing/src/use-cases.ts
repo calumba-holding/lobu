@@ -7,8 +7,9 @@ export const useCases: UseCase[] = [
     title: "Connect any platform",
     description:
       "Add Telegram, Slack, Discord, WhatsApp, or Teams from the admin page. No env vars — just paste your bot token and go.",
+    learnMoreUrl: "/getting-started/skills",
     settingsLabel: "Manage platform connections",
-    chatLabel: "Bot works instantly after connecting",
+    chatLabel: "What you see in the terminal",
     botName: "Lobu",
     botInitial: "L",
     botColor: "#0ea5e9",
