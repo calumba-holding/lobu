@@ -69,10 +69,8 @@ export async function devCommand(
     spinner.succeed("Environment prepared from lobu.toml");
 
     // Check for docker-compose.yml
-    const composePath = join(cwd, "docker-compose.yml");
-    let composeContent: string;
     try {
-      composeContent = await readFile(composePath, "utf-8");
+      await readFile(join(cwd, "docker-compose.yml"), "utf-8");
     } catch {
       console.log(
         chalk.yellow(
@@ -82,9 +80,8 @@ export async function devCommand(
       process.exit(1);
     }
 
-    // Parse gateway port from docker-compose.yml
-    const portMatch = composeContent.match(/"(\d+):8080"/);
-    const gatewayPort = portMatch ? portMatch[1] : "8080";
+    // Read gateway port from .env (already merged)
+    const gatewayPort = mergedVars.GATEWAY_PORT || "8080";
     const gatewayUrl = `http://localhost:${gatewayPort}`;
 
     console.log(
