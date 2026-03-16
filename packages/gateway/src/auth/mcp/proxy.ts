@@ -110,16 +110,36 @@ export class McpProxy {
       if (cached) return cached;
     }
 
-    let resolved = await this.resolveMcpServer(mcpId, tokenData);
-    if (!resolved) {
-      // Retry with discoveryOnly to attempt unauthenticated tool listing
-      resolved = await this.resolveMcpServer(mcpId, tokenData, {
-        discoveryOnly: true,
+    let resolved: ResolvedMcp | null = null;
+    try {
+      resolved = await this.resolveMcpServer(mcpId, tokenData);
+      if (!resolved) {
+        // Retry with discoveryOnly to attempt unauthenticated tool listing
+        resolved = await this.resolveMcpServer(mcpId, tokenData, {
+          discoveryOnly: true,
+        });
+      }
+    } catch (resolveError) {
+      logger.error("Failed to resolve MCP server", {
+        mcpId,
+        error:
+          resolveError instanceof Error
+            ? resolveError.message
+            : String(resolveError),
       });
-      if (!resolved) return { tools: [] };
+    }
+    if (!resolved) {
+      return { tools: [] };
     }
 
     try {
+      // Clear any stale session before fresh tool discovery —
+      // the upstream server may have restarted, invalidating old sessions.
+      const sessionKey = `mcp:session:${resolved.agentId}:${mcpId}`;
+      await this.redisClient.del(sessionKey).catch(() => {
+        // Ignore — stale key may not exist
+      });
+
       // Step 1: Send initialize to capture server instructions
       let instructions: string | undefined;
       try {
@@ -234,7 +254,12 @@ export class McpProxy {
     const auth = authenticateRequest(c);
     if (!auth) return c.json({ error: "Invalid authentication token" }, 401);
 
-    const resolved = await this.resolveMcpServer(mcpId, auth.tokenData);
+    let resolved = await this.resolveMcpServer(mcpId, auth.tokenData);
+    if (!resolved) {
+      resolved = await this.resolveMcpServer(mcpId, auth.tokenData, {
+        discoveryOnly: true,
+      });
+    }
     if (!resolved) {
       return c.json({ error: `MCP server '${mcpId}' not found` }, 404);
     }
@@ -297,7 +322,13 @@ export class McpProxy {
     const auth = authenticateRequest(c);
     if (!auth) return c.json({ error: "Invalid authentication token" }, 401);
 
-    const resolved = await this.resolveMcpServer(mcpId, auth.tokenData);
+    let resolved = await this.resolveMcpServer(mcpId, auth.tokenData);
+    if (!resolved) {
+      // Retry without credentials — some MCP servers allow unauthenticated calls
+      resolved = await this.resolveMcpServer(mcpId, auth.tokenData, {
+        discoveryOnly: true,
+      });
+    }
     if (!resolved) {
       return c.json({ error: `MCP server '${mcpId}' not found` }, 404);
     }
@@ -359,7 +390,7 @@ export class McpProxy {
         id: 1,
       });
 
-      const response = await this.sendUpstreamRequest(
+      let response = await this.sendUpstreamRequest(
         resolved.httpServer,
         resolved.credentials,
         resolved.inputValues,
@@ -369,7 +400,34 @@ export class McpProxy {
         jsonRpcBody
       );
 
-      const data = (await response.json()) as JsonRpcResponse;
+      let data = (await response.json()) as JsonRpcResponse;
+
+      // Re-initialize session and retry on "Server not initialized"
+      if (data?.error && /not initialized/i.test(data.error.message || "")) {
+        logger.info("MCP session expired, re-initializing before retry", {
+          mcpId,
+          toolName,
+        });
+        await this.reinitializeSession(
+          resolved.httpServer,
+          resolved.credentials,
+          resolved.inputValues,
+          resolved.agentId,
+          mcpId
+        );
+
+        response = await this.sendUpstreamRequest(
+          resolved.httpServer,
+          resolved.credentials,
+          resolved.inputValues,
+          resolved.agentId,
+          mcpId,
+          "POST",
+          jsonRpcBody
+        );
+        data = (await response.json()) as JsonRpcResponse;
+      }
+
       if (data?.error) {
         const errorMsg =
           data.error.message ||
@@ -775,7 +833,7 @@ export class McpProxy {
   ): Record<string, string> {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
-      Accept: "application/json, text/event-stream",
+      Accept: "application/json",
     };
 
     if (sessionId) {
@@ -850,9 +908,29 @@ export class McpProxy {
     mcpId: string
   ): Promise<Response> {
     const sessionKey = `mcp:session:${agentId}:${mcpId}`;
-    const sessionId = await this.getSession(sessionKey);
+    let sessionId = await this.getSession(sessionKey);
 
     let bodyText = await this.getRequestBodyAsText(c);
+
+    // If no active session exists, re-initialize before forwarding
+    // This handles cases where the upstream session expired
+    if (!sessionId && c.req.method === "POST") {
+      try {
+        await this.reinitializeSession(
+          httpServer,
+          credentials,
+          inputValues,
+          agentId,
+          mcpId
+        );
+        sessionId = await this.getSession(sessionKey);
+      } catch (error) {
+        logger.warn("Pre-emptive MCP re-initialization failed", {
+          mcpId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
 
     logger.info("Proxying MCP request", {
       mcpId,
@@ -925,6 +1003,67 @@ export class McpProxy {
     } catch {
       return "";
     }
+  }
+
+  /**
+   * Re-initialize an MCP session by sending initialize + notifications/initialized.
+   * Called when upstream returns "Server not initialized" (stale session).
+   */
+  private async reinitializeSession(
+    httpServer: any,
+    credentials: { accessToken: string; tokenType?: string } | null,
+    inputValues: Record<string, string>,
+    agentId: string,
+    mcpId: string
+  ): Promise<void> {
+    // Clear stale session
+    const sessionKey = `mcp:session:${agentId}:${mcpId}`;
+    await this.redisClient.del(sessionKey).catch(() => {
+      // Ignore — stale key may not exist
+    });
+
+    // Send initialize
+    const initBody = JSON.stringify({
+      jsonrpc: "2.0",
+      method: "initialize",
+      params: {
+        protocolVersion: "2024-11-05",
+        capabilities: {},
+        clientInfo: { name: "lobu-gateway", version: "1.0.0" },
+      },
+      id: 0,
+    });
+
+    const initResponse = await this.sendUpstreamRequest(
+      httpServer,
+      credentials,
+      inputValues,
+      agentId,
+      mcpId,
+      "POST",
+      initBody
+    );
+
+    await initResponse.json(); // consume response
+
+    // Send notifications/initialized
+    const notifyBody = JSON.stringify({
+      jsonrpc: "2.0",
+      method: "notifications/initialized",
+    });
+    await this.sendUpstreamRequest(
+      httpServer,
+      credentials,
+      inputValues,
+      agentId,
+      mcpId,
+      "POST",
+      notifyBody
+    ).catch(() => {
+      // Ignore — notification delivery is best-effort
+    });
+
+    logger.info("Re-initialized MCP session", { mcpId, agentId });
   }
 
   private async getSession(key: string): Promise<string | null> {

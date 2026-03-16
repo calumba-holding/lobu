@@ -1461,7 +1461,12 @@ export async function callMcpTool(
     };
 
     if (!response.ok || data.isError) {
-      const errorMsg = data.error || `${toolName} failed (${response.status})`;
+      const contentText = data.content
+        ?.filter((c) => c.type === "text")
+        .map((c) => c.text)
+        .join("\n");
+      const errorMsg =
+        data.error || contentText || `${toolName} failed (${response.status})`;
       return textResult(`Error: ${errorMsg}`);
     }
 

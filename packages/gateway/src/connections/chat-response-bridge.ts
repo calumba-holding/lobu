@@ -397,7 +397,29 @@ export class ChatResponseBridge implements ResponseRenderer {
       channelId,
       conversationId
     );
-    if (!target) return;
+    if (!target) {
+      logger.warn(
+        {
+          connectionId,
+          channelId,
+          conversationId,
+          platform: instance.connection.platform,
+        },
+        "resolveTarget returned null — response will not be delivered"
+      );
+      return;
+    }
+
+    logger.info(
+      {
+        connectionId,
+        channelId,
+        platform: instance.connection.platform,
+        bufferLength: stream.buffer.length,
+        shouldBuffer,
+      },
+      "sendFinalMessage: about to post"
+    );
 
     if (stream.buffer.length <= MESSAGE_CHUNK_SIZE) {
       try {
@@ -406,19 +428,37 @@ export class ChatResponseBridge implements ResponseRenderer {
             buildOutboundPayload(stream.buffer) as any
           );
         } else {
-          await target.post(buildOutboundPayload(stream.buffer) as any);
+          const result = await target.post(
+            buildOutboundPayload(stream.buffer) as any
+          );
+          logger.info(
+            {
+              connectionId,
+              channelId,
+              resultId: result?.id,
+              resultThreadId: result?.threadId,
+            },
+            "sendFinalMessage: post succeeded"
+          );
         }
       } catch (error) {
-        logger.debug(
+        logger.warn(
           { connectionId, error: String(error) },
-          "Failed final message edit"
+          "Failed final message send/edit"
         );
-        if (!shouldBuffer) {
-          try {
-            await stream.sentMessage?.edit?.(stream.buffer);
-          } catch {
-            // give up
+        // Retry as plain text (no markdown) so the user still sees the response
+        try {
+          if (!shouldBuffer && stream.sentMessage?.edit) {
+            await stream.sentMessage.edit(stream.buffer);
+          } else {
+            await target.post(stream.buffer);
           }
+          logger.info(
+            { connectionId, channelId },
+            "sendFinalMessage: plain-text fallback succeeded"
+          );
+        } catch {
+          // give up
         }
       }
       return;
@@ -440,12 +480,14 @@ export class ChatResponseBridge implements ResponseRenderer {
         { connectionId, error: String(error) },
         "Failed to send first final chunk"
       );
-      if (!shouldBuffer) {
-        try {
-          await stream.sentMessage?.edit?.(firstChunk);
-        } catch {
-          // give up on first chunk
+      try {
+        if (!shouldBuffer && stream.sentMessage?.edit) {
+          await stream.sentMessage.edit(firstChunk);
+        } else {
+          await target.post(firstChunk);
         }
+      } catch {
+        // give up on first chunk
       }
     }
 
@@ -458,6 +500,11 @@ export class ChatResponseBridge implements ResponseRenderer {
           { connectionId, error: String(error) },
           "Failed to send chunk"
         );
+        try {
+          await target.post(chunk);
+        } catch {
+          // give up on this chunk
+        }
       }
       if (i < remainingChunks.length - 1) {
         await delay(CHUNK_DELAY_MS);
@@ -474,14 +521,31 @@ export class ChatResponseBridge implements ResponseRenderer {
     const chat = instance.chat;
 
     if (!conversationId || conversationId === channelId) {
-      const channel = chat.channel?.(`${platform}:${channelId}`);
+      const channelKey = `${platform}:${channelId}`;
+      const channel = chat.channel?.(channelKey);
       if (channel) {
         return channel;
       }
+      logger.warn(
+        {
+          platform,
+          channelId,
+          channelKey,
+          conversationId,
+          hasChannelFn: !!chat.channel,
+        },
+        "chat.channel() returned null for DM"
+      );
     }
 
-    return (
-      (await chat.getThread?.(platform, channelId, conversationId)) ?? null
-    );
+    const thread =
+      (await chat.getThread?.(platform, channelId, conversationId)) ?? null;
+    if (!thread) {
+      logger.warn(
+        { platform, channelId, conversationId, hasGetThread: !!chat.getThread },
+        "chat.getThread() also returned null"
+      );
+    }
+    return thread;
   }
 }

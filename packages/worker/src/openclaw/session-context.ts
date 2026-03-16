@@ -279,7 +279,25 @@ export async function getOpenClawSessionContext(): Promise<{
       skillsConfig: data.skillsConfig || [],
       mcpTools,
     };
-    cachedResult = result;
+
+    // Don't cache if any authenticated MCP returned no tools — likely a
+    // transient upstream failure that should be retried on the next message.
+    const hasEmptyAuthenticatedMcp = data.mcpStatus.some(
+      (mcp) => mcp.authenticated && !toolMcpIds.has(mcp.id)
+    );
+    if (!hasEmptyAuthenticatedMcp) {
+      cachedResult = result;
+    } else {
+      logger.warn(
+        "Skipping session context cache — authenticated MCP(s) returned no tools",
+        {
+          emptyMcps: data.mcpStatus
+            .filter((mcp) => mcp.authenticated && !toolMcpIds.has(mcp.id))
+            .map((mcp) => mcp.id),
+        }
+      );
+    }
+
     return result;
   } catch (error) {
     logger.error("Failed to fetch session context from gateway", { error });

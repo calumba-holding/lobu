@@ -1172,7 +1172,7 @@ Use it when the user references past discussions or you need context.`);
         });
       }, HEARTBEAT_INTERVAL_MS);
 
-      // Session reset: run unconditional memory flush and return early
+      // Session reset: run unconditional memory flush, delete session file, and return early
       if ((this.config as any).platformMetadata?.sessionReset === true) {
         logger.info(
           "Session reset requested — running unconditional memory flush"
@@ -1186,6 +1186,14 @@ Use it when the user references past discussions or you need context.`);
           logger.warn(
             `Memory flush failed during session reset: ${error instanceof Error ? error.message : String(error)}`
           );
+        }
+
+        // Delete session file so next run starts with a clean history
+        try {
+          await fs.unlink(sessionFile);
+          logger.info("Deleted session file for session reset");
+        } catch {
+          // File may not exist
         }
 
         // Send visible confirmation to user

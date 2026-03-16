@@ -355,6 +355,13 @@ export class WorkerGateway {
             if (result.value.instructions) {
               mcpInstructions[result.value.mcpId] = result.value.instructions;
             }
+          } else {
+            logger.error("MCP tool fetch rejected", {
+              reason:
+                result.reason instanceof Error
+                  ? result.reason.message
+                  : String(result.reason),
+            });
           }
         }
       }
