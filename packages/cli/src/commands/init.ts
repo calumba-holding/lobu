@@ -113,7 +113,8 @@ export async function initCommand(
   ].join(",");
   const disallowedDomains = "";
 
-  // Generate encryption key for credentials
+  // Generate secrets
+  const adminPassword = randomBytes(12).toString("base64url");
   const encryptionKey = randomBytes(32).toString("hex");
 
   const answers = {
@@ -144,6 +145,7 @@ export async function initCommand(
       PROJECT_NAME: projectName,
       CLI_VERSION: cliVersion,
       DEPLOYMENT_MODE: answers.deploymentMode,
+      ADMIN_PASSWORD: adminPassword,
       ENCRYPTION_KEY: answers.encryptionKey,
       PUBLIC_GATEWAY_URL: `http://localhost:${gatewayPort}`,
       GATEWAY_PORT: gatewayPort,
@@ -375,6 +377,7 @@ services:
       PUBLIC_GATEWAY_URL: \${PUBLIC_GATEWAY_URL:-}
       NODE_ENV: production
       COMPOSE_PROJECT_NAME: ${projectName}
+      ADMIN_PASSWORD: \${ADMIN_PASSWORD}
       ENCRYPTION_KEY: \${ENCRYPTION_KEY}
       WORKER_ALLOWED_DOMAINS: \${WORKER_ALLOWED_DOMAINS:-}
       WORKER_DISALLOWED_DOMAINS: \${WORKER_DISALLOWED_DOMAINS:-}

@@ -104,8 +104,6 @@ export async function devCommand(
       if (code === 0 && passthroughArgs.includes("-d")) {
         console.log(chalk.green("\n  Lobu is running!\n"));
         console.log(chalk.cyan(`  Admin page:    ${gatewayUrl}/agents`));
-        console.log(chalk.cyan(`  Settings:      ${gatewayUrl}/settings`));
-        console.log(chalk.cyan(`  API docs:      ${gatewayUrl}/api/docs`));
         console.log(chalk.dim(`\n  View logs:     docker compose logs -f`));
         console.log(chalk.dim(`  Stop:          docker compose down\n`));
       }
