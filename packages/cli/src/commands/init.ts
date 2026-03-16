@@ -99,6 +99,22 @@ export async function initCommand(
     },
   ]);
 
+  // Admin password
+  const { adminPassword } = await inquirer.prompt([
+    {
+      type: "password",
+      name: "adminPassword",
+      message: "Admin password?",
+      mask: "*",
+      validate: (input: string) => {
+        if (!input || input.length < 4) {
+          return "Password must be at least 4 characters";
+        }
+        return true;
+      },
+    },
+  ]);
+
   // Worker network access — always filtered, configurable per-agent later
   const allowedDomains = [
     "registry.npmjs.org",
@@ -112,9 +128,6 @@ export async function initCommand(
     "files.pythonhosted.org",
   ].join(",");
   const disallowedDomains = "";
-
-  // Generate secrets
-  const adminPassword = randomBytes(12).toString("base64url");
   const encryptionKey = randomBytes(32).toString("hex");
 
   const answers = {
