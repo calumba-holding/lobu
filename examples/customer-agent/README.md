@@ -7,8 +7,8 @@ Lobu instance created with `@lobu/cli` v3.0.3
 Make sure you have Docker CLI installed.
 
 ```bash
-# Start the services (automatically builds worker image on first run)
-docker compose up -d
+# Start the services
+lobu dev -d
 
 # View logs
 docker compose logs -f
@@ -16,8 +16,6 @@ docker compose logs -f
 # Stop the services
 docker compose down
 ```
-
-**Note**: The first startup will take a few minutes to build the worker image. Subsequent starts will be much faster.
 
 ## Upgrading to Latest Version
 

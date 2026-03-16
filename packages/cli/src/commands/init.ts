@@ -233,13 +233,11 @@ export async function initCommand(
     console.log();
 
     console.log(chalk.cyan("  3. Start the services:"));
-    console.log(chalk.dim(`     docker compose -f ${composeFilename} up -d\n`));
+    console.log(chalk.dim("     lobu dev -d\n"));
     console.log(chalk.cyan("  4. View logs:"));
-    console.log(
-      chalk.dim(`     docker compose -f ${composeFilename} logs -f\n`)
-    );
+    console.log(chalk.dim("     docker compose logs -f\n"));
     console.log(chalk.cyan("  5. Stop the services:"));
-    console.log(chalk.dim(`     docker compose -f ${composeFilename} down\n`));
+    console.log(chalk.dim("     docker compose down\n"));
   } catch (error) {
     spinner.fail("Failed to create project");
     throw error;
