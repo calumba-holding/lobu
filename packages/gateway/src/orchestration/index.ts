@@ -19,7 +19,6 @@ import { buildModuleEnvVars } from "./deployment-utils";
 import {
   DockerDeploymentManager,
   EmbeddedDeploymentManager,
-  FlyDeploymentManager,
   K8sDeploymentManager,
 } from "./impl";
 import { MessageConsumer } from "./message-consumer";
@@ -109,15 +108,6 @@ export class Orchestrator {
         );
       }
       return new K8sDeploymentManager(
-        config,
-        buildModuleEnvVars,
-        providerModules
-      );
-    }
-
-    if (deploymentMode === "fly") {
-      logger.info("🪁 Using Fly deployment mode (Machines API)");
-      return new FlyDeploymentManager(
         config,
         buildModuleEnvVars,
         providerModules

@@ -5,5 +5,4 @@
 
 export { DockerDeploymentManager } from "./docker-deployment";
 export { EmbeddedDeploymentManager } from "./embedded-deployment";
-export { FlyDeploymentManager } from "./fly-deployment";
 export { K8sDeploymentManager } from "./k8s";
