@@ -1,9 +1,11 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import chalk from "chalk";
+import inquirer from "inquirer";
 import { parse as parseToml } from "smol-toml";
 import { CONFIG_FILENAME } from "../../config/loader.js";
 import { getSkillById, isProviderSkill } from "../skills/registry.js";
+import { secretsSetCommand } from "../secrets.js";
 
 export async function providersAddCommand(
   cwd: string,
@@ -55,6 +57,16 @@ export async function providersAddCommand(
   const defaultModel = provider.defaultModel;
   const envVar = provider.envVarName;
 
+  // Prompt for API key
+  const { apiKey } = await inquirer.prompt([
+    {
+      type: "password",
+      name: "apiKey",
+      message: `${provider.displayName} API key:`,
+      mask: "*",
+    },
+  ]);
+
   // Append provider entry to the TOML file (preserves comments/formatting)
   const tomlBlock = [
     "",
@@ -66,6 +78,11 @@ export async function providersAddCommand(
 
   await writeFile(configPath, `${raw.trimEnd()}\n${tomlBlock}\n`);
 
+  // Save API key to .env if provided
+  if (apiKey) {
+    await secretsSetCommand(cwd, envVar, apiKey);
+  }
+
   console.log(
     chalk.green(`\n  Added provider "${providerId}" to ${CONFIG_FILENAME}`)
   );
@@ -73,7 +90,9 @@ export async function providersAddCommand(
     console.log(chalk.dim(`  Default model: ${defaultModel}`));
   }
 
-  console.log(chalk.dim("\n  Set the API key:"));
-  console.log(chalk.cyan(`    lobu secrets set ${envVar} <your-key>`));
+  if (!apiKey) {
+    console.log(chalk.dim("\n  Set the API key:"));
+    console.log(chalk.cyan(`    lobu secrets set ${envVar} <your-key>`));
+  }
   console.log();
 }

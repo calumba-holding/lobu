@@ -11,6 +11,7 @@ import type {
   AgentSettingsStore,
 } from "../auth/settings/agent-settings-store";
 import type { AuthProfilesManager } from "../auth/settings/auth-profiles-manager";
+import { buildPromotedSettingsFromSource } from "../auth/settings/template-utils";
 
 const logger = createLogger("agent-seeder");
 
@@ -148,12 +149,22 @@ export async function seedAgentsFromManifest(
       );
       const nextSettings = buildReconciledSettings(entry, existingSettings);
 
-      if (settingsDiffer(existingSettings, nextSettings)) {
+      const settingsChanged = settingsDiffer(existingSettings, nextSettings);
+      if (settingsChanged) {
         await agentSettingsStore.saveSettings(entry.agentId, nextSettings);
         logger.debug(`Reconciled settings for agent "${entry.agentId}"`);
       } else {
         logger.debug(
           `Settings already match manifest for agent "${entry.agentId}"`
+        );
+      }
+
+      // Propagate manifest-managed fields to sandbox agents cloned from this template
+      if (settingsChanged) {
+        await propagateToSandboxAgents(
+          agentSettingsStore,
+          entry.agentId,
+          nextSettings
         );
       }
 
@@ -246,6 +257,55 @@ export async function seedConnectionsFromManifest(chatInstanceManager: {
   }
 }
 
+/**
+ * Propagate manifest-managed fields to sandbox agents cloned from a template.
+ * Preserves sandbox-specific state (authProfiles, agentIntegrations, etc.).
+ */
+async function propagateToSandboxAgents(
+  agentSettingsStore: AgentSettingsStore,
+  templateAgentId: string,
+  templateSettings: Omit<AgentSettings, "updatedAt">
+): Promise<void> {
+  try {
+    const sandboxIds =
+      await agentSettingsStore.findSandboxAgentIds(templateAgentId);
+    if (sandboxIds.length === 0) return;
+
+    const promoted = buildPromotedSettingsFromSource(
+      templateSettings as AgentSettings
+    );
+
+    for (const sandboxId of sandboxIds) {
+      try {
+        const existing = await agentSettingsStore.getSettings(sandboxId);
+        if (!existing) continue;
+
+        const updated: Omit<AgentSettings, "updatedAt"> = {
+          ...existing,
+          ...promoted,
+          templateAgentId,
+        };
+
+        await agentSettingsStore.saveSettings(sandboxId, updated);
+        logger.debug(`Propagated template settings to sandbox "${sandboxId}"`);
+      } catch (err) {
+        logger.warn(`Failed to propagate settings to sandbox "${sandboxId}"`, {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    logger.debug(
+      `Propagated settings to ${sandboxIds.length} sandbox(es) of "${templateAgentId}"`
+    );
+  } catch (err) {
+    logger.warn(
+      `Failed to find sandbox agents for template "${templateAgentId}"`,
+      { error: err instanceof Error ? err.message : String(err) }
+    );
+  }
+}
+
 function buildReconciledSettings(
   entry: AgentManifestEntry,
   existing: AgentSettings | null
@@ -288,16 +348,31 @@ function buildInstalledProviders(
     return undefined;
   }
 
-  return manifestProviders.map((provider, index) => {
-    const existing = existingProviders?.find(
-      (candidate) => candidate.providerId === provider.providerId
-    );
-    return {
-      providerId: provider.providerId,
-      installedAt: existing?.installedAt ?? Date.now() + index,
-      ...(existing?.config ? { config: existing.config } : {}),
-    };
-  });
+  const manifestIds = new Set(manifestProviders.map((p) => p.providerId));
+
+  const merged: InstalledProvider[] = manifestProviders.map(
+    (provider, index) => {
+      const existing = existingProviders?.find(
+        (candidate) => candidate.providerId === provider.providerId
+      );
+      return {
+        providerId: provider.providerId,
+        installedAt: existing?.installedAt ?? Date.now() + index,
+        ...(existing?.config ? { config: existing.config } : {}),
+      };
+    }
+  );
+
+  // Preserve providers added via the API that aren't in the manifest
+  if (existingProviders) {
+    for (const existing of existingProviders) {
+      if (!manifestIds.has(existing.providerId)) {
+        merged.push(existing);
+      }
+    }
+  }
+
+  return merged;
 }
 
 function buildSkillsConfig(

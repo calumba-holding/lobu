@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import chalk from "chalk";
 import { getToken } from "../api/credentials.js";
 import { isLoadError, loadConfig } from "../config/loader.js";
@@ -14,10 +16,9 @@ export async function chatCommand(
   prompt: string,
   options: { agent?: string; gateway?: string }
 ): Promise<void> {
-  const gatewayUrl = (options.gateway ?? "http://localhost:8080").replace(
-    /\/$/,
-    ""
-  );
+  const gatewayUrl = (
+    options.gateway ?? (await resolveGatewayUrl(cwd))
+  ).replace(/\/$/, "");
 
   // Resolve auth token: CLI JWT (from `lobu login`) → ADMIN_PASSWORD env var
   const authToken = (await getToken()) ?? process.env.ADMIN_PASSWORD;
@@ -214,4 +215,26 @@ function parseJSON(str: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
+}
+
+async function resolveGatewayUrl(cwd: string): Promise<string> {
+  try {
+    const envContent = await readFile(join(cwd, ".env"), "utf-8");
+    for (const line of envContent.split("\n")) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith("GATEWAY_PORT=")) {
+        let port = trimmed.slice("GATEWAY_PORT=".length);
+        if (
+          (port.startsWith('"') && port.endsWith('"')) ||
+          (port.startsWith("'") && port.endsWith("'"))
+        ) {
+          port = port.slice(1, -1);
+        }
+        if (port) return `http://localhost:${port}`;
+      }
+    }
+  } catch {
+    // No .env file
+  }
+  return "http://localhost:8080";
 }

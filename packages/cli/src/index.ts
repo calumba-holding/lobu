@@ -181,7 +181,7 @@ export async function runCli(
     .description("Agent health and version info")
     .action(async () => {
       const { statusCommand } = await import("./commands/status.js");
-      await statusCommand();
+      await statusCommand(process.cwd());
     });
 
   // ─── secrets ────────────────────────────────────────────────────────

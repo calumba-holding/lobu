@@ -181,6 +181,30 @@ export class AgentSettingsStore extends BaseRedisStore<AgentSettings> {
   }
 
   /**
+   * Find all sandbox agent IDs that reference a given template agent.
+   */
+  async findSandboxAgentIds(templateAgentId: string): Promise<string[]> {
+    const prefix = `${this.keyPrefix}:`;
+    const keys = await this.scanByPrefix(prefix);
+    const sandboxIds: string[] = [];
+
+    for (const key of keys) {
+      try {
+        const raw = await this.redis.get(key);
+        if (!raw) continue;
+        const parsed = safeJsonParse<AgentSettings>(raw);
+        if (parsed?.templateAgentId === templateAgentId) {
+          sandboxIds.push(key.slice(prefix.length));
+        }
+      } catch {
+        // Skip unparseable entries
+      }
+    }
+
+    return sandboxIds;
+  }
+
+  /**
    * Check if agent has any settings configured
    */
   async hasSettings(agentId: string): Promise<boolean> {
