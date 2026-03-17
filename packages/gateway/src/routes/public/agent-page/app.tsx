@@ -32,7 +32,7 @@ import type {
 
 declare global {
   interface Window {
-    __SETTINGS_STATE__: SettingsState;
+    __AGENT_STATE__: SettingsState;
     Telegram?: {
       WebApp?: {
         initData?: string;
@@ -158,7 +158,7 @@ export function useSettings(): SettingsContextValue {
 // ─── App ───────────────────────────────────────────────────────────────────
 
 function App() {
-  const state = window.__SETTINGS_STATE__;
+  const state = window.__AGENT_STATE__;
 
   // Init signals from server state
   const agentName = useSignal(state.agentName || "");

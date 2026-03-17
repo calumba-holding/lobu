@@ -130,7 +130,7 @@
       }
     },
     {
-      "includes": ["**/settings-page-styles.ts"],
+      "includes": ["**/page-styles.ts"],
       "linter": {
         "rules": {
           "suspicious": {
@@ -140,7 +140,7 @@
       }
     },
     {
-      "includes": ["**/settings-page/components/**", "**/admin-page/**"],
+      "includes": ["**/agent-page/components/**", "**/agents-page/**"],
       "linter": {
         "rules": {
           "a11y": {

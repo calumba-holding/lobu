@@ -1,14 +1,14 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createLogger } from "@lobu/core";
 import { type Context, Hono } from "hono";
-import type { SettingsOAuthClient } from "../../auth/settings/oauth-client";
 import { CliTokenService } from "../../auth/cli/token-service";
+import type { SettingsOAuthClient } from "../../auth/settings/oauth-client";
 import type { IMessageQueue } from "../../infrastructure/queue";
+import { resolvePublicUrl } from "../../utils/public-url";
 import {
   getClientIp,
   RedisFixedWindowRateLimiter,
 } from "../../utils/rate-limiter";
-import { resolvePublicUrl } from "../../utils/public-url";
 import { verifySettingsSession } from "./settings-auth";
 
 const logger = createLogger("cli-auth-routes");
@@ -526,7 +526,7 @@ export function createCliAuthRoutes(config: CliAuthRoutesConfig): Hono {
 
     const returnUrl = `/api/v1/auth/cli/session/complete?request=${encodeURIComponent(requestId)}`;
     return c.redirect(
-      `/settings/oauth/login?returnUrl=${encodeURIComponent(returnUrl)}`
+      `/agent/oauth/login?returnUrl=${encodeURIComponent(returnUrl)}`
     );
   });
 

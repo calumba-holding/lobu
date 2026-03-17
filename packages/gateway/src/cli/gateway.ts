@@ -622,8 +622,10 @@ function setupServer(
     const settingsOAuthStateStore = coreServices.getSettingsOAuthStateStore();
     const claimServiceForSettings = coreServices.getClaimService();
     if (agentSettingsStore && claimServiceForSettings) {
-      const { createSettingsPageRoutes } = require("../routes/public/settings");
-      const settingsPageRouter = createSettingsPageRoutes({
+      const {
+        createAgentPageRoutes,
+      } = require("../routes/public/agent-settings");
+      const agentPageRouter = createAgentPageRoutes({
         agentSettingsStore,
         userAgentsStore: coreServices.getUserAgentsStore(),
         agentMetadataStore: coreServices.getAgentMetadataStore(),
@@ -642,9 +644,9 @@ function setupServer(
         interactionService,
         queueProducer: coreServices.getQueueProducer(),
       });
-      app.route("", settingsPageRouter);
+      app.route("", agentPageRouter);
       logger.debug(
-        `Settings HTML page enabled at :8080/settings (${settingsOAuthClient ? "with OAuth" : "Telegram initData only, OAuth not configured"})`
+        `Agent page enabled at :8080/agent (${settingsOAuthClient ? "with OAuth" : "Telegram initData only, OAuth not configured"})`
       );
 
       // Admin page (system skills registry)
@@ -668,8 +670,10 @@ function setupServer(
           logger.info("═══════════════════════════════════════════════");
         }
 
-        const { createAdminPageRoutes } = require("../routes/public/admin");
-        const adminRouter = createAdminPageRoutes({
+        const {
+          createAgentsPageRoutes,
+        } = require("../routes/public/agents-page");
+        const agentsPageRouter = createAgentsPageRoutes({
           systemSkillsService,
           userAgentsStore: coreServices.getUserAgentsStore(),
           agentMetadataStore: coreServices.getAgentMetadataStore(),
@@ -679,17 +683,17 @@ function setupServer(
           version: process.env.npm_package_version || "2.6.1",
           githubUrl: "https://github.com/lobu-ai/lobu",
         });
-        app.route("", adminRouter);
+        app.route("", agentsPageRouter);
 
-        // Serve admin page JS bundle from disk (bypasses bun module cache)
-        const adminBundlePath = require("node:path").resolve(
+        // Serve agents page JS bundle from disk (bypasses bun module cache)
+        const agentsPageBundlePath = require("node:path").resolve(
           __dirname,
-          "../routes/public/admin-page-bundle.raw.js"
+          "../routes/public/agents-page-bundle.raw.js"
         );
         app.get("/agents-bundle.js", (c: any) => {
           try {
             const js = require("node:fs").readFileSync(
-              adminBundlePath,
+              agentsPageBundlePath,
               "utf-8"
             );
             return c.body(js, 200, {
@@ -703,7 +707,7 @@ function setupServer(
           }
         });
 
-        logger.debug("Admin page enabled at :8080/agents");
+        logger.debug("Agents page enabled at :8080/agents");
       }
     } else if (agentSettingsStore) {
       logger.warn(
@@ -746,7 +750,7 @@ function setupServer(
         app.get("/agent/:agentId/history", (c: any) => {
           const session = verifySettingsSession(c);
           if (!session) {
-            return c.redirect("/settings");
+            return c.redirect("/agent");
           }
           const agentId = c.req.param("agentId");
           return c.html(renderHistoryPage(agentId));
@@ -870,7 +874,7 @@ function setupServer(
       logger.debug("Agent management routes enabled at :8080/api/v1/agents/*");
     }
 
-    // Agent selector is now handled by the unified settings page (/settings)
+    // Agent selector is now handled by the unified agent page (/agent)
   }
 
   // Chat SDK connection routes (webhook + CRUD)

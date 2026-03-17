@@ -338,7 +338,7 @@ class MessageHandlerBridge {
   ): Promise<void> {
     const baseUrl =
       this.services.getPublicGatewayUrl() || "http://localhost:8080";
-    const settingsUrl = new URL("/settings", baseUrl);
+    const settingsUrl = new URL("/agent", baseUrl);
     settingsUrl.searchParams.set("platform", this.connection.platform);
     settingsUrl.searchParams.set("chat", channelId);
     settingsUrl.searchParams.set("connectionId", this.connection.id);

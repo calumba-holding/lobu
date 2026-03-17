@@ -7,7 +7,7 @@ export function createLandingRoutes() {
   app.get("/", (c) => {
     const session = verifySettingsSession(c);
     if (session?.isAdmin) return c.redirect("/agents");
-    if (session) return c.redirect("/settings");
+    if (session) return c.redirect("/agent");
     return c.redirect("/agents/login");
   });
 

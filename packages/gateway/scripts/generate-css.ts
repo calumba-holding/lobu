@@ -17,16 +17,13 @@ const escaped = css
   .replace(/\$\{/g, "\\${");
 
 const output = `/**
- * Auto-generated Tailwind CSS for the settings page.
+ * Auto-generated Tailwind CSS for all pages.
  * DO NOT EDIT — regenerated on every build/dev start.
  */
-export const settingsPageCSS = \`
+export const pageCSS = \`
 ${escaped}
 [x-cloak] { display: none !important; }\`;
 `;
 
-writeFileSync(
-  resolve(gatewayDir, "src/routes/public/settings-page-styles.ts"),
-  output
-);
-console.log("Settings CSS generated");
+writeFileSync(resolve(gatewayDir, "src/routes/public/page-styles.ts"), output);
+console.log("Page CSS generated");

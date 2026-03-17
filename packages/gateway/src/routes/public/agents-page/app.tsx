@@ -1,12 +1,12 @@
 import { useSignal } from "@preact/signals";
 import { render } from "preact";
-import type { EnvVarEntry } from "../settings-page/api";
-import * as api from "../settings-page/api";
+import type { EnvVarEntry } from "../agent-page/api";
+import * as api from "../agent-page/api";
 import { EnvVarRow } from "./EnvVarRow";
 
 declare global {
   interface Window {
-    __ADMIN_STATE__: AdminState;
+    __AGENTS_STATE__: AdminState;
   }
 }
 
@@ -482,7 +482,7 @@ function useEnvVars() {
 // ─── App ────────────────────────────────────────────────────────────────────
 
 function App() {
-  const state = window.__ADMIN_STATE__;
+  const state = window.__AGENTS_STATE__;
   const env = useEnvVars();
 
   return (

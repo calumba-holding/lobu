@@ -69,7 +69,7 @@ describe("SettingsOAuthClient", () => {
     const cache = new Map<string, string>();
     const client = new SettingsOAuthClient({
       issuerUrl: "https://issuer.example.com",
-      redirectUri: "https://gateway.example.com/settings/oauth/callback",
+      redirectUri: "https://gateway.example.com/agent/oauth/callback",
       cacheStore: {
         get: async (key) => cache.get(key) ?? null,
         set: async (key, value) => {
@@ -89,7 +89,7 @@ describe("SettingsOAuthClient", () => {
     );
     expect(parsed.searchParams.get("client_id")).toBe("dynamic-client-id");
     expect(parsed.searchParams.get("redirect_uri")).toBe(
-      "https://gateway.example.com/settings/oauth/callback"
+      "https://gateway.example.com/agent/oauth/callback"
     );
     expect(cache.size).toBe(1);
     // Discovery is cached in-memory after first call, so only 2 fetches: discovery + registration
@@ -130,7 +130,7 @@ describe("SettingsOAuthClient", () => {
 
     const client = new SettingsOAuthClient({
       issuerUrl: "https://issuer.example.com",
-      redirectUri: "https://gateway.example.com/settings/oauth/callback",
+      redirectUri: "https://gateway.example.com/agent/oauth/callback",
       cacheStore: {
         get: async (key) => cache.get(key) ?? null,
         set: async () => {
@@ -187,7 +187,7 @@ describe("SettingsOAuthClient", () => {
     const client = new SettingsOAuthClient({
       issuerUrl: "https://issuer.example.com",
       clientId: "static-client-id",
-      redirectUri: "https://gateway.example.com/settings/oauth/callback",
+      redirectUri: "https://gateway.example.com/agent/oauth/callback",
     });
 
     const pending = await client.pollDeviceAuthorization("device-1", 5);
@@ -259,7 +259,7 @@ describe("SettingsOAuthClient", () => {
     const client = new SettingsOAuthClient({
       issuerUrl: "https://issuer.example.com",
       clientId: "static-client-id",
-      redirectUri: "https://gateway.example.com/settings/oauth/callback",
+      redirectUri: "https://gateway.example.com/agent/oauth/callback",
     });
 
     const expired = await client.pollDeviceAuthorization("device-1", 5);

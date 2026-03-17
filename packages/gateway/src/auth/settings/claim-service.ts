@@ -159,7 +159,7 @@ export function buildClaimSettingsUrl(
   claimCode: string,
   opts?: { agentId?: string }
 ): string {
-  const url = new URL(resolvePublicUrl("/settings"));
+  const url = new URL(resolvePublicUrl("/agent"));
   url.searchParams.set("claim", claimCode);
   if (opts?.agentId) {
     url.searchParams.set("agent", opts.agentId);

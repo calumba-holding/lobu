@@ -607,7 +607,7 @@ export class McpOAuthModule extends BaseModule {
         ?.includes(SETTINGS_SESSION_COOKIE_NAME);
       if (hasSession) {
         return c.redirect(
-          `/settings?agent=${encodeURIComponent(stateData.agentId)}&open=skills&message=${encodeURIComponent(`Connected to ${mcpName}`)}`
+          `/agent?agent=${encodeURIComponent(stateData.agentId)}&open=skills&message=${encodeURIComponent(`Connected to ${mcpName}`)}`
         );
       }
 

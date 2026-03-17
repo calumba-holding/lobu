@@ -10,8 +10,8 @@ import {
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 import {
-  TOKEN_EXPIRATION_MS,
   createApiAuthMiddleware,
+  TOKEN_EXPIRATION_MS,
 } from "../../auth/api-auth-middleware";
 import type { CliTokenService } from "../../auth/cli/token-service";
 import type { QueueProducer } from "../../infrastructure/queue/queue-producer";

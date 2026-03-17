@@ -1,4 +1,4 @@
-import { marked, type MarkedExtension } from "marked";
+import { type MarkedExtension, marked } from "marked";
 // @ts-expect-error -- no type declarations
 import { markedTerminal } from "marked-terminal";
 

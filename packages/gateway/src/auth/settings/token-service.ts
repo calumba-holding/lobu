@@ -97,7 +97,7 @@ export interface SettingsTokenPayload {
  * so the URL never expires and can be reused across button taps.
  */
 export function buildTelegramSettingsUrl(chatId: string): string {
-  const url = new URL(resolvePublicUrl("/settings"));
+  const url = new URL(resolvePublicUrl("/agent"));
   url.searchParams.set("platform", "telegram");
   url.searchParams.set("chat", chatId);
   return url.toString();

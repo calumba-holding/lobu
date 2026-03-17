@@ -38,12 +38,12 @@ COPY config/skill-registries.json ./config/skill-registries.json
 WORKDIR /app/packages/core
 RUN bunx tsc
 
-# Generate Tailwind CSS for settings page
+# Generate Tailwind CSS and page bundles
 WORKDIR /app/packages/gateway
 RUN bun run generate:css && \
     bun run scripts/build-history.ts && \
-    bun run scripts/build-settings.ts && \
-    bun run scripts/build-admin.ts
+    bun run scripts/build-agent.ts && \
+    bun run scripts/build-agents.ts
 
 WORKDIR /app
 
@@ -56,4 +56,4 @@ RUN chmod -R a+rX /app
 
 # Run with bun for TypeScript support and hot reload in dev
 ENTRYPOINT []
-CMD ["sh", "-lc", "cd /app/packages/gateway && bun run generate:css >/dev/null 2>&1 && bun run scripts/build-history.ts >/dev/null 2>&1 && bun run scripts/build-settings.ts >/dev/null 2>&1 && bun run scripts/build-admin.ts >/dev/null 2>&1 && cd /app && exec bun --watch packages/gateway/src/index.ts"]
+CMD ["sh", "-lc", "cd /app/packages/gateway && bun run generate:css >/dev/null 2>&1 && bun run scripts/build-history.ts >/dev/null 2>&1 && bun run scripts/build-agent.ts >/dev/null 2>&1 && bun run scripts/build-agents.ts >/dev/null 2>&1 && cd /app && exec bun --watch packages/gateway/src/index.ts"]

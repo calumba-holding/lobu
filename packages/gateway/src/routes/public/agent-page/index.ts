@@ -1,5 +1,5 @@
 /**
- * Settings Page HTML Templates (Preact + Pre-compiled Tailwind CSS)
+ * Agent Page HTML Templates (Preact + Pre-compiled Tailwind CSS)
  */
 
 import * as fs from "node:fs";
@@ -9,16 +9,16 @@ import type { AgentSettings } from "../../../auth/settings";
 import type { SettingsTokenPayload } from "../../../auth/settings/token-service";
 import { getAuthMethod } from "../../../connections/platform-auth-methods";
 import type { ModelOption } from "../../../modules/module-system";
-import { settingsPageCSS } from "../settings-page-styles";
+import { pageCSS } from "../page-styles";
 import { escapeHtml, formatUserId, getPlatformDisplay } from "./utils";
 
-let settingsPageJS = "";
+let agentPageJS = "";
 try {
-  const bundle = require("../settings-page-bundle");
-  settingsPageJS = bundle.settingsPageJS;
+  const bundle = require("../agent-page-bundle");
+  agentPageJS = bundle.agentPageJS;
 } catch {
-  settingsPageJS =
-    'document.getElementById("app").textContent = "Bundle not built. Run: bun run scripts/build-settings.ts";';
+  agentPageJS =
+    'document.getElementById("app").textContent = "Bundle not built. Run: bun run scripts/build-agent.ts";';
 }
 
 export interface ProviderMeta {
@@ -209,7 +209,7 @@ export function renderSettingsPage(
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="referrer" content="no-referrer">
   <title>Agent Settings - Lobu</title>
-  <style>${settingsPageCSS}</style>
+  <style>${pageCSS}</style>
   ${(() => {
     const s = getAuthMethod(payload.platform).scriptUrl;
     return s ? `<script src="${s}"></script>` : "";
@@ -219,8 +219,8 @@ export function renderSettingsPage(
   <div class="max-w-xl mx-auto bg-white rounded-2xl shadow-2xl overflow-hidden">
     <div id="app" class="${payload.isAdmin ? "" : "p-6"}"></div>
   </div>
-  <script>window.__SETTINGS_STATE__ = ${JSON.stringify(initialState)};</script>
-  <script type="module">${settingsPageJS}</script>
+  <script>window.__AGENT_STATE__ = ${JSON.stringify(initialState)};</script>
+  <script type="module">${agentPageJS}</script>
 </body>
 </html>`;
 }
@@ -238,7 +238,7 @@ export function renderPickerPage(
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="referrer" content="no-referrer">
   <title>Configure Agent - Lobu</title>
-  <style>${settingsPageCSS}</style>
+  <style>${pageCSS}</style>
   ${(() => {
     const s = getAuthMethod(payload.platform).scriptUrl;
     return s ? `<script src="${s}"></script>` : "";

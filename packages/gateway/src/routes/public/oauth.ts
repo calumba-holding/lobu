@@ -81,7 +81,7 @@ export function createOAuthRoutes(config: OAuthRoutesConfig): OpenAPIHono {
       // No session — redirect through settings OAuth to establish one, then return here
       const returnUrl = `${c.req.path}?agentId=${encodeURIComponent(agentId)}`;
       return c.redirect(
-        `/settings/oauth/login?returnUrl=${encodeURIComponent(returnUrl)}`
+        `/agent/oauth/login?returnUrl=${encodeURIComponent(returnUrl)}`
       );
     }
 

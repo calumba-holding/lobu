@@ -6,9 +6,7 @@ const gatewayDir = resolve(import.meta.dir, "..");
 
 async function main() {
   const result = await build({
-    entryPoints: [
-      resolve(gatewayDir, "src/routes/public/settings-page/app.tsx"),
-    ],
+    entryPoints: [resolve(gatewayDir, "src/routes/public/agent-page/app.tsx")],
     bundle: true,
     minify: true,
     format: "esm",
@@ -31,20 +29,20 @@ async function main() {
     .replace(/\$\{/g, "\\${");
 
   const output = `/**
- * Auto-generated Preact bundle for the settings page.
+ * Auto-generated Preact bundle for the agent page.
  * DO NOT EDIT — regenerated on every build.
  */
-export const settingsPageJS = \`${escaped}\`;
+export const agentPageJS = \`${escaped}\`;
 `;
 
   writeFileSync(
-    resolve(gatewayDir, "src/routes/public/settings-page-bundle.ts"),
+    resolve(gatewayDir, "src/routes/public/agent-page-bundle.ts"),
     output
   );
-  console.log("Settings page JS bundle generated");
+  console.log("Agent page JS bundle generated");
 }
 
 main().catch((err) => {
-  console.error("Failed to build settings page:", err);
+  console.error("Failed to build agent page:", err);
   process.exit(1);
 });

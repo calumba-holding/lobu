@@ -41,8 +41,8 @@
     "node_modules",
     "packages/*/src/__tests__/**/*",
     "packages/landing/**/*",
-    "packages/gateway/src/routes/public/settings-page/**/*",
+    "packages/gateway/src/routes/public/agent-page/**/*",
     "packages/gateway/src/routes/public/history-page/**/*",
-    "packages/gateway/src/routes/public/admin-page/**/*"
+    "packages/gateway/src/routes/public/agents-page/**/*"
   ]
 }

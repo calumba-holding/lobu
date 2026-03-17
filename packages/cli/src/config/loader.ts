@@ -1,4 +1,4 @@
-import { readFile, readdir } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { type LobuTomlConfig, lobuConfigSchema } from "./schema.js";

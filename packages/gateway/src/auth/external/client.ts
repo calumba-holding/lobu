@@ -5,8 +5,8 @@ import type { OAuthCredentials } from "../oauth/credentials";
 import type { OAuthProviderConfig } from "../oauth/providers";
 import {
   DEVICE_CODE_GRANT_TYPE,
-  GenericDeviceCodeClient,
   type DeviceAuthorizationStartResult,
+  GenericDeviceCodeClient,
 } from "./device-code-client";
 
 const logger = createLogger("external-auth-client");
@@ -257,7 +257,7 @@ export class ExternalAuthClient {
       userinfoUrl: process.env.SETTINGS_OAUTH_USERINFO_URL,
       deviceAuthorizationUrl:
         process.env.SETTINGS_OAUTH_DEVICE_AUTHORIZATION_URL,
-      redirectUri: `${publicGatewayUrl}/settings/oauth/callback`,
+      redirectUri: `${publicGatewayUrl}/agent/oauth/callback`,
       scope: process.env.SETTINGS_OAUTH_SCOPE || DEFAULT_SCOPE,
       cacheStore,
     });

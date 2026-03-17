@@ -1,5 +1,5 @@
 /**
- * Admin Page — system skills registry + connections management.
+ * Agents Page — system skills registry + connections management.
  * Preact SPA with server-injected state.
  */
 
@@ -16,19 +16,22 @@ import type { UserAgentsStore } from "../../auth/user-agents-store";
 import type { ChatInstanceManager } from "../../connections/chat-instance-manager";
 import { getModelProviderModules } from "../../modules/module-system";
 import type { SystemSkillsService } from "../../services/system-skills-service";
+import { pageCSS } from "./page-styles";
 import {
   setSettingsSessionCookie,
   verifySettingsSession,
 } from "./settings-auth";
-import { settingsPageCSS } from "./settings-page-styles";
 
-const logger = createLogger("admin-routes");
+const logger = createLogger("agents-page-routes");
 
-const _adminBundlePath = path.resolve(__dirname, "admin-page-bundle.raw.js");
-function getAdminPageJS(): string {
+const _agentsPageBundlePath = path.resolve(
+  __dirname,
+  "agents-page-bundle.raw.js"
+);
+function getAgentsPageJS(): string {
   try {
-    const content = fs.readFileSync(_adminBundlePath, "utf-8");
-    return `/* ADMIN_BUNDLE_LOADED_AT_${Date.now()} */ ${content}`;
+    const content = fs.readFileSync(_agentsPageBundlePath, "utf-8");
+    return `/* AGENTS_BUNDLE_LOADED_AT_${Date.now()} */ ${content}`;
   } catch (e) {
     return `document.getElementById("app").textContent = "Bundle error: ${String(e).replace(/"/g, "'")}";`;
   }
@@ -133,7 +136,7 @@ function buildEnvCatalog(
   return { vars, allowedKeys: seen };
 }
 
-interface AdminPageConfig {
+interface AgentsPageConfig {
   systemSkillsService: SystemSkillsService;
   userAgentsStore: UserAgentsStore;
   agentMetadataStore: AgentMetadataStore;
@@ -157,16 +160,16 @@ function verifyPassword(input: string, expected: string): boolean {
   return crypto.timingSafeEqual(a, b);
 }
 
-export function createAdminPageRoutes(config: AdminPageConfig) {
+export function createAgentsPageRoutes(config: AgentsPageConfig) {
   const app = new OpenAPIHono();
 
-  // ─── Admin Login ───────────────────────────────────────────────────────────
+  // ─── Agents Login ──────────────────────────────────────────────────────────
 
   app.get("/agents/login", (c) => {
     const session = verifySettingsSession(c);
     if (session?.isAdmin) return c.redirect("/agents");
     const error = c.req.query("error");
-    return c.html(renderAdminLoginPage(error || undefined));
+    return c.html(renderAgentsLoginPage(error || undefined));
   });
 
   app.post("/agents/login", async (c) => {
@@ -193,9 +196,9 @@ export function createAdminPageRoutes(config: AdminPageConfig) {
     return c.redirect("/agents");
   });
 
-  // ─── Admin State Builder ─────────────────────────────────────────────────
+  // ─── Agents State Builder ────────────────────────────────────────────────
 
-  async function buildAdminState() {
+  async function buildAgentsState() {
     const rawSkills =
       (await config.systemSkillsService.getSystemSkills()) || [];
     const providerConfigs =
@@ -339,7 +342,7 @@ export function createAdminPageRoutes(config: AdminPageConfig) {
         slot: "memory",
         enabled: true,
         configured: !!process.env.OWLETTO_MCP_URL,
-        settingsUrl: "/settings#skills",
+        settingsUrl: "/agent#skills",
       },
     ];
 
@@ -354,21 +357,24 @@ export function createAdminPageRoutes(config: AdminPageConfig) {
     };
   }
 
-  // ─── Admin Pages ──────────────────────────────────────────────────────────
+  // ─── Agents Pages ─────────────────────────────────────────────────────────
 
-  async function handleAdminPage(c: Context) {
+  async function handleAgentsPage(c: Context) {
     const session = requireAdmin(c);
     if (!session) return c.redirect("/agents/login");
     try {
-      const adminState = await buildAdminState();
-      return c.html(renderAdminPage(adminState));
+      const agentsState = await buildAgentsState();
+      return c.html(renderAgentsPage(agentsState));
     } catch (error) {
-      logger.error("Failed to render admin page", { error });
-      return c.html(renderAdminErrorPage("Failed to load system skills."), 500);
+      logger.error("Failed to render agents page", { error });
+      return c.html(
+        renderAgentsErrorPage("Failed to load system skills."),
+        500
+      );
     }
   }
 
-  app.get("/agents", handleAdminPage);
+  app.get("/agents", handleAgentsPage);
 
   // ─── Agents API ──────────────────────────────────────────────────────────
 
@@ -471,34 +477,34 @@ export function createAdminPageRoutes(config: AdminPageConfig) {
 
 // ─── HTML Renderers ──────────────────────────────────────────────────────────
 
-function renderAdminPage(adminState: Record<string, unknown>): string {
+function renderAgentsPage(agentsState: Record<string, unknown>): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="referrer" content="no-referrer">
-  <title>Admin</title>
-  <style>${settingsPageCSS}</style>
+  <title>Agents</title>
+  <style>${pageCSS}</style>
 </head>
 <body class="min-h-screen bg-gradient-to-br from-slate-700 to-slate-900 p-4">
   <div class="max-w-xl mx-auto bg-white rounded-2xl shadow-2xl overflow-hidden">
     <div id="app"></div>
   </div>
-  <script>window.__ADMIN_STATE__ = ${JSON.stringify(adminState)};</script>
-  <script type="module">${getAdminPageJS()}</script>
+  <script>window.__AGENTS_STATE__ = ${JSON.stringify(agentsState)};</script>
+  <script type="module">${getAgentsPageJS()}</script>
 </body>
 </html>`;
 }
 
-function renderAdminLoginPage(error?: string): string {
+function renderAgentsLoginPage(error?: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="referrer" content="no-referrer">
-  <title>Admin Login</title>
+  <title>Agents Login</title>
   <style>
     body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1.25rem; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: linear-gradient(to bottom right, #334155, #0f172a); color: #e2e8f0; }
     .card { background: #0f172a; border: 1px solid #334155; border-radius: 1rem; box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.35); padding: 2rem; max-width: 24rem; width: 100%; }
@@ -513,7 +519,7 @@ function renderAdminLoginPage(error?: string): string {
 </head>
 <body>
   <div class="card">
-    <h1>Admin Login</h1>
+    <h1>Agents Login</h1>
     ${error ? `<div class="error">${esc(error)}</div>` : ""}
     <form method="POST" action="/agents/login">
       <label for="password">Password</label>
@@ -525,13 +531,13 @@ function renderAdminLoginPage(error?: string): string {
 </html>`;
 }
 
-function renderAdminErrorPage(message: string): string {
+function renderAgentsErrorPage(message: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Admin Error</title>
+  <title>Agents Error</title>
   <style>
     body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1.25rem; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: linear-gradient(to bottom right, #ef4444, #b91c1c); }
     .card { background: #fff; border-radius: 1rem; box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25); padding: 2.5rem; max-width: 28rem; width: 100%; text-align: center; }
@@ -542,8 +548,8 @@ function renderAdminErrorPage(message: string): string {
 </head>
 <body>
   <div class="card">
-    <h1>Admin Error</h1>
-    <p>Unable to load admin page.</p>
+    <h1>Agents Error</h1>
+    <p>Unable to load agents page.</p>
     <div class="error-box">${esc(message)}</div>
   </div>
 </body>

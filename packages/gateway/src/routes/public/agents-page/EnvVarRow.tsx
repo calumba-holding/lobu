@@ -1,6 +1,6 @@
 import { useSignal } from "@preact/signals";
-import type { EnvVarEntry } from "../settings-page/api";
-import * as api from "../settings-page/api";
+import type { EnvVarEntry } from "../agent-page/api";
+import * as api from "../agent-page/api";
 
 export function EnvVarRow({
   entry,

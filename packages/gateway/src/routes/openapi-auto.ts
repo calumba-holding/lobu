@@ -12,7 +12,7 @@ const INTERNAL_PREFIXES = ["/api/proxy", "/internal", "/worker", "/mcp"];
 // platform webhooks, system probes, and infra endpoints
 const EXCLUDED_ROUTES = [
   "/", // Landing page
-  "/settings", // HTML settings page
+  "/agent", // HTML agent page
   "/api/v1/auth/{provider}/login", // OAuth redirect (browser-only)
   "/api/v1/auth/mcp/callback", // MCP OAuth callback
   "/api/v1/auth/integration/callback", // Integration OAuth callback
@@ -28,7 +28,7 @@ const EXCLUDED_PREFIXES = [
   "/api/telegram", // Telegram webhook
   "/api/v1/webhooks", // Chat SDK connection webhooks
   "/slack/", // Slack events
-  "/settings/oauth", // Settings OAuth flow
+  "/agent/oauth", // Agent OAuth flow
 ];
 
 function isInternalRoute(path: string): boolean {
@@ -114,8 +114,8 @@ function deriveTag(path: string): string {
     return "Integrations";
   }
 
-  // Session — settings page bootstrap
-  if (path.startsWith("/settings")) {
+  // Session — agent page bootstrap
+  if (path.startsWith("/agent")) {
     return "Session";
   }
 
@@ -128,7 +128,7 @@ function deriveTag(path: string): string {
  */
 const ROUTE_SUMMARIES: Record<string, string> = {
   // Session
-  "post /settings/session": "Establish settings session",
+  "post /agent/session": "Establish agent session",
 
   // Agents
   "post /api/v1/agents": "Create agent",

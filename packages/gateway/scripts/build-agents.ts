@@ -6,7 +6,7 @@ const gatewayDir = resolve(import.meta.dir, "..");
 
 async function main() {
   const result = await build({
-    entryPoints: [resolve(gatewayDir, "src/routes/public/admin-page/app.tsx")],
+    entryPoints: [resolve(gatewayDir, "src/routes/public/agents-page/app.tsx")],
     bundle: true,
     minify: true,
     format: "esm",
@@ -24,13 +24,13 @@ async function main() {
 
   // Also write raw JS for fs.readFileSync usage (avoids bun require cache)
   writeFileSync(
-    resolve(gatewayDir, "src/routes/public/admin-page-bundle.raw.js"),
+    resolve(gatewayDir, "src/routes/public/agents-page-bundle.raw.js"),
     js
   );
-  console.log("Admin page JS bundle generated");
+  console.log("Agents page JS bundle generated");
 }
 
 main().catch((err) => {
-  console.error("Failed to build admin page:", err);
+  console.error("Failed to build agents page:", err);
   process.exit(1);
 });

@@ -56,15 +56,15 @@ export function registerBuiltInCommands(
           // Linked: use initData URL with web_app button (native mini app)
           const baseUrl =
             process.env.PUBLIC_GATEWAY_URL || "http://localhost:8080";
-          const settingsUrl = new URL("/settings", baseUrl);
+          const settingsUrl = new URL("/agent", baseUrl);
           settingsUrl.searchParams.set("platform", ctx.platform);
           settingsUrl.searchParams.set("chat", ctx.channelId);
           if (ctx.connectionId) {
             settingsUrl.searchParams.set("connectionId", ctx.connectionId);
           }
-          await ctx.reply("Tap the button below to open settings.", {
+          await ctx.reply("Tap the button below to open agent settings.", {
             url: settingsUrl.toString(),
-            urlLabel: "Open Settings",
+            urlLabel: "Open Agent Settings",
             webApp: true,
           });
           return;

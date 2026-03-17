@@ -2,7 +2,7 @@
  * History page HTML shell — serves the Preact app for viewing agent conversation history.
  */
 
-import { settingsPageCSS } from "../settings-page-styles";
+import { pageCSS } from "../page-styles";
 
 let historyPageJS = "";
 try {
@@ -22,7 +22,7 @@ export function renderHistoryPage(agentId: string): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="referrer" content="no-referrer">
   <title>Agent History</title>
-  <style>${settingsPageCSS}</style>
+  <style>${pageCSS}</style>
 </head>
 <body class="min-h-screen bg-gradient-to-br from-slate-700 to-slate-900 p-4">
   <div class="max-w-xl mx-auto bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col" style="height:calc(100vh - 2rem)">

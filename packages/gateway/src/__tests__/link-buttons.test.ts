@@ -4,33 +4,31 @@ import { extractSettingsLinkButtons } from "../platform/link-buttons";
 describe("extractSettingsLinkButtons", () => {
   test("extracts settings link and replaces with label", () => {
     const content =
-      "Click [Open Settings](https://example.com/settings?claim=abc123) to continue";
+      "Click [Open Settings](https://example.com/agent?claim=abc123) to continue";
     const { processedContent, linkButtons } =
       extractSettingsLinkButtons(content);
 
     expect(linkButtons).toHaveLength(1);
     expect(linkButtons[0]!.text).toBe("Open Settings");
-    expect(linkButtons[0]!.url).toBe(
-      "https://example.com/settings?claim=abc123"
-    );
+    expect(linkButtons[0]!.url).toBe("https://example.com/agent?claim=abc123");
     expect(processedContent).toBe("Click Open Settings to continue");
     expect(processedContent).not.toContain("https://");
   });
 
   test("extracts settings link with agent param", () => {
     const content =
-      "[Settings](https://example.com/settings?claim=abc&agent=agent-1)";
+      "[Settings](https://example.com/agent?claim=abc&agent=agent-1)";
     const { linkButtons } = extractSettingsLinkButtons(content);
 
     expect(linkButtons).toHaveLength(1);
     expect(linkButtons[0]!.url).toBe(
-      "https://example.com/settings?claim=abc&agent=agent-1"
+      "https://example.com/agent?claim=abc&agent=agent-1"
     );
   });
 
   test("extracts multiple settings links", () => {
     const content =
-      "[First](https://a.com/settings?claim=1) and [Second](https://b.com/settings?claim=2)";
+      "[First](https://a.com/agent?claim=1) and [Second](https://b.com/agent?claim=2)";
     const { processedContent, linkButtons } =
       extractSettingsLinkButtons(content);
 
@@ -39,7 +37,7 @@ describe("extractSettingsLinkButtons", () => {
   });
 
   test("filters out localhost URLs", () => {
-    const content = "[Settings](http://localhost:3000/settings?claim=token)";
+    const content = "[Settings](http://localhost:3000/agent?claim=token)";
     const { processedContent, linkButtons } =
       extractSettingsLinkButtons(content);
 
@@ -49,7 +47,7 @@ describe("extractSettingsLinkButtons", () => {
   });
 
   test("filters out 127.0.0.1 URLs", () => {
-    const content = "[Settings](http://127.0.0.1/settings?claim=token)";
+    const content = "[Settings](http://127.0.0.1/agent?claim=token)";
     const { linkButtons } = extractSettingsLinkButtons(content);
     expect(linkButtons).toHaveLength(0);
   });
@@ -64,7 +62,7 @@ describe("extractSettingsLinkButtons", () => {
   });
 
   test("does not match links without claim= parameter", () => {
-    const content = "[Settings](https://example.com/settings)";
+    const content = "[Settings](https://example.com/agent)";
     const { processedContent, linkButtons } =
       extractSettingsLinkButtons(content);
 
@@ -82,8 +80,8 @@ describe("extractSettingsLinkButtons", () => {
   });
 
   test("handles HTTP and HTTPS", () => {
-    const httpContent = "[A](http://example.com/settings?claim=x)";
-    const httpsContent = "[B](https://example.com/settings?claim=y)";
+    const httpContent = "[A](http://example.com/agent?claim=x)";
+    const httpsContent = "[B](https://example.com/agent?claim=y)";
 
     const httpResult = extractSettingsLinkButtons(httpContent);
     const httpsResult = extractSettingsLinkButtons(httpsContent);
@@ -94,7 +92,7 @@ describe("extractSettingsLinkButtons", () => {
 
   test("mixed localhost and remote links only keeps remote", () => {
     const content =
-      "[Local](http://localhost/settings?claim=a) and [Remote](https://app.com/settings?claim=b)";
+      "[Local](http://localhost/agent?claim=a) and [Remote](https://app.com/agent?claim=b)";
     const { linkButtons } = extractSettingsLinkButtons(content);
 
     expect(linkButtons).toHaveLength(1);

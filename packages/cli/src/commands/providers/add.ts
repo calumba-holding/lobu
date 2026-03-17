@@ -4,8 +4,8 @@ import chalk from "chalk";
 import inquirer from "inquirer";
 import { parse as parseToml } from "smol-toml";
 import { CONFIG_FILENAME } from "../../config/loader.js";
-import { getSkillById, isProviderSkill } from "../skills/registry.js";
 import { secretsSetCommand } from "../secrets.js";
+import { getSkillById, isProviderSkill } from "../skills/registry.js";
 
 export async function providersAddCommand(
   cwd: string,

@@ -47,13 +47,14 @@ coverage/
 # Redis snapshot
 dump.rdb
 
-# Auto-generated settings CSS
-packages/gateway/src/routes/public/settings-page-styles.ts
+# Auto-generated page CSS
+packages/gateway/src/routes/public/page-styles.ts
 
 # Auto-generated history page JS bundle
 packages/gateway/src/routes/public/history-page-bundle.ts
-packages/gateway/src/routes/public/admin-page-bundle.ts
-packages/gateway/src/routes/public/admin-page-bundle.raw.js
+packages/gateway/src/routes/public/agent-page-bundle.ts
+packages/gateway/src/routes/public/agents-page-bundle.ts
+packages/gateway/src/routes/public/agents-page-bundle.raw.js
 
 # Astro build artifacts
 packages/landing/.astro/

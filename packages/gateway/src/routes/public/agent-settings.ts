@@ -1,5 +1,5 @@
 /**
- * Settings Page Routes
+ * Agent Page Routes
  *
  * Serves the unified settings/agent-selector page.
  * OAuth + claims is the only auth path. No fallback to encrypted tokens.
@@ -35,32 +35,30 @@ import {
 } from "../../services/platform-helpers";
 import { platformAgentId } from "../../spaces";
 import { verifyAgentAccess } from "./agent-access";
+import type { ProviderMeta } from "./agent-page";
+import {
+  renderErrorPage,
+  renderPickerPage,
+  renderSettingsPage,
+} from "./agent-page";
 import {
   clearSettingsSessionCookie,
   setSettingsSessionCookie,
   verifySettingsSession,
 } from "./settings-auth";
-import type { ProviderMeta } from "./settings-page";
-import {
-  renderErrorPage,
-  renderPickerPage,
-  renderSettingsPage,
-} from "./settings-page";
 
 const logger = createLogger("settings-routes");
 
 /**
  * Validate returnUrl to prevent open redirects.
- * Only allows relative paths under /settings or /api/v1/.
+ * Only allows relative paths under /agent or /api/v1/.
  */
 function isSafeReturnUrl(url: string): boolean {
   if (!url.startsWith("/")) return false;
   // Block protocol-relative URLs (//evil.com)
   if (url.startsWith("//")) return false;
   return (
-    url.startsWith("/settings") ||
-    url.startsWith("/api/v1/") ||
-    url === "/agents"
+    url.startsWith("/agent") || url.startsWith("/api/v1/") || url === "/agents"
   );
 }
 
@@ -486,9 +484,7 @@ async function renderSettingsForPayload(
   );
 }
 
-export function createSettingsPageRoutes(
-  config: SettingsPageConfig
-): OpenAPIHono {
+export function createAgentPageRoutes(config: SettingsPageConfig): OpenAPIHono {
   const app = new OpenAPIHono();
 
   const oauthClient = config.settingsOAuthClient ?? null;
@@ -496,9 +492,9 @@ export function createSettingsPageRoutes(
   const claimService = config.claimService;
 
   // ====================================================================
-  // POST /settings/session — webapp-initdata authentication
+  // POST /agent/session — webapp-initdata authentication
   // ====================================================================
-  app.post("/settings/session", async (c) => {
+  app.post("/agent/session", async (c) => {
     const body = await c.req
       .json<{
         initData?: string;
@@ -589,15 +585,13 @@ export function createSettingsPageRoutes(
 
   if (oauthClient && stateStore) {
     /**
-     * GET /settings/oauth/login — Start OAuth flow
+     * GET /agent/oauth/login — Start OAuth flow
      * Redirects to the OAuth provider's authorization page.
      * Preserves returnUrl through the OAuth round-trip.
      */
-    app.get("/settings/oauth/login", async (c) => {
-      const rawReturnUrl = c.req.query("returnUrl") || "/settings";
-      const returnUrl = isSafeReturnUrl(rawReturnUrl)
-        ? rawReturnUrl
-        : "/settings";
+    app.get("/agent/oauth/login", async (c) => {
+      const rawReturnUrl = c.req.query("returnUrl") || "/agent";
+      const returnUrl = isSafeReturnUrl(rawReturnUrl) ? rawReturnUrl : "/agent";
       const codeVerifier = oauthClient.generateCodeVerifier();
 
       const state = await stateStore.create({
@@ -611,10 +605,10 @@ export function createSettingsPageRoutes(
     });
 
     /**
-     * GET /settings/oauth/callback — OAuth callback
+     * GET /agent/oauth/callback — OAuth callback
      * Exchanges code for token, fetches user info, creates session.
      */
-    app.get("/settings/oauth/callback", async (c) => {
+    app.get("/agent/oauth/callback", async (c) => {
       const code = c.req.query("code");
       const stateParam = c.req.query("state");
       const error = c.req.query("error");
@@ -687,7 +681,7 @@ export function createSettingsPageRoutes(
         // Redirect to the original settings URL (with claim/agent params preserved)
         const safeReturnUrl = isSafeReturnUrl(stateData.returnUrl)
           ? stateData.returnUrl
-          : "/settings";
+          : "/agent";
         return c.redirect(safeReturnUrl);
       } catch (err) {
         logger.error("OAuth callback failed", { error: err });
@@ -699,7 +693,7 @@ export function createSettingsPageRoutes(
     });
   } else {
     // OAuth not configured — return helpful error for OAuth-only paths
-    app.get("/settings/oauth/login", (c) =>
+    app.get("/agent/oauth/login", (c) =>
       c.html(
         renderErrorPage(
           "OAuth login is not configured. Use /configure in your chat to access settings."
@@ -707,15 +701,15 @@ export function createSettingsPageRoutes(
         501
       )
     );
-    app.get("/settings/oauth/callback", (c) =>
+    app.get("/agent/oauth/callback", (c) =>
       c.html(renderErrorPage("OAuth login is not configured."), 501)
     );
   }
 
   // ====================================================================
-  // GET /settings — Main settings page
+  // GET /agent — Main agent page
   // ====================================================================
-  app.get("/settings", async (c) => {
+  app.get("/agent", async (c) => {
     c.header("Referrer-Policy", "no-referrer");
     c.header("Cache-Control", "no-store, max-age=0");
     c.header("Pragma", "no-cache");
@@ -754,13 +748,13 @@ export function createSettingsPageRoutes(
         const currentUrl = new URL(c.req.url);
         const returnUrl = `${currentUrl.pathname}${currentUrl.search}`;
         return c.redirect(
-          `/settings/oauth/login?returnUrl=${encodeURIComponent(returnUrl)}`
+          `/agent/oauth/login?returnUrl=${encodeURIComponent(returnUrl)}`
         );
       }
 
       // No session — redirect to OAuth login if available, otherwise show error
       if (oauthClient) {
-        return c.redirect("/settings/oauth/login");
+        return c.redirect("/agent/oauth/login");
       }
       return c.html(
         renderErrorPage(
@@ -1250,7 +1244,7 @@ export function createSettingsPageRoutes(
         if (config.interactionService) {
           const baseUrl =
             process.env.PUBLIC_GATEWAY_URL || "http://localhost:8080";
-          const settingsUrl = new URL("/settings", baseUrl);
+          const settingsUrl = new URL("/agent", baseUrl);
           settingsUrl.searchParams.set("agent", agentId);
 
           const uniqueMissing = [...new Set(missingIntegrations)];
@@ -1303,8 +1297,8 @@ export function createSettingsPageRoutes(
     }
   });
 
-  // GET /settings/logout — Clear session cookie and redirect to root
-  app.get("/settings/logout", (c) => {
+  // GET /agent/logout — Clear session cookie and redirect to root
+  app.get("/agent/logout", (c) => {
     clearSettingsSessionCookie(c);
     return c.redirect("/");
   });
@@ -1314,7 +1308,7 @@ export function createSettingsPageRoutes(
 
 /**
  * Minimal bootstrap page for webapp-initdata authentication.
- * Extracts initData from the URL hash fragment and POSTs to /settings/session.
+ * Extracts initData from the URL hash fragment and POSTs to /agent/session.
  */
 function renderWebAppBootstrapPage(): string {
   return `<!DOCTYPE html>
@@ -1368,7 +1362,7 @@ function renderWebAppBootstrapPage(): string {
       }
 
       try {
-        var resp = await fetch('/settings/session', {
+        var resp = await fetch('/agent/session', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ initData: initData, chatId: chatId, platform: platform, connectionId: connectionId })
@@ -1377,7 +1371,7 @@ function renderWebAppBootstrapPage(): string {
           var rp = new URLSearchParams(window.location.search);
           rp.delete('platform');
           rp.delete('chat');
-          var redirectUrl = '/settings' + (rp.toString() ? '?' + rp.toString() : '');
+          var redirectUrl = '/agent' + (rp.toString() ? '?' + rp.toString() : '');
           var cleanUrl = new URL(window.location.href);
           cleanUrl.hash = '';
           cleanUrl.search = '';

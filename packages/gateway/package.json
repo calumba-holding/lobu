@@ -8,8 +8,8 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "generate:css": "bun run scripts/generate-css.ts",
-    "build": "bun run generate:css && bun run scripts/build-history.ts && bun run scripts/build-settings.ts && bun run scripts/build-admin.ts && tsc",
-    "dev": "bun run generate:css && bun run scripts/build-history.ts && bun run scripts/build-settings.ts && bun run scripts/build-admin.ts && DEPLOYMENT_MODE=docker bun --watch src/index.ts -- --env ../../.env",
+    "build": "bun run generate:css && bun run scripts/build-history.ts && bun run scripts/build-agent.ts && bun run scripts/build-agents.ts && tsc",
+    "dev": "bun run generate:css && bun run scripts/build-history.ts && bun run scripts/build-agent.ts && bun run scripts/build-agents.ts && DEPLOYMENT_MODE=docker bun --watch src/index.ts -- --env ../../.env",
     "start": "cd ../core && bun run build && cd ../gateway && bun src/index.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
