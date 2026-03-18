@@ -466,10 +466,11 @@ export class AgentSettingsStore extends BaseRedisStore<AgentSettings> {
         const decrypted = decrypt(value.slice(ENCRYPTED_VALUE_PREFIX.length));
         return { value: decrypted, needsMigration: false };
       } catch (error) {
-        this.logger.warn("Failed to decrypt auth profile credential value", {
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return { value, needsMigration: false };
+        this.logger.warn(
+          "Dropping undecryptable credential (ENCRYPTION_KEY changed?)",
+          { error: error instanceof Error ? error.message : String(error) }
+        );
+        return { value: "", needsMigration: false };
       }
     }
 

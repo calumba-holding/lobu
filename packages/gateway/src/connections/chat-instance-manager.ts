@@ -63,7 +63,24 @@ export class ChatInstanceManager {
           continue;
         }
         const connection = JSON.parse(raw) as PlatformConnection;
-        connection.config = this.decryptConfig(connection.config);
+        try {
+          connection.config = this.decryptConfig(connection.config);
+        } catch (decryptError) {
+          // ENCRYPTION_KEY changed — remove stale connection so the seeder can recreate it
+          logger.warn(
+            { id, platform: connection.platform, error: String(decryptError) },
+            "Removing connection with undecryptable config (ENCRYPTION_KEY changed?)"
+          );
+          await this.redis.del(`connection:${id}`);
+          await this.redis.srem("connections:all", id);
+          if (connection.templateAgentId) {
+            await this.redis.srem(
+              `connections:agent:${connection.templateAgentId}`,
+              id
+            );
+          }
+          continue;
+        }
 
         // Migrate legacy agentId → templateAgentId
         const legacy = connection as PlatformConnection & {
@@ -882,7 +899,9 @@ export class ChatInstanceManager {
         try {
           decrypted[field] = decrypt(val.slice(7));
         } catch {
-          // decryption failed — leave as-is
+          throw new Error(
+            `Failed to decrypt field "${field}" — ENCRYPTION_KEY may have changed`
+          );
         }
       }
     }
