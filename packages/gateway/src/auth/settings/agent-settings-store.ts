@@ -132,6 +132,70 @@ export class AgentSettingsStore extends BaseRedisStore<AgentSettings> {
   }
 
   /**
+   * Get effective settings for an agent, with template agent fallback.
+   * For sandbox agents, inherits from the template agent when own settings
+   * are missing or have no providers configured.
+   */
+  async getEffectiveSettings(agentId: string): Promise<AgentSettings | null> {
+    const settings = await this.getSettings(agentId);
+
+    // If settings exist and have providers, use them directly
+    if (settings?.installedProviders?.length) return settings;
+
+    // Resolve template agent ID
+    const templateAgentId = await this.resolveTemplateAgentId(
+      agentId,
+      settings
+    );
+    if (!templateAgentId) return settings;
+
+    const templateSettings = await this.getSettings(templateAgentId);
+    if (!templateSettings) return settings;
+
+    // Merge: own settings override template, but inherit missing fields
+    if (!settings) {
+      return { ...templateSettings, templateAgentId };
+    }
+
+    return {
+      ...templateSettings,
+      ...Object.fromEntries(
+        Object.entries(settings).filter(([, v]) => v !== undefined)
+      ),
+      templateAgentId,
+    } as AgentSettings;
+  }
+
+  /**
+   * Resolve the template agent ID for a sandbox agent.
+   * Chain: settings.templateAgentId → metadata.parentConnectionId → connection.templateAgentId
+   */
+  private async resolveTemplateAgentId(
+    agentId: string,
+    settings: AgentSettings | null
+  ): Promise<string | undefined> {
+    if (settings?.templateAgentId) return settings.templateAgentId;
+
+    try {
+      // Check metadata for parentConnectionId
+      const metaRaw = await this.redis.get(`agent_metadata:${agentId}`);
+      if (!metaRaw) return undefined;
+      const meta = safeJsonParse<{ parentConnectionId?: string }>(metaRaw);
+      if (!meta?.parentConnectionId) return undefined;
+
+      // Check connection for templateAgentId
+      const connRaw = await this.redis.get(
+        `connection:${meta.parentConnectionId}`
+      );
+      if (!connRaw) return undefined;
+      const conn = safeJsonParse<{ templateAgentId?: string }>(connRaw);
+      return conn?.templateAgentId;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * Save settings for an agent
    * Overwrites existing settings
    */

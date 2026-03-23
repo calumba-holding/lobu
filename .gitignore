@@ -44,7 +44,8 @@ debug-voice-urls.js
 # Test coverage
 coverage/
 
-# Redis snapshot
+# Local data (Redis, etc.)
+data/
 dump.rdb
 
 # Auto-generated page CSS

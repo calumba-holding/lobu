@@ -298,50 +298,62 @@ export async function initCommand(
     }
   }
 
-  // Settings page OAuth login (optional)
-  const { oauthIssuer } = await inquirer.prompt([
+  // Auth provider (OAuth login for settings page + memory/integrations)
+  const { authProvider } = await inquirer.prompt([
     {
-      type: "input",
-      name: "oauthIssuer",
-      message: "Settings page OAuth issuer URL (leave empty to skip):",
-      default: "",
+      type: "list",
+      name: "authProvider",
+      message: "Auth provider (OAuth login, memory & integrations):",
+      choices: [
+        { name: "Owletto (owletto.com)", value: "owletto" },
+        { name: "Custom URL", value: "custom" },
+        { name: "None (admin password only)", value: "none" },
+      ],
+      default: "owletto",
     },
   ]);
 
   const oauthSecrets: Array<{ envVar: string; value: string }> = [];
-  if (oauthIssuer) {
-    const oauthAnswers = await inquirer.prompt([
+  if (authProvider === "owletto") {
+    oauthSecrets.push({
+      envVar: "AUTH_MCP_URL",
+      value: "https://owletto.com/mcp",
+    });
+  } else if (authProvider === "custom") {
+    const { customAuthMcpUrl } = await inquirer.prompt([
       {
         type: "input",
-        name: "clientId",
-        message: "OAuth client ID (leave empty for dynamic registration):",
-        default: "",
-      },
-      {
-        type: "password",
-        name: "clientSecret",
-        message: "OAuth client secret (leave empty if public client):",
-        mask: "*",
-        default: "",
+        name: "customAuthMcpUrl",
+        message: "Auth MCP URL:",
       },
     ]);
+    if (customAuthMcpUrl) {
+      oauthSecrets.push({
+        envVar: "AUTH_MCP_URL",
+        value: customAuthMcpUrl,
+      });
+    }
+  }
 
+  // Memory plugin
+  const { memoryPlugin } = await inquirer.prompt([
+    {
+      type: "list",
+      name: "memoryPlugin",
+      message: "Memory plugin:",
+      choices: [
+        { name: "Owletto (persistent, cross-conversation)", value: "owletto" },
+        { name: "Native (filesystem-based)", value: "native" },
+      ],
+      default: authProvider === "owletto" ? "owletto" : "native",
+    },
+  ]);
+
+  if (memoryPlugin !== "owletto") {
     oauthSecrets.push({
-      envVar: "SETTINGS_OAUTH_ISSUER_URL",
-      value: oauthIssuer,
+      envVar: "MEMORY_PLUGIN",
+      value: memoryPlugin,
     });
-    if (oauthAnswers.clientId) {
-      oauthSecrets.push({
-        envVar: "SETTINGS_OAUTH_CLIENT_ID",
-        value: oauthAnswers.clientId,
-      });
-    }
-    if (oauthAnswers.clientSecret) {
-      oauthSecrets.push({
-        envVar: "SETTINGS_OAUTH_CLIENT_SECRET",
-        value: oauthAnswers.clientSecret,
-      });
-    }
   }
 
   // Compute network domains from selected policy
@@ -724,9 +736,8 @@ services:
       ENCRYPTION_KEY: \${ENCRYPTION_KEY}
       WORKER_ALLOWED_DOMAINS: \${WORKER_ALLOWED_DOMAINS:-}
       WORKER_DISALLOWED_DOMAINS: \${WORKER_DISALLOWED_DOMAINS:-}
-      SETTINGS_OAUTH_ISSUER_URL: \${SETTINGS_OAUTH_ISSUER_URL:-}
-      SETTINGS_OAUTH_CLIENT_ID: \${SETTINGS_OAUTH_CLIENT_ID:-}
-      SETTINGS_OAUTH_CLIENT_SECRET: \${SETTINGS_OAUTH_CLIENT_SECRET:-}
+      AUTH_MCP_URL: \${AUTH_MCP_URL:-}
+      MEMORY_PLUGIN: \${MEMORY_PLUGIN:-owletto}
     volumes:${dockerSocketMount}
       - ./.lobu:/app/.lobu
     networks:

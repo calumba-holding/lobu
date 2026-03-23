@@ -621,6 +621,7 @@ function setupServer(
           chatInstanceManager: chatInstanceManager ?? undefined,
           systemEnvStore,
           adminPassword,
+          oauthEnabled: !!settingsOAuthClient,
           version: process.env.npm_package_version || "2.6.1",
           githubUrl: "https://github.com/lobu-ai/lobu",
         });

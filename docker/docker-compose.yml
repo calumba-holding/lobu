@@ -6,7 +6,7 @@ services:
     image: redis:7-alpine
     command: redis-server --maxmemory 256mb --maxmemory-policy noeviction --save 60 1 --dir /data
     volumes:
-      - redis-data:/data
+      - ../data/redis:/data
     networks:
       - lobu-internal
     restart: unless-stopped
@@ -70,24 +70,12 @@ services:
         condition: service_healthy
     develop:
       watch:
-        - action: sync
-          path: ../packages/gateway/src
-          target: /app/packages/gateway/src
-        - action: sync
-          path: ../packages/core/src
-          target: /app/packages/core/src
-        - action: sync
-          path: ../packages/worker/src
-          target: /app/packages/worker/src
         - action: rebuild
           path: ../packages/gateway/package.json
         - action: rebuild
           path: ../packages/core/package.json
         - action: rebuild
           path: ../packages/worker/package.json
-
-volumes:
-  redis-data:
 
 networks:
   # Public network with internet access (gateway only)

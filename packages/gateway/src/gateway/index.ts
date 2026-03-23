@@ -351,13 +351,13 @@ export class WorkerGateway {
         }
       }
 
-      // Resolve dynamic provider configuration
+      // Resolve dynamic provider configuration (with template agent fallback)
       const agentSettings =
         this.agentSettingsStore && agentId
-          ? await this.agentSettingsStore.getSettings(agentId)
+          ? await this.agentSettingsStore.getEffectiveSettings(agentId)
           : null;
       const providerConfig = await this.resolveProviderConfig(
-        agentId || "",
+        agentSettings?.templateAgentId || agentId || "",
         resolveEffectiveModelRef(agentSettings),
         baseUrl
       );
@@ -367,7 +367,8 @@ export class WorkerGateway {
       const mcpContext: Record<string, string> = {};
       if (this.agentSettingsStore && agentId) {
         try {
-          const settings = await this.agentSettingsStore.getSettings(agentId);
+          const settings =
+            await this.agentSettingsStore.getEffectiveSettings(agentId);
           const skills = settings?.skillsConfig?.skills || [];
           skillsConfig = skills
             .filter((s) => s.enabled && s.content)

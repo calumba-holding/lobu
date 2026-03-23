@@ -2,7 +2,7 @@
 
 import { existsSync } from "node:fs";
 import path from "node:path";
-import type { AgentOptions, LogLevel } from "@lobu/core";
+import type { AgentOptions, LogLevel, PluginConfig } from "@lobu/core";
 import {
   DEFAULTS as CORE_DEFAULTS,
   createLogger,
@@ -158,6 +158,33 @@ export function loadEnvFile(envPath?: string): void {
 }
 
 /**
+ * Build the default memory plugin list based on MEMORY_PLUGIN env var.
+ * "owletto" (default) → Owletto MCP plugin
+ * "native" → @openclaw/native-memory (filesystem-based)
+ */
+function buildMemoryPlugins(): PluginConfig[] {
+  const memoryPlugin = getOptionalEnv("MEMORY_PLUGIN", "owletto");
+
+  if (memoryPlugin === "native") {
+    return [
+      { source: "@openclaw/native-memory", slot: "memory", enabled: true },
+    ];
+  }
+
+  return [
+    {
+      source: "@lobu/owletto-openclaw",
+      slot: "memory",
+      enabled: true,
+      config: {
+        mcpUrl: "http://gateway:8080/mcp/owletto",
+        gatewayAuthUrl: "http://gateway:8080",
+      },
+    },
+  ];
+}
+
+/**
  * Build complete gateway configuration from environment variables
  * This is the SINGLE source of truth for all configuration
  */
@@ -214,17 +241,7 @@ export function buildGatewayConfig(): GatewayConfig {
         },
       },
       pluginsConfig: {
-        plugins: [
-          {
-            source: "@lobu/owletto-openclaw",
-            slot: "memory",
-            enabled: true,
-            config: {
-              mcpUrl: "http://gateway:8080/mcp/owletto",
-              gatewayAuthUrl: "http://gateway:8080",
-            },
-          },
-        ],
+        plugins: buildMemoryPlugins(),
       },
     },
     sessionTimeoutMinutes: getOptionalNumber(

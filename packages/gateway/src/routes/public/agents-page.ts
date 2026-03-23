@@ -143,6 +143,7 @@ interface AgentsPageConfig {
   chatInstanceManager?: ChatInstanceManager;
   systemEnvStore?: SystemEnvStore;
   adminPassword: string;
+  oauthEnabled?: boolean;
   version?: string;
   githubUrl?: string;
 }
@@ -168,6 +169,10 @@ export function createAgentsPageRoutes(config: AgentsPageConfig) {
   app.get("/agents/login", (c) => {
     const session = verifySettingsSession(c);
     if (session?.isAdmin) return c.redirect("/agents");
+    // Redirect to OAuth if configured, otherwise show password form
+    if (config.oauthEnabled) {
+      return c.redirect("/agent/oauth/login?returnUrl=/agents");
+    }
     const error = c.req.query("error");
     return c.html(renderAgentsLoginPage(error || undefined));
   });

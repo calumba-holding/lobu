@@ -5,16 +5,28 @@ function normalizeBaseUrl(url: string): string {
 export function resolvePublicBaseUrl(options?: {
   configuredUrl?: string;
   requestUrl?: string;
+  forwardedProto?: string;
   fallbackUrl?: string;
 }): string {
-  const configuredUrl =
-    options?.configuredUrl || process.env.PUBLIC_GATEWAY_URL;
-  if (configuredUrl) {
-    return normalizeBaseUrl(configuredUrl);
+  // Explicit configuredUrl always wins (caller knows best)
+  if (options?.configuredUrl) {
+    return normalizeBaseUrl(options.configuredUrl);
   }
 
+  // When only requestUrl is provided, prefer it over the env default
+  // so OAuth redirects match the actual browser origin.
+  // Respect X-Forwarded-Proto for TLS-terminating proxies.
   if (options?.requestUrl) {
-    return normalizeBaseUrl(new URL(options.requestUrl).origin);
+    const origin = new URL(options.requestUrl);
+    if (options.forwardedProto) {
+      const proto = options.forwardedProto.split(",")[0]?.trim().toLowerCase();
+      if (proto) origin.protocol = `${proto}:`;
+    }
+    return normalizeBaseUrl(origin.origin);
+  }
+
+  if (process.env.PUBLIC_GATEWAY_URL) {
+    return normalizeBaseUrl(process.env.PUBLIC_GATEWAY_URL);
   }
 
   return normalizeBaseUrl(options?.fallbackUrl || "http://localhost:8080");

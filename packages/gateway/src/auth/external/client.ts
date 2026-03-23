@@ -10,9 +10,9 @@ import {
 } from "./device-code-client";
 
 const logger = createLogger("external-auth-client");
-const EXTERNAL_AUTH_CACHE_KEY = "external:auth:client:v2";
+const EXTERNAL_AUTH_CACHE_KEY = "external:auth:client:v3";
 const DISCOVERY_CACHE_TTL_MS = 5 * 60 * 1000;
-const DEFAULT_SCOPE = process.env.SETTINGS_OAUTH_SCOPE || "profile:read";
+const DEFAULT_SCOPE = "profile:read";
 
 export interface ExternalAuthConfig {
   issuerUrl: string;
@@ -23,6 +23,8 @@ export interface ExternalAuthConfig {
   userinfoUrl?: string;
   deviceAuthorizationUrl?: string;
   redirectUri: string;
+  /** Additional redirect URIs to register (e.g. PUBLIC_GATEWAY_URL alongside localhost) */
+  additionalRedirectUris?: string[];
   scope?: string;
   cacheStore?: {
     get: (key: string) => Promise<string | null>;
@@ -105,7 +107,11 @@ export class ExternalAuthClient {
     return randomBytes(32).toString("base64url");
   }
 
-  async buildAuthUrl(state: string, codeVerifier: string): Promise<string> {
+  async buildAuthUrl(
+    state: string,
+    codeVerifier: string,
+    redirectUri?: string
+  ): Promise<string> {
     const resolved = await this.resolveConfig();
     if (!resolved.authUrl || !resolved.tokenUrl) {
       throw new Error(
@@ -113,12 +119,17 @@ export class ExternalAuthClient {
       );
     }
 
-    return this.buildOAuthClient(resolved).buildAuthUrl(state, codeVerifier);
+    return this.buildOAuthClient(resolved).buildAuthUrl(
+      state,
+      codeVerifier,
+      redirectUri
+    );
   }
 
   async exchangeCodeForToken(
     code: string,
-    codeVerifier: string
+    codeVerifier: string,
+    redirectUri?: string
   ): Promise<OAuthCredentials> {
     const resolved = await this.resolveConfig();
     if (!resolved.authUrl || !resolved.tokenUrl) {
@@ -129,7 +140,8 @@ export class ExternalAuthClient {
 
     return this.buildOAuthClient(resolved).exchangeCodeForToken(
       code,
-      codeVerifier
+      codeVerifier,
+      redirectUri
     );
   }
 
@@ -137,7 +149,7 @@ export class ExternalAuthClient {
     const resolved = await this.resolveConfig();
     if (!resolved.userinfoUrl) {
       throw new Error(
-        "External auth: userinfo endpoint not available (set SETTINGS_OAUTH_USERINFO_URL or expose it via discovery)"
+        "External auth: userinfo endpoint not available (expose it via OIDC discovery)"
       );
     }
 
@@ -226,39 +238,31 @@ export class ExternalAuthClient {
   }
 
   static isConfigured(): boolean {
-    return !!(
-      process.env.SETTINGS_OAUTH_ISSUER_URL ||
-      (process.env.SETTINGS_OAUTH_AUTHORIZE_URL &&
-        process.env.SETTINGS_OAUTH_TOKEN_URL)
-    );
+    return !!process.env.AUTH_MCP_URL;
   }
 
   static fromEnv(
     publicGatewayUrl: string,
     cacheStore?: ExternalAuthConfig["cacheStore"]
   ): ExternalAuthClient | null {
-    const issuerUrl = process.env.SETTINGS_OAUTH_ISSUER_URL;
-    const clientId = process.env.SETTINGS_OAUTH_CLIENT_ID;
+    const authMcpUrl = process.env.AUTH_MCP_URL;
+    if (!authMcpUrl) return null;
 
-    if (
-      !issuerUrl &&
-      (!process.env.SETTINGS_OAUTH_AUTHORIZE_URL ||
-        !process.env.SETTINGS_OAUTH_TOKEN_URL)
-    ) {
-      return null;
-    }
+    const issuerUrl = new URL("/", authMcpUrl).toString().replace(/\/$/, "");
+    const callbackPath = "/agent/oauth/callback";
+
+    // Register redirect URIs for both the configured public URL and localhost
+    // so OAuth works regardless of how the user accesses the gateway
+    const redirectUri = `${publicGatewayUrl}${callbackPath}`;
+    const additionalRedirectUris = [
+      `http://localhost:8080${callbackPath}`,
+    ].filter((uri) => uri !== redirectUri);
 
     return new ExternalAuthClient({
-      issuerUrl: issuerUrl || publicGatewayUrl,
-      clientId,
-      clientSecret: process.env.SETTINGS_OAUTH_CLIENT_SECRET,
-      authorizeUrl: process.env.SETTINGS_OAUTH_AUTHORIZE_URL,
-      tokenUrl: process.env.SETTINGS_OAUTH_TOKEN_URL,
-      userinfoUrl: process.env.SETTINGS_OAUTH_USERINFO_URL,
-      deviceAuthorizationUrl:
-        process.env.SETTINGS_OAUTH_DEVICE_AUTHORIZATION_URL,
-      redirectUri: `${publicGatewayUrl}/agent/oauth/callback`,
-      scope: process.env.SETTINGS_OAUTH_SCOPE || DEFAULT_SCOPE,
+      issuerUrl,
+      redirectUri,
+      additionalRedirectUris,
+      scope: DEFAULT_SCOPE,
       cacheStore,
     });
   }
@@ -419,7 +423,10 @@ export class ExternalAuthClient {
         },
         body: JSON.stringify({
           client_name: "Lobu CLI and Settings",
-          redirect_uris: [this.config.redirectUri],
+          redirect_uris: [
+            this.config.redirectUri,
+            ...(this.config.additionalRedirectUris || []),
+          ].filter((v, i, a) => a.indexOf(v) === i),
           grant_types: supportsDeviceGrant
             ? ["authorization_code", "refresh_token", DEVICE_CODE_GRANT_TYPE]
             : ["authorization_code", "refresh_token"],

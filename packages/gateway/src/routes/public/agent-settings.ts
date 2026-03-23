@@ -34,6 +34,7 @@ import {
   resolveAgentOptions,
 } from "../../services/platform-helpers";
 import { platformAgentId } from "../../spaces";
+import { resolvePublicBaseUrl } from "../../utils/public-url";
 import type { ProviderMeta } from "./agent-page";
 import {
   renderErrorPage,
@@ -121,6 +122,7 @@ interface SettingsOAuthStateData {
   userId: string;
   codeVerifier: string;
   returnUrl: string;
+  redirectUri?: string;
 }
 
 export interface SettingsPageConfig {
@@ -551,14 +553,23 @@ export function createAgentPageRoutes(config: SettingsPageConfig): OpenAPIHono {
       const rawReturnUrl = c.req.query("returnUrl") || "/agent";
       const returnUrl = isSafeReturnUrl(rawReturnUrl) ? rawReturnUrl : "/agent";
       const codeVerifier = oauthClient.generateCodeVerifier();
+      const redirectUri = `${resolvePublicBaseUrl({
+        requestUrl: c.req.url,
+        forwardedProto: c.req.header("x-forwarded-proto"),
+      })}/agent/oauth/callback`;
 
       const state = await stateStore.create({
         userId: "pending", // will be resolved after OAuth
         codeVerifier,
         returnUrl,
+        redirectUri,
       });
 
-      const authUrl = await oauthClient.buildAuthUrl(state, codeVerifier);
+      const authUrl = await oauthClient.buildAuthUrl(
+        state,
+        codeVerifier,
+        redirectUri
+      );
       return c.redirect(authUrl);
     });
 
@@ -593,10 +604,11 @@ export function createAgentPageRoutes(config: SettingsPageConfig): OpenAPIHono {
       }
 
       try {
-        // Exchange code for token
+        // Exchange code for token (use the same redirectUri from the authorize step)
         const credentials = await oauthClient.exchangeCodeForToken(
           code,
-          stateData.codeVerifier
+          stateData.codeVerifier,
+          stateData.redirectUri
         );
 
         // Fetch user info
@@ -1088,6 +1100,12 @@ export function createAgentPageRoutes(config: SettingsPageConfig): OpenAPIHono {
 
     return await renderSettingsForPayload(c, config, payload, agentId);
   };
+  // GET /agent/logout — must be before the :agentId catch-all
+  app.get("/agent/logout", (c) => {
+    clearSettingsSessionCookie(c);
+    return c.redirect("/agents/login");
+  });
+
   app.get("/agent", agentPageHandler);
   app.get("/agent/:agentId", agentPageHandler);
 
@@ -1191,12 +1209,6 @@ export function createAgentPageRoutes(config: SettingsPageConfig): OpenAPIHono {
       logger.error("Install callback failed", { error, agentId });
       return c.json({ error: "Failed to send notification" }, 500);
     }
-  });
-
-  // GET /agent/logout — Clear session cookie and redirect to root
-  app.get("/agent/logout", (c) => {
-    clearSettingsSessionCookie(c);
-    return c.redirect("/");
   });
 
   return app;

@@ -120,7 +120,7 @@ describe("SettingsOAuthClient", () => {
 
     const cache = new Map<string, string>([
       [
-        "external:auth:client:v2",
+        "external:auth:client:v3",
         JSON.stringify({
           client_id: "cached-client-id",
           token_endpoint_auth_method: "none",

@@ -213,6 +213,14 @@ spec:
               value: "{{ .Values.gateway.anthropicProxy.baseUrl }}"
             {{- end }}
 
+            # External auth (Owletto OIDC) for settings OAuth
+            {{- if .Values.gateway.config.authMcpUrl }}
+            - name: AUTH_MCP_URL
+              value: "{{ .Values.gateway.config.authMcpUrl }}"
+            - name: WORKER_ENV_AUTH_MCP_URL
+              value: "{{ .Values.gateway.config.authMcpUrl }}"
+            {{- end }}
+
             # Admin password (direct value override, not in sealed secrets)
             {{- if .Values.secrets.adminPassword }}
             - name: ADMIN_PASSWORD
