@@ -345,6 +345,24 @@
           "modelsEndpoint": "/v1/models"
         }
       ]
+    },
+    {
+      "id": "openai",
+      "name": "OpenAI",
+      "description": "OpenAI Models",
+      "providers": [
+        {
+          "displayName": "OpenAI",
+          "iconUrl": "https://www.google.com/s2/favicons?domain=openai.com&sz=128",
+          "envVarName": "OPENAI_API_KEY",
+          "upstreamBaseUrl": "https://api.openai.com",
+          "apiKeyInstructions": "Get your API key from <a href=\"https://platform.openai.com/api-keys\" target=\"_blank\" class=\"text-blue-600 hover:underline\">OpenAI Dashboard</a>",
+          "apiKeyPlaceholder": "sk-...",
+          "sdkCompat": "openai",
+          "defaultModel": "gpt-4o",
+          "modelsEndpoint": "/v1/models"
+        }
+      ]
     }
   ]
 }
