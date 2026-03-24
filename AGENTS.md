@@ -63,13 +63,19 @@ TypeScript packages must be compiled from `src/` → `dist/`. If you modify any 
 - Anytime you make changes in the code, you MUST:
 
 1. Have the stack running (`make dev`).
-2. Test the bot using the test script:
+2. When possible, first verify MCP tool calls work by calling the gateway proxy or Owletto directly (e.g., via a temporary script or `bun -e`). This catches issues before involving the full agent loop.
+3. Test the bot using the test script:
 ```bash
 ./scripts/test-bot.sh "@me test prompt"
 ```
 The script automatically handles sending the message, waiting for response, and checking logs. You can send multiple messages in sequence:
 ```bash
 ./scripts/test-bot.sh "@me first message" "follow up question" "another question"
+```
+4. If the bot gives stale/wrong responses, clear Redis chat history for the test user before retesting:
+```bash
+docker compose -f docker/docker-compose.yml exec redis redis-cli KEYS 'chat:history:*' # find the key
+docker compose -f docker/docker-compose.yml exec redis redis-cli DEL 'chat:history:<key>'
 ```
 
 - If you create ephemeral files, you MUST delete them when you're done with them.

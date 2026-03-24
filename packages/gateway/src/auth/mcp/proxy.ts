@@ -7,6 +7,7 @@ import type { GrantStore } from "../../permissions/grant-store";
 import {
   getStoredCredential,
   refreshCredential,
+  tryCompletePendingDeviceAuth,
 } from "../../routes/internal/device-auth";
 import type { CachedMcpServer, McpTool, McpToolCache } from "./tool-cache";
 
@@ -215,7 +216,50 @@ export class McpProxy {
 
       return serverInfo;
     } catch (error) {
-      logger.error("Failed to fetch tools for MCP", { mcpId, error });
+      logger.warn("Failed to fetch tools for MCP, retrying once", {
+        mcpId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+
+      // Retry once after a short delay (upstream may still be starting)
+      await new Promise((r) => setTimeout(r, 2000));
+      try {
+        const retryBody = JSON.stringify({
+          jsonrpc: "2.0",
+          method: "tools/list",
+          params: {},
+          id: 1,
+        });
+        const retryResponse = await this.sendUpstreamRequest(
+          httpServer,
+          agentId,
+          mcpId,
+          "POST",
+          retryBody,
+          userId
+        );
+        const retryData = (await retryResponse.json()) as JsonRpcResponse;
+        const retryTools: McpTool[] = retryData?.result?.tools || [];
+        if (retryTools.length > 0) {
+          const serverInfo: CachedMcpServer = { tools: retryTools };
+          if (this.toolCache) {
+            await this.toolCache.setServerInfo(mcpId, serverInfo, agentId);
+          }
+          logger.info("Retry succeeded for MCP tool fetch", {
+            mcpId,
+            toolCount: retryTools.length,
+          });
+          return serverInfo;
+        }
+      } catch (retryError) {
+        logger.error("Retry also failed for MCP tool fetch", {
+          mcpId,
+          error:
+            retryError instanceof Error
+              ? retryError.message
+              : String(retryError),
+        });
+      }
       return { tools: [] };
     }
   }
@@ -615,7 +659,15 @@ export class McpProxy {
       userId,
       mcpId
     );
-    if (!credential) return null;
+    if (!credential) {
+      // No stored credential — check if there's a pending device-auth to complete
+      return tryCompletePendingDeviceAuth(
+        this.redisClient,
+        agentId,
+        userId,
+        mcpId
+      );
+    }
 
     // Check if token is still valid (5 minute buffer)
     if (credential.expiresAt > Date.now() + 5 * 60 * 1000) {

@@ -205,16 +205,12 @@ export async function getOpenClawSessionContext(): Promise<{
       data.mcpStatus,
       toolMcpIds
     );
-    // Server instructions for MCPs that have tools are co-located in mcpToolInstructions.
-    // Build a separate section only for servers with instructions but no tools.
-    const instructionsOnlyMcps: Record<string, string> = {};
-    for (const [id, instr] of Object.entries(data.mcpInstructions || {})) {
-      if (instr && !toolMcpIds.has(id)) {
-        instructionsOnlyMcps[id] = instr;
-      }
-    }
-    const mcpServerInstructions =
-      buildMcpServerInstructions(instructionsOnlyMcps);
+    // Include MCP server instructions for all servers (with or without tools).
+    // These provide workspace context (available connectors, entity schemas, etc.)
+    // that helps the agent use the tools effectively.
+    const mcpServerInstructions = buildMcpServerInstructions(
+      data.mcpInstructions || {}
+    );
 
     const gatewayInstructions = [
       data.agentInstructions,

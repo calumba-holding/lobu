@@ -176,6 +176,88 @@ export async function refreshCredential(
   }
 }
 
+/**
+ * Try to complete a pending device-code auth flow.
+ * Called by the MCP proxy's resolveCredentialToken when no stored credential
+ * exists but a device-auth flow may have been started earlier.
+ * Returns the access token on success, null if pending or no flow in progress.
+ */
+export async function tryCompletePendingDeviceAuth(
+  redis: Redis,
+  agentId: string,
+  userId: string,
+  mcpId: string
+): Promise<string | null> {
+  const raw = await redis.get(deviceAuthKey(agentId, userId, mcpId));
+  if (!raw) return null;
+
+  let deviceState: StoredDeviceAuth;
+  try {
+    deviceState = JSON.parse(raw) as StoredDeviceAuth;
+  } catch {
+    return null;
+  }
+
+  if (Date.now() > deviceState.expiresAt) {
+    await redis.del(deviceAuthKey(agentId, userId, mcpId));
+    return null;
+  }
+
+  try {
+    const deviceCodeClient = new GenericDeviceCodeClient({
+      clientId: deviceState.clientId,
+      clientSecret: deviceState.clientSecret,
+      tokenUrl: deviceState.tokenUrl,
+      deviceAuthorizationUrl: `${deviceState.issuer}/oauth/device_authorization`,
+      scope: DEFAULT_MCP_SCOPE,
+      tokenEndpointAuthMethod: deviceState.clientSecret
+        ? "client_secret_post"
+        : "none",
+    });
+
+    const pollResult = await deviceCodeClient.pollForToken(
+      deviceState.deviceCode,
+      deviceState.interval
+    );
+
+    if (pollResult.status === "pending") {
+      return null;
+    }
+
+    if (pollResult.status === "error") {
+      await redis.del(deviceAuthKey(agentId, userId, mcpId));
+      return null;
+    }
+
+    // Success — store credential and clean up
+    const { credentials } = pollResult;
+    const storedCred: StoredCredential = {
+      accessToken: credentials.accessToken,
+      refreshToken: credentials.refreshToken,
+      expiresAt: credentials.expiresAt,
+      clientId: deviceState.clientId,
+      clientSecret: deviceState.clientSecret,
+      tokenUrl: deviceState.tokenUrl,
+    };
+
+    await storeCredential(redis, agentId, userId, mcpId, storedCred);
+    await redis.del(deviceAuthKey(agentId, userId, mcpId));
+
+    logger.info("Device auth auto-completed by proxy", {
+      mcpId,
+      agentId,
+      userId,
+    });
+    return credentials.accessToken;
+  } catch (error) {
+    logger.warn("Auto-complete device auth failed", {
+      mcpId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
 function deriveOAuthBaseUrl(upstreamUrl: string): string {
   const url = new URL(upstreamUrl);
   url.pathname = "/";
