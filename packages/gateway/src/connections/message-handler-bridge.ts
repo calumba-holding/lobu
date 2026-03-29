@@ -8,10 +8,10 @@ import { createLogger, generateTraceId } from "@lobu/core";
 import type Redis from "ioredis";
 import type { CommandDispatcher } from "../commands/command-dispatcher";
 import { createChatReply } from "../commands/command-reply-adapters";
-import { getModelProviderModules } from "../modules/module-system";
 import type { CoreServices } from "../platform";
 import {
   buildMessagePayload,
+  hasConfiguredProvider,
   resolveAgentId,
   resolveAgentOptions,
 } from "../services/platform-helpers";
@@ -283,30 +283,11 @@ class MessageHandlerBridge {
     const agentSettingsStore = this.services.getAgentSettingsStore();
 
     // Check if agent has any provider credentials before enqueuing
-    if (agentSettingsStore) {
-      const settings = await agentSettingsStore.getSettings(agentId);
-      const hasAuth =
-        (settings?.authProfiles && settings.authProfiles.length > 0) ||
-        getModelProviderModules().some((m) => m.hasSystemKey());
-      if (!hasAuth && settings?.templateAgentId) {
-        const templateSettings = await agentSettingsStore.getSettings(
-          settings.templateAgentId
-        );
-        if (
-          !templateSettings?.authProfiles ||
-          templateSettings.authProfiles.length === 0
-        ) {
-          await thread.post(
-            "No AI provider is configured yet. Open settings to add one: /configure"
-          );
-          return;
-        }
-      } else if (!hasAuth) {
-        await thread.post(
-          "No AI provider is configured yet. Open settings to add one: /configure"
-        );
-        return;
-      }
+    if (!(await hasConfiguredProvider(agentId, agentSettingsStore))) {
+      await thread.post(
+        "No AI provider is configured yet. Open settings to add one: /configure"
+      );
+      return;
     }
 
     const agentOptions = await resolveAgentOptions(

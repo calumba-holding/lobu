@@ -48,7 +48,7 @@ Settings page provider order is drag-sortable via handle, with per-provider mode
   - **Blocklist mode**: `WORKER_ALLOWED_DOMAINS="*"` + `WORKER_DISALLOWED_DOMAINS="malicious.com,spam.org"` → allow all except blocked
 - **Domain format**: Exact domain (`api.example.com`) or wildcard (`.example.com` matches `*.example.com`)
 - **Enforcement**: Docker's `internal: true` network flag prevents routing to external networks at infrastructure layer. Even if worker code is compromised, no network route exists. HTTP proxy provides selective access to approved domains only.
-- **Worker env passthrough**: Gateway env vars prefixed with `WORKER_ENV_` are forwarded to workers with the prefix stripped. Example: `WORKER_ENV_AUTH_MCP_URL=https://owletto.com/mcp` → worker sees `AUTH_MCP_URL=https://owletto.com/mcp`. Use this for plugin config and other worker-specific env vars without hardcoding them in the deployment manager.
+- **Worker env passthrough**: Gateway env vars prefixed with `WORKER_ENV_` are forwarded to workers with the prefix stripped. Example: `WORKER_ENV_FOO=bar` → worker sees `FOO=bar`. Use this only for worker-specific runtime env, not for the default Owletto memory plugin config.
 
 ## TypeScript Build System
 

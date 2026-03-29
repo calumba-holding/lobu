@@ -468,6 +468,12 @@ function App() {
                 : "Using system key",
           };
         }
+        // Resolve any providers still stuck at "Checking..."
+        for (const [pid, ps] of Object.entries(updated)) {
+          if (ps.status === "Checking...") {
+            updated[pid] = { ...ps, status: "Not connected" };
+          }
+        }
         providerState.value = updated;
 
         // Auto-trigger auth flow for prefilled providers
@@ -486,8 +492,16 @@ function App() {
           }
         }
       })
-      .catch(() => {
-        // noop
+      .catch((err) => {
+        console.warn("checkProviders failed:", err);
+        // Clear "Checking..." so providers don't appear stuck
+        const updated = { ...providerState.value };
+        for (const [pid, ps] of Object.entries(updated)) {
+          if (ps.status === "Checking...") {
+            updated[pid] = { ...ps, status: "Not connected" };
+          }
+        }
+        providerState.value = updated;
       });
 
     // Load permissions

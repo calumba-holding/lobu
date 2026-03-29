@@ -17,16 +17,8 @@ export async function resolveInstalledProviders(
   agentSettingsStore: AgentSettingsStore,
   agentId: string
 ): Promise<InstalledProvider[]> {
-  const settings = await agentSettingsStore.getSettings(agentId);
-  const installed = settings?.installedProviders || [];
-  if (installed.length > 0) return installed;
-  if (settings?.templateAgentId) {
-    const templateSettings = await agentSettingsStore.getSettings(
-      settings.templateAgentId
-    );
-    return templateSettings?.installedProviders || [];
-  }
-  return [];
+  const settings = await agentSettingsStore.getEffectiveSettings(agentId);
+  return settings?.installedProviders || [];
 }
 
 /**

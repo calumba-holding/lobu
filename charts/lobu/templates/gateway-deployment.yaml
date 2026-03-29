@@ -223,8 +223,6 @@ spec:
             {{- if .Values.gateway.config.authMcpUrl }}
             - name: AUTH_MCP_URL
               value: "{{ .Values.gateway.config.authMcpUrl }}"
-            - name: WORKER_ENV_AUTH_MCP_URL
-              value: "{{ .Values.gateway.config.authMcpUrl }}"
             {{- end }}
 
             # Admin password (direct value override, not in sealed secrets)

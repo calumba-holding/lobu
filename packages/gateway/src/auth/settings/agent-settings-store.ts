@@ -139,9 +139,6 @@ export class AgentSettingsStore extends BaseRedisStore<AgentSettings> {
   async getEffectiveSettings(agentId: string): Promise<AgentSettings | null> {
     const settings = await this.getSettings(agentId);
 
-    // If settings exist and have providers, use them directly
-    if (settings?.installedProviders?.length) return settings;
-
     // Resolve template agent ID
     const templateAgentId = await this.resolveTemplateAgentId(
       agentId,

@@ -150,6 +150,80 @@ describe("SettingsOAuthClient", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  test("prefers path-relative discovery for AUTH_MCP_URL-style issuers", async () => {
+    const fetchMock = mock(async (input: string | URL | Request) => {
+      const url = String(input);
+      expect(url).toBe(
+        "https://issuer.example.com/mcp/.well-known/openid-configuration"
+      );
+
+      return new Response(
+        JSON.stringify({
+          authorization_endpoint: "https://issuer.example.com/oauth/authorize",
+          token_endpoint: "https://issuer.example.com/oauth/token",
+          userinfo_endpoint: "https://issuer.example.com/oauth/userinfo",
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    });
+
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const client = new SettingsOAuthClient({
+      issuerUrl: "https://issuer.example.com/mcp",
+      clientId: "static-client-id",
+      redirectUri: "https://gateway.example.com/agent/oauth/callback",
+    });
+
+    const capabilities = await client.getCapabilities();
+    expect(capabilities).toEqual({ browser: true, device: false });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("falls back to root discovery when path-relative discovery fails", async () => {
+    const fetchMock = mock(async (input: string | URL | Request) => {
+      const url = String(input);
+
+      if (
+        url ===
+        "https://issuer.example.com/mcp/.well-known/openid-configuration"
+      ) {
+        return new Response("<html>not json</html>", {
+          status: 200,
+          headers: { "content-type": "text/html" },
+        });
+      }
+
+      if (
+        url === "https://issuer.example.com/.well-known/openid-configuration"
+      ) {
+        return new Response(
+          JSON.stringify({
+            authorization_endpoint:
+              "https://issuer.example.com/oauth/authorize",
+            token_endpoint: "https://issuer.example.com/oauth/token",
+            userinfo_endpoint: "https://issuer.example.com/oauth/userinfo",
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const client = new SettingsOAuthClient({
+      issuerUrl: "https://issuer.example.com/mcp",
+      clientId: "static-client-id",
+      redirectUri: "https://gateway.example.com/agent/oauth/callback",
+    });
+
+    const capabilities = await client.getCapabilities();
+    expect(capabilities).toEqual({ browser: true, device: false });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   test("treats authorization_pending and slow_down as pending during device polling", async () => {
     let tokenPolls = 0;
     const fetchMock = mock(async (input: string | URL | Request) => {

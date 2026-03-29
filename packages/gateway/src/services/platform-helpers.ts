@@ -4,11 +4,11 @@
  */
 
 import { createLogger } from "@lobu/core";
-import { resolveInstalledProviders } from "../auth/provider-catalog";
 import type { AgentSettingsStore } from "../auth/settings";
 import { resolveEffectiveModelRef } from "../auth/settings/model-selection";
 import type { ChannelBindingService } from "../channels";
 import { buildMemoryPlugins } from "../config";
+import { getModelProviderModules } from "../modules/module-system";
 import type { MessagePayload } from "../infrastructure/queue/queue-producer";
 import { platformAgentId } from "../spaces";
 
@@ -27,22 +27,15 @@ export async function resolveAgentOptions(
     return { ...baseOptions };
   }
 
-  const settings = await agentSettingsStore.getSettings(agentId);
+  const settings = await agentSettingsStore.getEffectiveSettings(agentId);
   if (!settings) {
     return { ...baseOptions };
   }
 
-  // Resolve effective providers (falls back to base agent for sandboxes)
-  const effectiveProviders = await resolveInstalledProviders(
-    agentSettingsStore,
-    agentId
-  );
-  const modelSource = effectiveProviders.length
-    ? { ...settings, installedProviders: effectiveProviders }
-    : settings;
+  const effectiveProviders = settings.installedProviders || [];
 
   const mergedOptions: Record<string, any> = { ...baseOptions };
-  const effectiveModelRef = resolveEffectiveModelRef(modelSource);
+  const effectiveModelRef = resolveEffectiveModelRef(settings);
   logger.info(
     {
       agentId,
@@ -83,6 +76,34 @@ export async function resolveAgentOptions(
   }
 
   return mergedOptions;
+}
+
+export async function hasConfiguredProvider(
+  agentId: string,
+  agentSettingsStore?: AgentSettingsStore
+): Promise<boolean> {
+  if (!agentSettingsStore) {
+    return true;
+  }
+
+  const settings = await agentSettingsStore.getEffectiveSettings(agentId);
+  const installedProviderIds = new Set(
+    (settings?.installedProviders || []).map((provider) => provider.providerId)
+  );
+
+  if ((settings?.authProfiles?.length || 0) > 0) {
+    return true;
+  }
+
+  const modules = getModelProviderModules();
+  if (installedProviderIds.size > 0) {
+    return modules.some(
+      (module) =>
+        installedProviderIds.has(module.providerId) && module.hasSystemKey()
+    );
+  }
+
+  return modules.some((module) => module.hasSystemKey());
 }
 
 /**

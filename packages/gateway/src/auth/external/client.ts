@@ -248,7 +248,7 @@ export class ExternalAuthClient {
     const authMcpUrl = process.env.AUTH_MCP_URL;
     if (!authMcpUrl) return null;
 
-    const issuerUrl = new URL("/", authMcpUrl).toString().replace(/\/$/, "");
+    const issuerUrl = authMcpUrl.replace(/\/+$/, "");
     const callbackPath = "/agent/oauth/callback";
 
     // Register redirect URIs for both the configured public URL and localhost
@@ -348,37 +348,61 @@ export class ExternalAuthClient {
       return this.discoveryCache.metadata;
     }
 
-    try {
-      const wellKnownUrl = `${this.config.issuerUrl}/.well-known/openid-configuration`;
-      logger.info(`Discovering external auth endpoints from ${wellKnownUrl}`);
-      const response = await fetch(wellKnownUrl);
-      if (!response.ok) {
-        logger.warn(
-          `Failed to fetch external auth metadata: ${response.status}, using manual config`
-        );
-        this.discoveryCache = { metadata: null, resolvedAt: Date.now() };
-        return null;
-      }
+    const discoveryUrls = this.getDiscoveryUrls();
 
-      const metadata = (await response.json()) as WellKnownMetadata;
-      logger.info("Discovered external auth endpoints", {
-        authUrl: this.config.authorizeUrl || metadata.authorization_endpoint,
-        tokenUrl: this.config.tokenUrl || metadata.token_endpoint,
-        userinfoUrl:
-          this.config.userinfoUrl || metadata.userinfo_endpoint || null,
-        deviceAuthorizationUrl:
-          this.config.deviceAuthorizationUrl ||
-          metadata.device_authorization_endpoint ||
-          null,
-        registrationEndpoint: metadata.registration_endpoint || null,
-      });
-      this.discoveryCache = { metadata, resolvedAt: Date.now() };
-      return metadata;
-    } catch (error) {
-      logger.warn("Failed to discover external auth endpoints", { error });
-      this.discoveryCache = { metadata: null, resolvedAt: Date.now() };
-      return null;
+    for (const wellKnownUrl of discoveryUrls) {
+      try {
+        logger.info(`Discovering external auth endpoints from ${wellKnownUrl}`);
+        const response = await fetch(wellKnownUrl);
+        if (!response.ok) {
+          logger.warn(
+            `Failed to fetch external auth metadata from ${wellKnownUrl}: ${response.status}`
+          );
+          continue;
+        }
+
+        const metadata = (await response.json()) as WellKnownMetadata;
+        logger.info("Discovered external auth endpoints", {
+          discoveryUrl: wellKnownUrl,
+          authUrl: this.config.authorizeUrl || metadata.authorization_endpoint,
+          tokenUrl: this.config.tokenUrl || metadata.token_endpoint,
+          userinfoUrl:
+            this.config.userinfoUrl || metadata.userinfo_endpoint || null,
+          deviceAuthorizationUrl:
+            this.config.deviceAuthorizationUrl ||
+            metadata.device_authorization_endpoint ||
+            null,
+          registrationEndpoint: metadata.registration_endpoint || null,
+        });
+        this.discoveryCache = { metadata, resolvedAt: Date.now() };
+        return metadata;
+      } catch (error) {
+        logger.warn("Failed to discover external auth endpoints", {
+          discoveryUrl: wellKnownUrl,
+          error,
+        });
+      }
     }
+
+    this.discoveryCache = { metadata: null, resolvedAt: Date.now() };
+    return null;
+  }
+
+  private getDiscoveryUrls(): string[] {
+    const trimmedIssuerUrl = this.config.issuerUrl.replace(/\/+$/, "");
+    const candidates = [`${trimmedIssuerUrl}/.well-known/openid-configuration`];
+
+    try {
+      const origin = new URL(trimmedIssuerUrl).origin;
+      const rootDiscoveryUrl = `${origin}/.well-known/openid-configuration`;
+      if (!candidates.includes(rootDiscoveryUrl)) {
+        candidates.push(rootDiscoveryUrl);
+      }
+    } catch {
+      // Ignore invalid issuer URLs here; fetch will surface the real error.
+    }
+
+    return candidates;
   }
 
   private async getDynamicClientCredentials(

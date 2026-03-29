@@ -132,8 +132,9 @@ export async function checkProviders(agentId: string): Promise<
   >
 > {
   const resp = await fetch(apiUrl(agentId, "/config"));
+  if (!resp.ok) throw new Error(`Config check failed: ${resp.status}`);
   const data = await parseJson(resp);
-  return data.providers || {};
+  return data.providers?.status || {};
 }
 
 // ─── Provider Install/Uninstall ────────────────────────────────────────────

@@ -17,6 +17,39 @@ set -e
 
 GATEWAY_URL="${GATEWAY_URL:-http://localhost:8080}"
 
+resolve_tguser_python() {
+    local tguser_bin shebang interpreter exec_python
+
+    if [ -n "$TGUSER_PYTHON" ] && [ -x "$TGUSER_PYTHON" ]; then
+        printf '%s\n' "$TGUSER_PYTHON"
+        return
+    fi
+
+    tguser_bin="$(command -v tguser || true)"
+    if [ -n "$tguser_bin" ] && [ -f "$tguser_bin" ]; then
+        shebang="$(head -n 1 "$tguser_bin" 2>/dev/null || true)"
+        if [[ "$shebang" == '#!'* ]]; then
+            interpreter="${shebang#\#!}"
+            interpreter="${interpreter%% *}"
+            if [ -x "$interpreter" ] && [ "$interpreter" != "/bin/sh" ]; then
+                printf '%s\n' "$interpreter"
+                return
+            fi
+        fi
+
+        exec_python="$(sed -n '2s/^exec \"\([^\"]*python[^\"]*\)\" .*/\1/p' "$tguser_bin" | head -n 1)"
+        exec_python="${exec_python/#\$HOME/$HOME}"
+        if [ -n "$exec_python" ] && [ -x "$exec_python" ]; then
+            printf '%s\n' "$exec_python"
+            return
+        fi
+    fi
+
+    command -v python3 || true
+}
+
+TGUSER_PYTHON="$(resolve_tguser_python)"
+
 # Load .env if it exists (line-by-line to handle unquoted special chars)
 if [ -f .env ]; then
     while IFS= read -r line || [ -n "$line" ]; do
@@ -35,6 +68,73 @@ if [ -f .env ]; then
         fi
     done < .env
 fi
+
+telegram_wait_for_reply() {
+    local peer="$1"
+    local after_ts="$2"
+    local timeout="$3"
+
+    TG_WAIT_PEER="$peer" \
+    TG_WAIT_AFTER_TS="$after_ts" \
+    TG_WAIT_TIMEOUT="$timeout" \
+    TG_SESSION="${TG_SESSION:-$HOME/.config/tguser/session}" \
+    "$TGUSER_PYTHON" - <<'PY'
+import asyncio
+import os
+import sys
+import time
+from telethon import TelegramClient
+
+
+async def main() -> int:
+    api_id_s = os.environ.get("TG_API_ID", "").strip()
+    api_hash = os.environ.get("TG_API_HASH", "").strip()
+    peer = os.environ.get("TG_WAIT_PEER", "").strip()
+    after_ts = float(os.environ.get("TG_WAIT_AFTER_TS", "0"))
+    timeout = float(os.environ.get("TG_WAIT_TIMEOUT", "30"))
+    session = os.environ.get("TG_SESSION", "").strip() or os.path.expanduser(
+        "~/.config/tguser/session"
+    )
+
+    if not api_id_s or not api_hash or not peer:
+        print("Missing TG_API_ID, TG_API_HASH, or peer.", file=sys.stderr)
+        return 2
+
+    client = TelegramClient(session, int(api_id_s), api_hash)
+    await client.connect()
+    try:
+        if not await client.is_user_authorized():
+            print("Not authenticated. Run `tguser login`.", file=sys.stderr)
+            return 1
+
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            async for message in client.iter_messages(peer, limit=10):
+                message_ts = message.date.timestamp()
+                if message_ts <= after_ts:
+                    break
+                if message.out:
+                    continue
+
+                text = (message.message or "").strip()
+                if text:
+                    print(text)
+                else:
+                    media = type(message.media).__name__ if message.media else "unknown"
+                    print(f"[non-text reply: {media}]")
+                return 0
+
+            await asyncio.sleep(2)
+
+        print(f"Timeout waiting for Telegram reply within {int(timeout)}s", file=sys.stderr)
+        return 1
+    finally:
+        await client.disconnect()
+
+
+raise SystemExit(asyncio.run(main()))
+PY
+}
 
 # Auto-detect platform from active messaging connections, fall back to env vars
 if [ -z "$TEST_PLATFORM" ]; then
@@ -133,6 +233,11 @@ for i in "${!MESSAGES[@]}"; do
     echo "[$MSG_NUM/${#MESSAGES[@]}] 📤 Sending: $MESSAGE"
 
     if [ "$TEST_PLATFORM" = "telegram" ] && command -v tguser > /dev/null 2>&1 && [ -n "$TG_API_ID" ] && [ -n "$TG_API_HASH" ]; then
+        SEND_TS=$("$TGUSER_PYTHON" - <<'PY'
+import time
+print(time.time())
+PY
+)
         TGUSER_OUTPUT=$(TG_API_ID="$TG_API_ID" TG_API_HASH="$TG_API_HASH" tguser send "$CHANNEL" "$MESSAGE" 2>&1) || {
             echo "   ❌ Failed to send Telegram message $MSG_NUM:"
             echo "$TGUSER_OUTPUT"
@@ -143,7 +248,14 @@ for i in "${!MESSAGES[@]}"; do
         if [ -n "$TGUSER_OUTPUT" ]; then
             echo "      $TGUSER_OUTPUT"
         fi
-        echo "   📋 Check Telegram chat for bot response"
+        echo "   ⏳ Waiting for bot response..."
+        BOT_RESPONSE=$(TG_API_ID="$TG_API_ID" TG_API_HASH="$TG_API_HASH" telegram_wait_for_reply "$CHANNEL" "$SEND_TS" "$TIMEOUT" 2>&1) || {
+            echo "   ❌ Failed to get Telegram response:"
+            printf '%s\n' "$BOT_RESPONSE" | sed 's/^/      /'
+            exit 1
+        }
+        echo "   ✅ Bot responded:"
+        printf '%s\n' "$BOT_RESPONSE" | sed 's/^/      /'
         echo ""
         continue
     elif [ "$TEST_PLATFORM" = "telegram" ]; then
