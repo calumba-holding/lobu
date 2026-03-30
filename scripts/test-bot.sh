@@ -17,6 +17,29 @@ set -e
 
 GATEWAY_URL="${GATEWAY_URL:-http://localhost:8080}"
 
+fetch_telegram_bot_peer() {
+    local username
+
+    username=$(
+        curl -sf "$GATEWAY_URL/internal/connections" 2>/dev/null || \
+        curl -sf "$GATEWAY_URL/api/internal/connections" 2>/dev/null || \
+        echo ""
+    )
+
+    username=$(
+        printf '%s' "$username" | jq -r '
+            .connections[]? |
+            select(.platform == "telegram") |
+            select(.status == "active") |
+            .metadata.botUsername // empty
+        ' 2>/dev/null | head -n 1
+    )
+
+    if [ -n "$username" ]; then
+        printf '@%s\n' "${username#@}"
+    fi
+}
+
 resolve_tguser_python() {
     local tguser_bin shebang interpreter exec_python
 
@@ -136,6 +159,116 @@ raise SystemExit(asyncio.run(main()))
 PY
 }
 
+telegram_send_and_wait() {
+    local peer="$1"
+    local message="$2"
+    local timeout="$3"
+
+    TG_SEND_PEER="$peer" \
+    TG_SEND_TEXT="$message" \
+    TG_SEND_TIMEOUT="$timeout" \
+    TG_SESSION="${TG_SESSION:-$HOME/.config/tguser/session}" \
+    "$TGUSER_PYTHON" - <<'PY'
+import asyncio
+import json
+import os
+import sqlite3
+import sys
+import time
+from telethon import TelegramClient
+
+
+async def connect_with_retry(client: TelegramClient) -> None:
+    last_error = None
+    for _ in range(5):
+        try:
+            await client.connect()
+            return
+        except sqlite3.OperationalError as error:
+            if "locked" not in str(error).lower():
+                raise
+            last_error = error
+            await asyncio.sleep(1)
+    if last_error is not None:
+        raise last_error
+
+
+async def resolve_peer(client: TelegramClient, peer: str):
+    try:
+        return await client.get_entity(peer)
+    except Exception:
+        normalized = peer.lower().lstrip("@")
+        async for dialog in client.iter_dialogs():
+            username = getattr(dialog.entity, "username", None)
+            if username and username.lower() == normalized:
+                return dialog.entity
+        raise
+
+
+async def main() -> int:
+    api_id_s = os.environ.get("TG_API_ID", "").strip()
+    api_hash = os.environ.get("TG_API_HASH", "").strip()
+    peer = os.environ.get("TG_SEND_PEER", "").strip()
+    message = os.environ.get("TG_SEND_TEXT", "")
+    timeout = float(os.environ.get("TG_SEND_TIMEOUT", "30"))
+    session = os.environ.get("TG_SESSION", "").strip() or os.path.expanduser(
+        "~/.config/tguser/session"
+    )
+
+    if not api_id_s or not api_hash or not peer:
+        print("Missing TG_API_ID, TG_API_HASH, or Telegram peer.", file=sys.stderr)
+        return 2
+
+    client = TelegramClient(session, int(api_id_s), api_hash)
+    await connect_with_retry(client)
+    try:
+        if not await client.is_user_authorized():
+            print("Not authenticated. Run `tguser login`.", file=sys.stderr)
+            return 1
+
+        entity = await resolve_peer(client, peer)
+        sent = await client.send_message(entity, message)
+        sent_ts = sent.date.timestamp()
+        deadline = time.time() + timeout
+
+        while time.time() < deadline:
+            async for reply in client.iter_messages(entity, limit=10):
+                reply_ts = reply.date.timestamp()
+                if reply_ts <= sent_ts:
+                    break
+                if reply.out:
+                    continue
+
+                text = (reply.message or "").strip()
+                if not text:
+                    media = type(reply.media).__name__ if reply.media else "unknown"
+                    text = f"[non-text reply: {media}]"
+
+                print(
+                    json.dumps(
+                        {
+                            "sentMessageId": sent.id,
+                            "responseText": text,
+                        }
+                    )
+                )
+                return 0
+
+            await asyncio.sleep(2)
+
+        print(
+            f"Timeout waiting for Telegram reply within {int(timeout)}s",
+            file=sys.stderr,
+        )
+        return 1
+    finally:
+        await client.disconnect()
+
+
+raise SystemExit(asyncio.run(main()))
+PY
+}
+
 # Auto-detect platform from active messaging connections, fall back to env vars
 if [ -z "$TEST_PLATFORM" ]; then
     # Try querying gateway for active local test targets
@@ -147,6 +280,9 @@ if [ -z "$TEST_PLATFORM" ]; then
         TEST_PLATFORM=$(echo "$TEST_TARGETS" | jq -r '.[0].platform // empty' 2>/dev/null || echo "")
         if [ -z "$TEST_CHANNEL" ]; then
             TEST_CHANNEL=$(echo "$TEST_TARGETS" | jq -r '.[0].defaultTarget // empty' 2>/dev/null || echo "")
+        fi
+        if [ "$TEST_PLATFORM" = "telegram" ] && [ -z "$TELEGRAM_TEST_BOT_USERNAME" ]; then
+            TELEGRAM_TEST_BOT_USERNAME="$(fetch_telegram_bot_peer)"
         fi
     fi
 
@@ -199,8 +335,17 @@ case "$TEST_PLATFORM" in
     telegram)
         AUTH_TOKEN="${TEST_AUTH_TOKEN:-$ADMIN_PASSWORD}"
         CHANNEL="${TEST_CHANNEL:-$TELEGRAM_TEST_CHAT_ID}"
-        if [ -z "$CHANNEL" ]; then
-            echo "❌ TEST_CHANNEL or TELEGRAM_TEST_CHAT_ID environment variable is required for Telegram"
+        TELEGRAM_BOT_PEER="${TELEGRAM_TEST_BOT_USERNAME:-}"
+        if [[ -n "$TELEGRAM_BOT_PEER" && "$TELEGRAM_BOT_PEER" != @* ]]; then
+            TELEGRAM_BOT_PEER="@${TELEGRAM_BOT_PEER}"
+        fi
+        if [[ "$CHANNEL" == @* ]]; then
+            TELEGRAM_BOT_PEER="$CHANNEL"
+        elif [ -z "$TELEGRAM_BOT_PEER" ]; then
+            TELEGRAM_BOT_PEER="$(fetch_telegram_bot_peer)"
+        fi
+        if [ -z "$CHANNEL" ] && [ -z "$TELEGRAM_BOT_PEER" ]; then
+            echo "❌ Telegram testing requires TEST_CHANNEL/TELEGRAM_TEST_CHAT_ID or TELEGRAM_TEST_BOT_USERNAME"
             exit 1
         fi
         ;;
@@ -219,7 +364,12 @@ fi
 
 echo "🧪 Testing bot with ${#MESSAGES[@]} message(s)"
 echo "📱 Platform: $TEST_PLATFORM"
-echo "📍 Channel: $CHANNEL"
+if [ "$TEST_PLATFORM" = "telegram" ] && [ -n "$TELEGRAM_BOT_PEER" ]; then
+    echo "📍 Channel: ${CHANNEL:-"(none)"}"
+    echo "🤖 Bot peer: $TELEGRAM_BOT_PEER"
+else
+    echo "📍 Channel: $CHANNEL"
+fi
 echo "⏱️  Timeout: ${TIMEOUT}s"
 echo ""
 
@@ -232,28 +382,22 @@ for i in "${!MESSAGES[@]}"; do
 
     echo "[$MSG_NUM/${#MESSAGES[@]}] 📤 Sending: $MESSAGE"
 
-    if [ "$TEST_PLATFORM" = "telegram" ] && command -v tguser > /dev/null 2>&1 && [ -n "$TG_API_ID" ] && [ -n "$TG_API_HASH" ]; then
-        SEND_TS=$("$TGUSER_PYTHON" - <<'PY'
-import time
-print(time.time())
-PY
-)
-        TGUSER_OUTPUT=$(TG_API_ID="$TG_API_ID" TG_API_HASH="$TG_API_HASH" tguser send "$CHANNEL" "$MESSAGE" 2>&1) || {
-            echo "   ❌ Failed to send Telegram message $MSG_NUM:"
-            echo "$TGUSER_OUTPUT"
+    if [ "$TEST_PLATFORM" = "telegram" ] && [ -n "$TGUSER_PYTHON" ] && [ -n "$TG_API_ID" ] && [ -n "$TG_API_HASH" ]; then
+        if [ -z "$TELEGRAM_BOT_PEER" ]; then
+            echo "   ❌ Missing Telegram bot peer. Set TELEGRAM_TEST_BOT_USERNAME or TEST_CHANNEL=@botusername."
             exit 1
-        }
-
-        echo "   ✅ Sent via tguser (as your Telegram user account)"
-        if [ -n "$TGUSER_OUTPUT" ]; then
-            echo "      $TGUSER_OUTPUT"
         fi
+
+        echo "   ✅ Sending via Telegram user session to $TELEGRAM_BOT_PEER"
         echo "   ⏳ Waiting for bot response..."
-        BOT_RESPONSE=$(TG_API_ID="$TG_API_ID" TG_API_HASH="$TG_API_HASH" telegram_wait_for_reply "$CHANNEL" "$SEND_TS" "$TIMEOUT" 2>&1) || {
-            echo "   ❌ Failed to get Telegram response:"
-            printf '%s\n' "$BOT_RESPONSE" | sed 's/^/      /'
+        TELEGRAM_RESULT=$(TG_API_ID="$TG_API_ID" TG_API_HASH="$TG_API_HASH" telegram_send_and_wait "$TELEGRAM_BOT_PEER" "$MESSAGE" "$TIMEOUT" 2>&1) || {
+            echo "   ❌ Failed Telegram E2E message $MSG_NUM:"
+            printf '%s\n' "$TELEGRAM_RESULT" | sed 's/^/      /'
             exit 1
         }
+        MESSAGE_ID=$(printf '%s' "$TELEGRAM_RESULT" | jq -r '.sentMessageId')
+        BOT_RESPONSE=$(printf '%s' "$TELEGRAM_RESULT" | jq -r '.responseText')
+        echo "   ✅ Sent: messageId=$MESSAGE_ID"
         echo "   ✅ Bot responded:"
         printf '%s\n' "$BOT_RESPONSE" | sed 's/^/      /'
         echo ""

@@ -309,13 +309,6 @@ export async function fetchSkillContent(repo: string): Promise<{
   description: string;
   content: string;
   fetchedAt: number;
-  integrations?: Array<{
-    id: string;
-    label?: string;
-    authType?: "oauth" | "api-key";
-    scopes?: string[];
-    apiDomains?: string[];
-  }>;
   mcpServers?: Array<{
     id: string;
     name?: string;

@@ -464,7 +464,7 @@ export abstract class BaseDeploymentManager {
       DEBUG: "1",
       HTTP_PROXY: proxyUrl,
       HTTPS_PROXY: proxyUrl,
-      NO_PROXY: `${dispatcherHost},redis,localhost,127.0.0.1`,
+      NO_PROXY: `${dispatcherHost},gateway,redis,localhost,127.0.0.1`,
       // Route temporary files and cache to persistent workspace storage.
       TMPDIR: "/workspace/.tmp",
       TMP: "/workspace/.tmp",

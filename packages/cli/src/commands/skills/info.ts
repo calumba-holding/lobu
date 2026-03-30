@@ -33,20 +33,6 @@ export async function skillsInfoCommand(skillId: string): Promise<void> {
     }
   }
 
-  if (skill.integrations) {
-    console.log(chalk.bold("\n  Integrations:"));
-    for (const integ of skill.integrations) {
-      console.log(
-        chalk.dim(
-          `    ${integ.label ?? integ.id} (${integ.authType ?? "unknown"})`
-        )
-      );
-      if (integ.apiDomains) {
-        console.log(chalk.dim(`    Domains: ${integ.apiDomains.join(", ")}`));
-      }
-    }
-  }
-
   if (skill.mcpServers) {
     console.log(chalk.bold("\n  MCP Servers:"));
     for (const mcp of skill.mcpServers) {

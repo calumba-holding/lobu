@@ -75,7 +75,7 @@ function maskValue(value: string): string {
 
 /**
  * Build the env var catalog dynamically from registered providers,
- * system-skills integrations, MCP servers, and static gateway/connection vars.
+ * system-skill MCP servers, and static gateway/connection vars.
  */
 function buildEnvCatalog(
   skills: any[],
@@ -108,20 +108,7 @@ function buildEnvCatalog(
     }
   }
 
-  // 2. Integrations — extract ${env:*} from OAuth configs
-  for (const skill of skills) {
-    const raw = skill as any;
-    if (!raw.integrations) continue;
-    for (const ig of raw.integrations) {
-      if (!ig.oauth) continue;
-      const refs = extractEnvRefs(ig.oauth);
-      for (const key of refs) {
-        addVar(key, `integration:${ig.id}`, ig.label || ig.id);
-      }
-    }
-  }
-
-  // 3. MCP Servers — extract ${env:*} from server configs
+  // 2. MCP Servers — extract ${env:*} from server configs
   for (const skill of skills) {
     const raw = skill as any;
     if (!raw.mcpServers) continue;
@@ -215,12 +202,6 @@ export function createAgentsPageRoutes(config: AgentsPageConfig) {
       name: string;
       description?: string;
       source: string;
-      integrations: {
-        id: string;
-        label: string;
-        authType: string;
-        apiDomains: string[];
-      }[];
       mcpServers: { name: string; type: string; url: string }[];
       providers: {
         providerId: string;
@@ -233,18 +214,6 @@ export function createAgentsPageRoutes(config: AgentsPageConfig) {
     for (const skill of rawSkills) {
       const raw = skill as any;
       const skillId = skill.repo.replace("system/", "");
-
-      const skillIntegrations: (typeof adminSkills)[0]["integrations"] = [];
-      if (raw.integrations) {
-        for (const ig of raw.integrations) {
-          skillIntegrations.push({
-            id: ig.id,
-            label: ig.label || ig.id,
-            authType: ig.authType || "oauth",
-            apiDomains: ig.apiDomains || [],
-          });
-        }
-      }
 
       const skillMcpServers: (typeof adminSkills)[0]["mcpServers"] = [];
       const servers = raw.mcpServers || [];
@@ -273,7 +242,6 @@ export function createAgentsPageRoutes(config: AgentsPageConfig) {
         name: skill.name,
         description: raw.description,
         source: "lobu",
-        integrations: skillIntegrations,
         mcpServers: skillMcpServers,
         providers: skillProviders,
       });
@@ -295,7 +263,6 @@ export function createAgentsPageRoutes(config: AgentsPageConfig) {
         id: "__built-in__",
         name: "Built-in",
         source: "built-in",
-        integrations: [],
         mcpServers: [],
         providers: builtInProviders,
       });

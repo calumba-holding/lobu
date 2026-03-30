@@ -195,13 +195,6 @@ async function buildManifest(
         enabled: true,
         system: true,
         content: "",
-        integrations: skill.integrations?.map((integration) => ({
-          id: integration.id,
-          label: integration.label,
-          authType: integration.authType,
-          scopesConfig: integration.scopesConfig,
-          apiDomains: integration.apiDomains,
-        })),
         mcpServers: skill.mcpServers?.map((mcp) => ({
           id: mcp.id,
           name: mcp.name,

@@ -91,7 +91,7 @@ function buildMcpInstructions(
     return "";
   }
 
-  // MCPs with no tools at all that need setup
+  // MCPs with no tools at all that need setup (explicit auth/input requirements)
   const undiscoveredMcps = mcpStatus.filter(
     (mcp) =>
       !mcpToolIds.has(mcp.id) &&
@@ -104,7 +104,17 @@ function buildMcpInstructions(
     (mcp) => mcpToolIds.has(mcp.id) && mcp.requiresAuth && !mcp.authenticated
   );
 
-  if (undiscoveredMcps.length === 0 && unauthenticatedMcps.length === 0) {
+  // MCPs with no tools and no explicit auth requirement — may need plugin-level
+  // authentication (e.g. owletto device auth flow via owletto_login tool)
+  const pluginAuthMcps = mcpStatus.filter(
+    (mcp) => !mcpToolIds.has(mcp.id) && !mcp.requiresAuth && !mcp.requiresInput
+  );
+
+  if (
+    undiscoveredMcps.length === 0 &&
+    unauthenticatedMcps.length === 0 &&
+    pluginAuthMcps.length === 0
+  ) {
     return "";
   }
 
@@ -127,6 +137,12 @@ function buildMcpInstructions(
   for (const mcp of unauthenticatedMcps) {
     lines.push(
       `- ⚠️ **${mcp.name}** (id: ${mcp.id}): Tools are visible but require authentication to use. Direct the user to the settings page to authenticate.`
+    );
+  }
+
+  for (const mcp of pluginAuthMcps) {
+    lines.push(
+      `- **IMPORTANT** — **${mcp.name}** (id: ${mcp.id}): Memory tools (save_knowledge, search_knowledge) are NOT available because authentication is required. You MUST call the \`${mcp.id}_login\` tool NOW to start the login flow. After the user completes login in their browser, call \`${mcp.id}_login_check\` to finish authentication. Do NOT tell the user that memory is unavailable — instead, initiate login immediately.`
     );
   }
 

@@ -9,14 +9,13 @@ export async function skillsListCommand(): Promise<void> {
     return;
   }
 
-  // Separate integrations from providers
-  const integrations = skills.filter((s) => !isProviderSkill(s));
+  const systemSkills = skills.filter((s) => !isProviderSkill(s));
   const providers = skills.filter(isProviderSkill);
 
-  if (integrations.length > 0) {
-    console.log(chalk.bold("\n  Integrations:\n"));
-    const maxIdLen = Math.max(...integrations.map((s) => s.id.length));
-    for (const skill of integrations) {
+  if (systemSkills.length > 0) {
+    console.log(chalk.bold("\n  Skills:\n"));
+    const maxIdLen = Math.max(...systemSkills.map((s) => s.id.length));
+    for (const skill of systemSkills) {
       console.log(
         `  ${chalk.cyan(skill.id.padEnd(maxIdLen))}  ${chalk.dim(skill.description)}`
       );

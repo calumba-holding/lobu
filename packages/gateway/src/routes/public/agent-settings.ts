@@ -384,9 +384,6 @@ async function renderSettingsForPayload(
     }
   }
 
-  // Integration status (managed by Owletto)
-  const integrationStatus: Record<string, never> = {};
-
   // Determine config-managed providers from manifest credentials
   let configManagedProviders: string[] = [];
   try {
@@ -437,7 +434,6 @@ async function renderSettingsForPayload(
       hasChannelId: !!payload.channelId,
       isSandbox: !!agentMetadata?.parentConnectionId,
       ownerPlatform: agentMetadata?.owner?.platform || "",
-      integrationStatus,
       baseProviderNames,
       configManagedProviders,
     })
@@ -1132,51 +1128,8 @@ export function createAgentPageRoutes(config: SettingsPageConfig): OpenAPIHono {
     }
 
     try {
-      // Check integration deps for each installed skill
-      const settings = await config.agentSettingsStore.getSettings(agentId);
-      const installedSkills = settings?.skillsConfig?.skills || [];
-      const missingIntegrations: string[] = [];
-
-      for (const skillName of body.skills) {
-        const skill = installedSkills.find(
-          (s) => s.name === skillName || s.repo === skillName
-        );
-        if (!skill?.integrations) continue;
-
-        for (const ig of skill.integrations) {
-          // Integration credentials are managed by Owletto; treat all as missing here
-          missingIntegrations.push(ig.label || ig.id);
-        }
-      }
-
       const skillList = body.skills.join(", ");
-
-      if (missingIntegrations.length > 0) {
-        // Missing deps — send a button so the user can connect them
-        if (config.interactionService) {
-          const baseUrl =
-            process.env.PUBLIC_GATEWAY_URL || "http://localhost:8080";
-          const settingsUrl = new URL(
-            `/agent/${encodeURIComponent(agentId)}`,
-            baseUrl
-          );
-
-          const uniqueMissing = [...new Set(missingIntegrations)];
-          const label = `Connect ${uniqueMissing.join(", ")}`;
-
-          await config.interactionService.postLinkButton(
-            "",
-            body.conversationId,
-            body.channelId,
-            undefined,
-            body.connectionId,
-            body.platform,
-            settingsUrl.toString(),
-            label,
-            "settings"
-          );
-        }
-      } else if (config.queueProducer) {
+      if (config.queueProducer) {
         // All deps met — trigger the agent to continue
         const agentOptions = await resolveAgentOptions(
           agentId,

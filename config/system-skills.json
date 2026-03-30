@@ -1,56 +1,6 @@
 {
   "skills": [
     {
-      "id": "google-workspace",
-      "name": "Google Workspace",
-      "description": "Gmail, Calendar, Drive integration"
-    },
-    {
-      "id": "github",
-      "name": "GitHub",
-      "description": "Repos, issues, pull requests, and code access"
-    },
-    {
-      "id": "microsoft-365",
-      "name": "Microsoft 365",
-      "description": "Outlook, OneDrive, and Teams integration"
-    },
-    {
-      "id": "notion",
-      "name": "Notion",
-      "description": "Workspace pages, databases, and content"
-    },
-    {
-      "id": "spotify",
-      "name": "Spotify",
-      "description": "Music playback, playlists, and library management"
-    },
-    {
-      "id": "linear",
-      "name": "Linear",
-      "description": "Issue tracking and project management"
-    },
-    {
-      "id": "jira",
-      "name": "Jira",
-      "description": "Atlassian Jira project and issue management"
-    },
-    {
-      "id": "sentry",
-      "name": "Sentry",
-      "description": "Error tracking, performance monitoring, and issue management"
-    },
-    {
-      "id": "reddit",
-      "name": "Reddit",
-      "description": "Reddit posts, comments, subreddits, and user data"
-    },
-    {
-      "id": "twitter",
-      "name": "X (Twitter)",
-      "description": "Tweets, timelines, users, and direct messages"
-    },
-    {
       "id": "owletto",
       "name": "Owletto Memory",
       "description": "Long-term memory across conversations. Use when you need to remember user preferences, recall past context, or store important facts.",

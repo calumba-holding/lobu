@@ -13,11 +13,6 @@ interface ResolvedSkillDetail {
   name: string;
   description: string;
   content?: string;
-  integrations?: Array<{
-    id: string;
-    label?: string;
-    authType?: "oauth" | "api-key";
-  }>;
   mcpServers?: Array<{ id: string; name?: string; url?: string }>;
   nixPackages?: string[];
   permissions?: string[];
@@ -80,7 +75,6 @@ function PrefillBanner() {
             name: fetched.name || s.name || s.repo,
             description: fetched.description || s.description || "",
             content: fetched.content,
-            integrations: fetched.integrations,
             mcpServers: fetched.mcpServers,
             nixPackages: fetched.nixPackages,
             permissions: fetched.permissions,
@@ -141,7 +135,6 @@ function PrefillBanner() {
               enabled: true,
               content: fetched.content,
               contentFetchedAt: fetched.fetchedAt,
-              integrations: fetched.integrations,
               mcpServers: fetched.mcpServers,
               nixPackages: fetched.nixPackages,
               permissions: fetched.permissions,
@@ -372,7 +365,7 @@ function PrefillBanner() {
  * Expanded card showing skill details.
  *
  * Merges two data sources:
- * 1. Skill's own SKILL.md frontmatter (integrations, mcpServers from registry)
+ * 1. Skill's own SKILL.md frontmatter (mcpServers from registry)
  * 2. Prefill context data (MCP servers, grants, packages extracted by the worker)
  *
  * This ensures the card shows the full picture even when the SKILL.md frontmatter
@@ -404,7 +397,6 @@ function PrefillSkillCard({
   const allNixPackages = [...(skill.nixPackages || []), ...extraPkgs];
 
   const hasDetails =
-    (skill.integrations && skill.integrations.length > 0) ||
     allMcps.length > 0 ||
     allPermissions.length > 0 ||
     allNixPackages.length > 0;
@@ -432,12 +424,6 @@ function PrefillSkillCard({
       {hasDetails && (
         <div class="mt-2 ml-4 pl-2 border-l-2 border-purple-100 space-y-1">
           {[
-            ...(skill.integrations || []).map((ig) => ({
-              key: ig.id,
-              badge: ig.authType || "oauth",
-              name: ig.label || ig.id,
-              detail: null as string | null,
-            })),
             ...allMcps.map((m) => ({
               key: m.id,
               badge: "mcp",

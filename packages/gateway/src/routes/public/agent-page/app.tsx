@@ -16,7 +16,6 @@ import { RemindersSection } from "./components/RemindersSection";
 import { SkillsSection } from "./components/SkillsSection";
 import type {
   CatalogProvider,
-  IntegrationStatusEntry,
   McpConfig,
   ModelOption,
   PermissionGrant,
@@ -85,8 +84,6 @@ export interface SettingsContextValue {
   skillsError: Signal<string>;
 
   mcpServers: Signal<Record<string, McpConfig>>;
-
-  integrationStatus: Signal<Record<string, IntegrationStatusEntry>>;
 
   nixPackages: Signal<string[]>;
 
@@ -239,10 +236,6 @@ function App() {
   const mcpServers = useSignal<Record<string, McpConfig>>(
     state.initialMcpServers || {}
   );
-  // Integration status (read-only, for display)
-  const integrationStatus = useSignal<Record<string, IntegrationStatusEntry>>(
-    state.integrationStatus || {}
-  );
 
   // Skill registries (per-agent custom registries)
   const registries = useSignal<RegistryEntry[]>(state.initialRegistries || []);
@@ -298,12 +291,9 @@ function App() {
       skills.value.map((s) => ({
         repo: s.repo,
         enabled: s.enabled,
-        integrations: s.integrations,
         mcpServers: s.mcpServers,
         nixPackages: s.nixPackages,
         permissions: s.permissions,
-        modelPreference: s.modelPreference,
-        thinkingLevel: s.thinkingLevel,
       }))
     );
   }
@@ -580,8 +570,6 @@ function App() {
     skillsError,
 
     mcpServers,
-
-    integrationStatus,
 
     registries,
     globalRegistries,

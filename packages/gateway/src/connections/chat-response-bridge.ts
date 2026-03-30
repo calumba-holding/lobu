@@ -23,6 +23,20 @@ const MESSAGE_CHUNK_SIZE = 4096;
 const CHUNK_DELAY_MS = 500;
 
 /**
+ * Format message content for the target platform.
+ * Keep everything inside Chat SDK's supported PostableMessage shapes.
+ * The Telegram adapter understands markdown itself; passing `{ html: ... }`
+ * causes Chat SDK to reject the payload after the adapter has already sent it.
+ */
+function formatForPlatform(
+  text: string,
+  platform: string
+): { markdown: string } {
+  void platform;
+  return { markdown: text };
+}
+
+/**
  * Streaming state for progressive message editing.
  */
 interface StreamState {
@@ -117,9 +131,9 @@ export class ChatResponseBridge implements ResponseRenderer {
         );
 
         if (target) {
-          const sentMessage = await target.post({
-            markdown: payload.delta,
-          } as any);
+          const sentMessage = await target.post(
+            formatForPlatform(payload.delta, ctx.platform) as any
+          );
           stream = {
             buffer: payload.delta,
             sentMessage,
@@ -152,7 +166,7 @@ export class ChatResponseBridge implements ResponseRenderer {
     // Throttle edits
     const now = Date.now();
     if (now - stream.lastEditTime >= EDIT_INTERVAL_MS) {
-      await this.editStreamMessage(stream, connectionId);
+      await this.editStreamMessage(stream, connectionId, ctx.platform);
     } else if (!stream.editTimer) {
       stream.editTimer = setTimeout(
         async () => {
@@ -161,7 +175,7 @@ export class ChatResponseBridge implements ResponseRenderer {
           const current = this.streams.get(key);
           if (!current) return;
           current.editTimer = undefined;
-          await this.editStreamMessage(current, connectionId);
+          await this.editStreamMessage(current, connectionId, ctx.platform);
         },
         EDIT_INTERVAL_MS - (now - stream.lastEditTime)
       );
@@ -471,11 +485,14 @@ export class ChatResponseBridge implements ResponseRenderer {
 
   private async editStreamMessage(
     stream: StreamState,
-    connectionId: string
+    connectionId: string,
+    platform = ""
   ): Promise<void> {
     if (!stream.sentMessage?.edit) return;
     try {
-      await stream.sentMessage.edit({ markdown: stream.buffer } as any);
+      await stream.sentMessage.edit(
+        formatForPlatform(stream.buffer, platform) as any
+      );
       stream.lastEditTime = Date.now();
     } catch (error) {
       logger.debug(
@@ -526,12 +543,18 @@ export class ChatResponseBridge implements ResponseRenderer {
       "sendFinalMessage: about to post"
     );
 
+    const platform = instance.connection.platform;
+
     if (stream.buffer.length <= MESSAGE_CHUNK_SIZE) {
       try {
         if (!shouldBuffer && stream.sentMessage?.edit) {
-          await stream.sentMessage.edit({ markdown: stream.buffer } as any);
+          await stream.sentMessage.edit(
+            formatForPlatform(stream.buffer, platform) as any
+          );
         } else {
-          const result = await target.post({ markdown: stream.buffer } as any);
+          const result = await target.post(
+            formatForPlatform(stream.buffer, platform) as any
+          );
           logger.info(
             {
               connectionId,
@@ -572,9 +595,11 @@ export class ChatResponseBridge implements ResponseRenderer {
 
     try {
       if (!shouldBuffer && stream.sentMessage?.edit) {
-        await stream.sentMessage.edit({ markdown: firstChunk } as any);
+        await stream.sentMessage.edit(
+          formatForPlatform(firstChunk, platform) as any
+        );
       } else {
-        await target.post({ markdown: firstChunk } as any);
+        await target.post(formatForPlatform(firstChunk, platform) as any);
       }
     } catch (error) {
       logger.debug(
@@ -595,7 +620,7 @@ export class ChatResponseBridge implements ResponseRenderer {
     for (let i = 0; i < remainingChunks.length; i++) {
       const chunk = remainingChunks[i]!;
       try {
-        await target.post({ markdown: chunk } as any);
+        await target.post(formatForPlatform(chunk, platform) as any);
       } catch (error) {
         logger.debug(
           { connectionId, error: String(error) },

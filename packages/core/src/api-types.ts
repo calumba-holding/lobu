@@ -47,14 +47,6 @@ export interface ModelSelectionState {
   pinnedModel?: string;
 }
 
-export interface SkillIntegrationInfo {
-  id: string;
-  label?: string;
-  authType?: "oauth" | "api-key";
-  scopes?: string[];
-  apiDomains?: string[];
-}
-
 export interface SkillMcpServerInfo {
   id: string;
   name?: string;
@@ -72,7 +64,6 @@ export interface Skill {
   system?: boolean;
   content?: string;
   contentFetchedAt?: number;
-  integrations?: SkillIntegrationInfo[];
   mcpServers?: SkillMcpServerInfo[];
   nixPackages?: string[];
   permissions?: string[];
@@ -145,14 +136,6 @@ export interface PermissionGrant {
   expiresAt: number | null;
   denied?: boolean;
   grantedAt?: number;
-}
-
-export interface IntegrationStatusEntry {
-  label: string;
-  connected: boolean;
-  configured: boolean;
-  accounts: { accountId: string; grantedScopes: string[] }[];
-  availableScopes: string[];
 }
 
 export interface AgentInfo {
@@ -240,6 +223,4 @@ export interface AgentConfigResponse {
     verboseLogging: boolean;
     memoryEnabled: boolean;
   };
-
-  integrationStatus: Record<string, IntegrationStatusEntry>;
 }

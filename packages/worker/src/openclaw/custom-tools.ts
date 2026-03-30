@@ -136,7 +136,7 @@ export function createOpenClawCustomTools(params: {
     defineTool({
       name: "SearchSkills",
       description:
-        "Search for installable skills and MCP servers, or list installed capabilities. Pass a query to search available capabilities. Pass an empty query to list all installed skills, integrations, and MCP servers.",
+        "Search for installable skills and MCP servers, or list installed capabilities. Pass a query to search available capabilities. Pass an empty query to list all installed skills and MCP servers.",
       parameters: Type.Object({
         query: Type.String({
           description:

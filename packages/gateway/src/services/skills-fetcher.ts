@@ -1,4 +1,4 @@
-import type { SkillIntegration, SkillMcpServer } from "@lobu/core";
+import type { SkillMcpServer } from "@lobu/core";
 import { createLogger } from "@lobu/core";
 import yaml from "yaml";
 import type {
@@ -232,7 +232,6 @@ export class ClawHubRegistry implements SkillRegistry {
 
     let name = slug;
     let description = "";
-    let integrations: SkillIntegration[] | undefined;
     let mcpServers: SkillMcpServer[] | undefined;
     let nixPackages: string[] | undefined;
     let permissions: string[] | undefined;
@@ -245,7 +244,6 @@ export class ClawHubRegistry implements SkillRegistry {
         if (typeof fm.name === "string") name = fm.name;
         if (typeof fm.description === "string") description = fm.description;
 
-        integrations = this.parseIntegrations(fm.integrations);
         mcpServers = this.parseMcpServers(fm.mcpServers);
         nixPackages = this.parseStringList(fm.nixPackages);
         permissions = this.parseStringList(fm.permissions);
@@ -259,45 +257,11 @@ export class ClawHubRegistry implements SkillRegistry {
       name,
       description,
       content,
-      integrations,
       mcpServers,
       nixPackages,
       permissions,
       providers,
     };
-  }
-
-  /**
-   * Parse integrations field — normalizes string entries to SkillIntegration objects.
-   */
-  private parseIntegrations(value: unknown): SkillIntegration[] | undefined {
-    if (!Array.isArray(value) || value.length === 0) return undefined;
-    const result = value
-      .map((entry): SkillIntegration | null => {
-        if (typeof entry === "string") return { id: entry };
-        if (
-          typeof entry === "object" &&
-          entry !== null &&
-          typeof entry.id === "string"
-        ) {
-          const obj: SkillIntegration = { id: entry.id };
-          if (typeof entry.label === "string") obj.label = entry.label;
-          if (entry.authType === "oauth" || entry.authType === "api-key")
-            obj.authType = entry.authType;
-          if (Array.isArray(entry.scopes))
-            obj.scopes = entry.scopes.filter(
-              (s: unknown) => typeof s === "string"
-            );
-          if (Array.isArray(entry.apiDomains))
-            obj.apiDomains = entry.apiDomains.filter(
-              (d: unknown) => typeof d === "string"
-            );
-          return obj;
-        }
-        return null;
-      })
-      .filter((v): v is SkillIntegration => v !== null);
-    return result.length > 0 ? result : undefined;
   }
 
   /**

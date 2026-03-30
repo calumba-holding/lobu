@@ -398,14 +398,6 @@ export async function listReminders(gw: GatewayParams): Promise<TextResult> {
 // SearchSkills (unified search for skills + MCP servers)
 // ============================================================================
 
-interface SkillIntegrationRef {
-  id: string;
-  label?: string;
-  authType?: string;
-  scopes?: string[];
-  apiDomains?: string[];
-}
-
 interface SkillMcpServerRef {
   id: string;
   name?: string;
@@ -422,7 +414,6 @@ interface SkillSearchResult {
   source: string;
   score?: number;
   uri?: string;
-  integrations?: SkillIntegrationRef[];
   mcpServers?: SkillMcpServerRef[];
   nixPackages?: string[];
   permissions?: string[];
@@ -449,10 +440,6 @@ function formatSkillSearchResults(results: SkillSearchResult[]): string {
         deps.push(`packages: ${item.nixPackages.join(", ")}`);
       if (item.permissions?.length)
         deps.push(`domains: ${item.permissions.join(", ")}`);
-      if (item.integrations?.length)
-        deps.push(
-          `integrations: ${item.integrations.map((i) => i.label || i.id).join(", ")}`
-        );
       if (item.mcpServers?.length)
         deps.push(
           `mcpServers: ${item.mcpServers.map((m) => m.name || m.id).join(", ")}`
@@ -507,7 +494,6 @@ export async function searchSkills(
             source: string;
             score?: number;
             uri?: string;
-            integrations?: SkillIntegrationRef[];
             mcpServers?: SkillMcpServerRef[];
             nixPackages?: string[];
             permissions?: string[];
@@ -527,7 +513,6 @@ export async function searchSkills(
           source: s.source || "registry",
           score: s.score,
           uri: s.uri,
-          integrations: s.integrations,
           mcpServers: s.mcpServers,
           nixPackages: s.nixPackages,
           permissions: s.permissions,
@@ -580,14 +565,6 @@ async function listInstalledCapabilities(
     id: string;
     name: string;
     enabled: boolean;
-    integrations?: SkillIntegrationRef[];
-  }
-  interface InstalledIntegration {
-    id: string;
-    label: string;
-    authType: string;
-    connected: boolean;
-    accounts: Array<{ accountId: string; grantedScopes: string[] }>;
   }
   interface InstalledMcp {
     id: string;
@@ -597,7 +574,6 @@ async function listInstalledCapabilities(
 
   const { data, error } = await gatewayFetch<{
     skills: InstalledSkill[];
-    integrations: InstalledIntegration[];
     mcpServers: InstalledMcp[];
   }>(
     gw,
@@ -607,9 +583,9 @@ async function listInstalledCapabilities(
   );
   if (error) return error;
 
-  const { skills, integrations, mcpServers } = data!;
+  const { skills, mcpServers } = data!;
 
-  if (!skills.length && !integrations.length && !mcpServers.length) {
+  if (!skills.length && !mcpServers.length) {
     return textResult(
       "No capabilities installed yet. Use SearchSkills with a query to find skills and MCP servers to install."
     );
@@ -621,25 +597,10 @@ async function listInstalledCapabilities(
     const formatted = skills
       .map((s, i) => {
         const status = s.enabled ? "enabled" : "disabled";
-        const integrationsInfo = s.integrations?.length
-          ? ` [integrations: ${s.integrations.map((ig) => ig.label || ig.id).join(", ")}]`
-          : "";
-        return `${i + 1}. ${s.name} (${s.id}) — ${status}${integrationsInfo}`;
+        return `${i + 1}. ${s.name} (${s.id}) — ${status}`;
       })
       .join("\n");
     sections.push(`Skills (${skills.length}):\n${formatted}`);
-  }
-
-  if (integrations.length) {
-    const formatted = integrations
-      .map((ig, i) => {
-        const status = ig.connected
-          ? `${ig.accounts.length} account(s) connected`
-          : "not connected";
-        return `${i + 1}. [${ig.authType}] ${ig.label} (${ig.id}) — ${status}`;
-      })
-      .join("\n");
-    sections.push(`Integrations (${integrations.length}):\n${formatted}`);
   }
 
   if (mcpServers.length) {
@@ -744,7 +705,6 @@ export async function installSkill(
       uri?: string | null;
       description?: string;
       message?: string;
-      integrations?: SkillIntegrationRef[];
       mcpServers?: SkillMcpServerRef[];
       nixPackages?: string[];
       permissions?: string[];
@@ -792,15 +752,7 @@ export async function installSkill(
       ];
     }
 
-    // Collect grants from permissions + integration apiDomains
     const grants: string[] = [...(result.permissions || [])];
-    if (result.integrations) {
-      for (const ig of result.integrations) {
-        if (ig.apiDomains) {
-          grants.push(...ig.apiDomains);
-        }
-      }
-    }
     if (grants.length) {
       prefill.grants = [...new Set(grants)];
     }

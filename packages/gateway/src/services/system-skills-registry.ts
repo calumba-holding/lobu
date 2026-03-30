@@ -41,7 +41,6 @@ export class SystemSkillsRegistry implements SkillRegistry {
       name: s.name,
       description: s.description,
       score: SYSTEM_SKILL_SCORE,
-      integrations: s.integrations,
       source: "system",
     }));
   }
@@ -65,7 +64,6 @@ export class SystemSkillsRegistry implements SkillRegistry {
       name: skill.name,
       description: skill.description || "",
       content: runtime?.content || "",
-      integrations: skill.integrations,
       mcpServers: skill.mcpServers,
       nixPackages: skill.nixPackages,
       permissions: skill.permissions,

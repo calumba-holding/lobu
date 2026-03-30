@@ -38,14 +38,6 @@ export interface AgentManifestEntry {
         content: string;
         enabled: boolean;
         system?: boolean;
-        integrations?: Array<{
-          id: string;
-          label?: string;
-          authType?: string;
-          scopesConfig?: { default: string[]; available: string[] };
-          scopes?: string[];
-          apiDomains?: string[];
-        }>;
         mcpServers?: Array<{
           id: string;
           name?: string;

@@ -20,7 +20,6 @@ interface ManifestSkill {
   content: string;
   enabled: boolean;
   system?: boolean;
-  integrations?: SkillConfig["integrations"];
   mcpServers?: SkillConfig["mcpServers"];
   nixPackages?: SkillConfig["nixPackages"];
   permissions?: SkillConfig["permissions"];
@@ -339,7 +338,6 @@ function buildSkillsConfig(
         system: skill.system,
         content: skill.content || undefined,
         contentFetchedAt,
-        integrations: skill.integrations,
         mcpServers: skill.mcpServers,
         nixPackages: skill.nixPackages,
         permissions: skill.permissions,

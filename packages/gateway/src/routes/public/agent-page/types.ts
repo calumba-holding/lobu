@@ -38,14 +38,6 @@ export interface ModelSelectionState {
   pinnedModel?: string;
 }
 
-export interface SkillIntegrationInfo {
-  id: string;
-  label?: string;
-  authType?: "oauth" | "api-key";
-  scopes?: string[];
-  apiDomains?: string[];
-}
-
 export interface SkillMcpServerInfo {
   id: string;
   name?: string;
@@ -63,7 +55,6 @@ export interface Skill {
   system?: boolean;
   content?: string;
   contentFetchedAt?: number;
-  integrations?: SkillIntegrationInfo[];
   mcpServers?: SkillMcpServerInfo[];
   nixPackages?: string[];
   permissions?: string[];
@@ -138,14 +129,6 @@ export interface PermissionGrant {
   grantedAt?: number;
 }
 
-export interface IntegrationStatusEntry {
-  label: string;
-  connected: boolean;
-  configured: boolean;
-  accounts: { accountId: string; grantedScopes: string[] }[];
-  availableScopes: string[];
-}
-
 export interface AgentInfo {
   agentId: string;
   name: string;
@@ -191,8 +174,6 @@ export interface SettingsState {
   configManagedProviders: string[];
   // Provider icon URLs for rendering
   providerIconUrls: Record<string, string>;
-  // Integration connection status keyed by integration ID
-  integrationStatus: Record<string, IntegrationStatusEntry>;
   // Settings mode and scoped access
   settingsMode: "admin" | "user";
   allowedScopes?: string[];

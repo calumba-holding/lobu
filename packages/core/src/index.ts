@@ -24,9 +24,6 @@ export * from "./constants";
 export * from "./errors";
 // Integration types
 export type {
-  AgentIntegrationConfig,
-  IntegrationApiKeyConfig,
-  IntegrationOAuthConfig,
   SystemSkillEntry,
   SystemSkillsConfigFile,
 } from "./integration-types";
@@ -88,7 +85,6 @@ export type {
   RegistryEntry,
   SessionContext,
   SkillConfig,
-  SkillIntegration,
   SkillMcpServer,
   SkillsConfig,
   SuggestedPrompt,
@@ -97,8 +93,6 @@ export type {
   ToolsConfig,
   UserSuggestion,
 } from "./types";
-
-export { normalizeSkillIntegration } from "./types";
 
 // Platform constants
 export const SUPPORTED_PLATFORMS = [
@@ -116,7 +110,6 @@ export type {
   AgentInfo,
   CatalogProvider,
   Connection,
-  IntegrationStatusEntry,
   McpConfig,
   ModelOption,
   ModelSelectionState,
@@ -129,7 +122,6 @@ export type {
   Schedule,
   SettingsSnapshot,
   Skill,
-  SkillIntegrationInfo,
   SkillMcpServerInfo,
 } from "./api-types";
 

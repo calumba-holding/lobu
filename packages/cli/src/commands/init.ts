@@ -7,7 +7,6 @@ import inquirer from "inquirer";
 import ora from "ora";
 import { secretsSetCommand } from "../commands/secrets.js";
 import {
-  isIntegrationSkill,
   isProviderSkill,
   loadSkillsRegistry,
   type RegistrySkill,
@@ -195,21 +194,21 @@ export async function initCommand(
     }
   }
 
-  // Skills selection (integration skills from registry, excluding provider-only skills)
-  const integrationSkills = loadSkillsRegistry().filter(
-    (s) => isIntegrationSkill(s) && !isProviderSkill(s) && !s.hidden
+  // Skills selection (system skills from registry, excluding provider-only skills)
+  const systemSkills = loadSkillsRegistry().filter(
+    (s) => !isProviderSkill(s) && !s.hidden
   );
   const { skillIds } = await inquirer.prompt([
     {
       type: "checkbox",
       name: "skillIds",
-      message: "Enable integration skills?",
-      choices: integrationSkills.map((s) => ({
+      message: "Enable skills?",
+      choices: systemSkills.map((s) => ({
         name: `${s.name} — ${s.description}`,
         value: s.id,
         checked: s.id === "github",
       })),
-      when: integrationSkills.length > 0,
+      when: systemSkills.length > 0,
     },
   ]);
   const selectedSkillIds: string[] = skillIds || [];

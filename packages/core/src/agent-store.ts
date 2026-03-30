@@ -18,7 +18,6 @@ import type {
   ToolsConfig,
 } from "./types";
 import type { PluginsConfig } from "./plugin-types";
-import type { AgentIntegrationConfig } from "./integration-types";
 
 // ── Agent Settings ──────────────────────────────────────────────────────────
 
@@ -30,12 +29,10 @@ export interface AgentSettings {
   nixConfig?: NixConfig;
   mcpServers?: Record<string, McpServerConfig>;
   mcpInstallNotified?: Record<string, number>;
-  agentIntegrations?: Record<string, AgentIntegrationConfig>;
   soulMd?: string;
   userMd?: string;
   identityMd?: string;
   skillsConfig?: SkillsConfig;
-  skillAutoGrantedDomains?: string[];
   toolsConfig?: ToolsConfig;
   pluginsConfig?: PluginsConfig;
   authProfiles?: AuthProfile[];

@@ -1,10 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import {
-  createLogger,
-  type SkillIntegration,
-  type SkillMcpServer,
-} from "@lobu/core";
+import { createLogger, type SkillMcpServer } from "@lobu/core";
 
 const logger = createLogger("skill-registry");
 
@@ -21,7 +17,6 @@ export interface SkillRegistryResult {
   score?: number;
   uri?: string;
   source: string;
-  integrations?: SkillIntegration[];
 }
 
 /**
@@ -31,7 +26,6 @@ export interface SkillContent {
   name: string;
   description: string;
   content: string;
-  integrations?: SkillIntegration[];
   mcpServers?: SkillMcpServer[];
   nixPackages?: string[];
   permissions?: string[];

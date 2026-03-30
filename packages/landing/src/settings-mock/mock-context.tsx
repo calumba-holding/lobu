@@ -5,7 +5,6 @@
 import { type Signal, useSignal } from "@preact/signals";
 import type {
   CatalogProvider,
-  IntegrationStatusEntry,
   McpConfig,
   ModelOption,
   PermissionGrant,
@@ -57,8 +56,6 @@ export interface SettingsContextValue {
   skillsError: Signal<string>;
 
   mcpServers: Signal<Record<string, McpConfig>>;
-
-  integrationStatus: Signal<Record<string, IntegrationStatusEntry>>;
 
   nixPackages: Signal<string[]>;
 
@@ -212,10 +209,6 @@ export function MockSettingsProvider({
       description: "GitHub — repos, PRs, issues",
     },
   });
-  const integrationStatus = useSignal<Record<string, IntegrationStatusEntry>>(
-    {}
-  );
-
   const nixPackages = useSignal<string[]>([
     "ffmpeg",
     "gifsicle",
@@ -311,7 +304,6 @@ export function MockSettingsProvider({
     skillsError,
 
     mcpServers,
-    integrationStatus,
 
     nixPackages,
 

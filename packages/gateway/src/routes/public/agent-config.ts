@@ -5,13 +5,7 @@
  */
 
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
-import {
-  type AgentIntegrationConfig,
-  type AuthProfile,
-  createLogger,
-  normalizeSkillIntegration,
-  type SkillConfig,
-} from "@lobu/core";
+import { type AuthProfile, createLogger, type SkillConfig } from "@lobu/core";
 import type { AgentMetadataStore } from "../../auth/agent-metadata-store";
 import type { ProviderCatalogService } from "../../auth/provider-catalog";
 import { collectProviderModelOptions } from "../../auth/provider-model-options";
@@ -156,10 +150,6 @@ const updateConfigRoute = createRoute({
                     enabled: z.boolean(),
                     content: z.string().optional(),
                     contentFetchedAt: z.number().optional(),
-                    modelPreference: z.string().optional(),
-                    thinkingLevel: z
-                      .enum(["off", "low", "medium", "high"])
-                      .optional(),
                   })
                 ),
               })
@@ -670,7 +660,6 @@ export function createAgentConfigRoutes(
         verboseLogging: !!sanitized.verboseLogging,
         memoryEnabled: !!process.env.AUTH_MCP_URL,
       },
-      integrationStatus: {},
     });
   });
 
@@ -786,25 +775,7 @@ export function createAgentConfigRoutes(
         });
       }
 
-      // Auto-register/cleanup integrations when skills change
       if (updates.skillsConfig) {
-        await autoRegisterSkillIntegrations(
-          config.agentSettingsStore,
-          agentId,
-          updates.skillsConfig.skills || []
-        );
-
-        // Auto-grant apiDomains from enabled skill integrations
-        if (config.grantStore) {
-          await syncSkillApiDomainGrants(
-            config.agentSettingsStore,
-            config.grantStore,
-            agentId,
-            updates.skillsConfig.skills || []
-          );
-        }
-
-        // Cleanup orphaned dependencies from removed/disabled skills
         await cleanupOrphanedSkillDependencies(
           config.agentSettingsStore,
           agentId,
@@ -884,19 +855,6 @@ export function createAgentConfigRoutes(
       promotedSettings
     );
 
-    await autoRegisterSkillIntegrations(
-      config.agentSettingsStore,
-      targetAgentId,
-      sourceSettings?.skillsConfig?.skills || []
-    );
-    if (config.grantStore) {
-      await syncSkillApiDomainGrants(
-        config.agentSettingsStore,
-        config.grantStore,
-        targetAgentId,
-        sourceSettings?.skillsConfig?.skills || []
-      );
-    }
     await cleanupOrphanedSkillDependencies(
       config.agentSettingsStore,
       targetAgentId,
@@ -1319,6 +1277,23 @@ function sanitizeSettingsForResponse(
 
   const sanitized = redactSensitiveFields(settings) as PublicAgentSettings;
 
+  if (sanitized.skillsConfig?.skills) {
+    sanitized.skillsConfig = {
+      skills: sanitized.skillsConfig.skills.map((skill) => {
+        const legacySkill = skill as SkillConfig & {
+          integrations?: unknown;
+        };
+        const {
+          integrations: _integrations,
+          modelPreference: _modelPreference,
+          thinkingLevel: _thinkingLevel,
+          ...rest
+        } = legacySkill;
+        return rest;
+      }),
+    };
+  }
+
   if (Array.isArray(settings.authProfiles)) {
     sanitized.authProfiles = settings.authProfiles.map(sanitizeAuthProfile);
   }
@@ -1611,7 +1586,16 @@ async function validateSettings(
   }
 
   if (input.skillsConfig) {
-    settings.skillsConfig = input.skillsConfig;
+    settings.skillsConfig = {
+      skills: input.skillsConfig.skills.map((skill) => ({
+        repo: skill.repo,
+        name: skill.name,
+        description: skill.description,
+        enabled: skill.enabled,
+        content: skill.content,
+        contentFetchedAt: skill.contentFetchedAt,
+      })),
+    };
   }
 
   if (Array.isArray(input.skillRegistries)) {
@@ -1657,109 +1641,6 @@ async function validateSettings(
 }
 
 /**
- * Auto-register API-key integrations declared by enabled skills.
- * OAuth integrations don't need registration (resolved at auth time from platform config + skill scopes).
- */
-async function autoRegisterSkillIntegrations(
-  agentSettingsStore: AgentSettingsStore,
-  agentId: string,
-  skills: SkillConfig[]
-): Promise<void> {
-  const apiKeyIntegrations: Record<string, AgentIntegrationConfig> = {};
-
-  for (const skill of skills) {
-    if (!skill.enabled || !skill.integrations) continue;
-    for (const raw of skill.integrations) {
-      const ig = normalizeSkillIntegration(raw);
-      if (ig.authType !== "api-key") continue;
-
-      apiKeyIntegrations[ig.id] = {
-        label: ig.label || ig.id,
-        authType: "api-key",
-        apiKey: {
-          headerName: "Authorization",
-          headerTemplate: "Bearer {{key}}",
-        },
-        apiDomains: ig.apiDomains || [],
-      };
-    }
-  }
-
-  if (Object.keys(apiKeyIntegrations).length === 0) return;
-
-  const existing = await agentSettingsStore.getSettings(agentId);
-  const merged = {
-    ...(existing?.agentIntegrations || {}),
-    ...apiKeyIntegrations,
-  };
-  await agentSettingsStore.updateSettings(agentId, {
-    agentIntegrations: merged,
-  });
-
-  logger.info("Auto-registered API-key integrations from skills", {
-    agentId,
-    integrations: Object.keys(apiKeyIntegrations),
-  });
-}
-
-/**
- * Sync apiDomains from enabled skill integrations into the GrantStore.
- * Tracks which domains were auto-granted so removed skills can clean them up.
- */
-async function syncSkillApiDomainGrants(
-  agentSettingsStore: AgentSettingsStore,
-  grantStore: GrantStore,
-  agentId: string,
-  skills: SkillConfig[]
-): Promise<void> {
-  const settings = await agentSettingsStore.getSettings(agentId);
-  const previousDomains = new Set(settings?.skillAutoGrantedDomains || []);
-  const nextDomains = new Set(collectSkillApiDomains(skills));
-
-  const domainsToGrant = [...nextDomains].filter(
-    (domain) => !previousDomains.has(domain)
-  );
-  const domainsToRevoke = [...previousDomains].filter(
-    (domain) => !nextDomains.has(domain)
-  );
-
-  await Promise.all(
-    domainsToGrant.map((domain) => grantStore.grant(agentId, domain, null))
-  );
-  await Promise.all(
-    domainsToRevoke.map((domain) => grantStore.revoke(agentId, domain))
-  );
-
-  const previousList = [...previousDomains].sort();
-  const nextList = [...nextDomains].sort();
-  if (previousList.join("\n") !== nextList.join("\n")) {
-    await agentSettingsStore.updateSettings(agentId, {
-      skillAutoGrantedDomains: nextList,
-    });
-  }
-
-  logger.info("Synced apiDomains from skill integrations", {
-    agentId,
-    grantedDomains: domainsToGrant,
-    revokedDomains: domainsToRevoke,
-  });
-}
-
-function collectSkillApiDomains(skills: SkillConfig[]): string[] {
-  const domains = new Set<string>();
-  for (const skill of skills) {
-    if (!skill.enabled || !skill.integrations) continue;
-    for (const raw of skill.integrations) {
-      const ig = normalizeSkillIntegration(raw);
-      for (const domain of ig.apiDomains || []) {
-        domains.add(domain);
-      }
-    }
-  }
-  return [...domains].sort();
-}
-
-/**
  * Compute what dependencies are no longer needed after skills change.
  * Returns sets of IDs to remove.
  */
@@ -1767,27 +1648,16 @@ function computeSkillDependencyDiff(
   oldSkills: SkillConfig[],
   newSkills: SkillConfig[]
 ): {
-  removedIntegrations: string[];
   removedMcpServers: string[];
   removedNixPackages: string[];
   removedPermissions: string[];
 } {
-  // Collect all dependencies from enabled new skills
-  const activeIntegrations = new Set<string>();
   const activeMcpServers = new Set<string>();
   const activeNixPackages = new Set<string>();
   const activePermissions = new Set<string>();
 
   for (const skill of newSkills) {
     if (!skill.enabled) continue;
-    if (skill.integrations) {
-      for (const ig of skill.integrations) {
-        const normalized = normalizeSkillIntegration(ig);
-        if (normalized.authType === "api-key") {
-          activeIntegrations.add(normalized.id);
-        }
-      }
-    }
     if (skill.mcpServers) {
       for (const mcp of skill.mcpServers) activeMcpServers.add(mcp.id);
     }
@@ -1799,22 +1669,12 @@ function computeSkillDependencyDiff(
     }
   }
 
-  // Collect all dependencies from enabled old skills
-  const previousIntegrations = new Set<string>();
   const previousMcpServers = new Set<string>();
   const previousNixPackages = new Set<string>();
   const previousPermissions = new Set<string>();
 
   for (const skill of oldSkills) {
     if (!skill.enabled) continue;
-    if (skill.integrations) {
-      for (const ig of skill.integrations) {
-        const normalized = normalizeSkillIntegration(ig);
-        if (normalized.authType === "api-key") {
-          previousIntegrations.add(normalized.id);
-        }
-      }
-    }
     if (skill.mcpServers) {
       for (const mcp of skill.mcpServers) previousMcpServers.add(mcp.id);
     }
@@ -1826,11 +1686,7 @@ function computeSkillDependencyDiff(
     }
   }
 
-  // Things that were needed before but aren't anymore
   return {
-    removedIntegrations: [...previousIntegrations].filter(
-      (id) => !activeIntegrations.has(id)
-    ),
     removedMcpServers: [...previousMcpServers].filter(
       (id) => !activeMcpServers.has(id)
     ),
@@ -1856,9 +1712,7 @@ async function cleanupOrphanedSkillDependencies(
   const diff = computeSkillDependencyDiff(oldSkills, newSkills);
 
   const hasRemovals =
-    diff.removedIntegrations.length > 0 ||
-    diff.removedMcpServers.length > 0 ||
-    diff.removedNixPackages.length > 0;
+    diff.removedMcpServers.length > 0 || diff.removedNixPackages.length > 0;
 
   if (!hasRemovals) return;
 
@@ -1866,15 +1720,6 @@ async function cleanupOrphanedSkillDependencies(
   if (!settings) return;
 
   const updates: Record<string, unknown> = {};
-
-  // Remove orphaned API-key integrations
-  if (diff.removedIntegrations.length > 0 && settings.agentIntegrations) {
-    const cleaned = { ...settings.agentIntegrations };
-    for (const id of diff.removedIntegrations) {
-      delete cleaned[id];
-    }
-    updates.agentIntegrations = cleaned;
-  }
 
   // Remove orphaned MCP servers
   if (diff.removedMcpServers.length > 0 && settings.mcpServers) {
@@ -1901,7 +1746,6 @@ async function cleanupOrphanedSkillDependencies(
     await agentSettingsStore.updateSettings(agentId, updates);
     logger.info("Cleaned up orphaned skill dependencies", {
       agentId,
-      removedIntegrations: diff.removedIntegrations,
       removedMcpServers: diff.removedMcpServers,
       removedNixPackages: diff.removedNixPackages,
     });

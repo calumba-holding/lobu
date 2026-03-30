@@ -89,20 +89,6 @@ export interface ConversationMessage {
 export type ThinkingLevel = "off" | "low" | "medium" | "high";
 
 /**
- * Rich integration declared by a skill.
- * Carries OAuth scopes, API domains, and auth type.
- */
-export interface SkillIntegration {
-  id: string;
-  label?: string;
-  authType?: "oauth" | "api-key";
-  oauth?: import("./integration-types").IntegrationOAuthConfig;
-  scopesConfig?: { default: string[]; available: string[] };
-  scopes?: string[];
-  apiDomains?: string[];
-}
-
-/**
  * MCP server declared by a skill manifest.
  */
 export interface SkillMcpServer {
@@ -127,19 +113,6 @@ export interface SkillMcpServer {
 }
 
 /**
- * Normalize a skill integration entry (string or object) to a SkillIntegration.
- * Used at parse boundaries to convert legacy string-only format.
- */
-export function normalizeSkillIntegration(
-  entry: string | SkillIntegration
-): SkillIntegration {
-  if (typeof entry === "string") {
-    return { id: entry };
-  }
-  return entry;
-}
-
-/**
  * Individual skill configuration.
  * Skills are SKILL.md files from GitHub repos that provide instructions to Claude.
  */
@@ -160,8 +133,6 @@ export interface SkillConfig {
   content?: string;
   /** When the content was last fetched (timestamp ms) */
   contentFetchedAt?: number;
-  /** Required integrations declared by the skill */
-  integrations?: SkillIntegration[];
   /** MCP servers declared by the skill */
   mcpServers?: SkillMcpServer[];
   /** System packages declared by the skill (nix) */

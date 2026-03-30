@@ -1,13 +1,5 @@
 import skillsConfig from "@skills-config";
 
-interface Integration {
-  id: string;
-  label: string;
-  authType: string;
-  scopesConfig?: { default?: string[]; available?: string[] };
-  apiDomains?: string[];
-}
-
 interface McpServer {
   id: string;
   name: string;
@@ -19,15 +11,10 @@ interface Skill {
   id: string;
   name: string;
   description: string;
-  integrations?: Integration[];
   mcpServers?: McpServer[];
 }
 
 const skills: Skill[] = (skillsConfig as { skills: Skill[] }).skills;
-
-const integrationSkills = skills.filter((s) =>
-  s.integrations?.some((i) => i.authType === "oauth")
-);
 const mcpSkills = skills.filter((s) => s.mcpServers);
 
 const cellStyle = {
@@ -68,64 +55,6 @@ function Badge({ text }: { text: string }) {
 export function SkillsRegistryTable() {
   return (
     <div>
-      <h2>Integrations</h2>
-      <p>
-        OAuth-authenticated services. Users connect their own accounts through
-        the settings page.
-      </p>
-      <div style={{ overflowX: "auto" }}>
-        <table
-          style={{
-            width: "100%",
-            borderCollapse: "collapse",
-            border: "1px solid var(--color-page-border)",
-          }}
-        >
-          <thead>
-            <tr>
-              <th style={headerCellStyle}>Name</th>
-              <th style={headerCellStyle}>Auth Type</th>
-              <th style={headerCellStyle}>Services</th>
-              <th style={headerCellStyle}>Available Scopes</th>
-            </tr>
-          </thead>
-          <tbody>
-            {integrationSkills.map((skill) => {
-              const integration = skill.integrations![0];
-              const scopes = integration.scopesConfig?.available ?? [];
-              return (
-                <tr key={skill.id}>
-                  <td
-                    style={{
-                      ...cellStyle,
-                      fontWeight: 500,
-                      color: "var(--color-page-text)",
-                    }}
-                  >
-                    {skill.name}
-                  </td>
-                  <td style={cellStyle}>
-                    <Badge text={integration.authType} />
-                  </td>
-                  <td style={cellStyle}>
-                    {(integration.apiDomains ?? []).map((d) => (
-                      <Badge key={d} text={d} />
-                    ))}
-                  </td>
-                  <td style={cellStyle}>
-                    {scopes.length > 0 ? (
-                      scopes.map((s) => <Badge key={s} text={s} />)
-                    ) : (
-                      <span style={{ opacity: 0.5 }}>—</span>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-
       <h2>MCP Servers</h2>
       <p>Model Context Protocol servers for extended capabilities.</p>
       <div style={{ overflowX: "auto" }}>

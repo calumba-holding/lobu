@@ -1,5 +1,5 @@
-import { useSignal } from "@preact/signals";
 import type { ComponentChildren } from "preact";
+import { useSignal } from "@preact/signals";
 import { type RegistryEntry, useSettings } from "../app";
 import { Section } from "./Section";
 
@@ -75,19 +75,6 @@ export function SkillsSection({ adminOnly }: { adminOnly?: boolean }) {
     ctx.skills.value = ctx.skills.value.filter((s) => s.repo !== repo);
   }
 
-  function updateSkillField(repo: string, field: string, value: string) {
-    ctx.skills.value = ctx.skills.value.map((s) =>
-      s.repo === repo ? { ...s, [field]: value || undefined } : s
-    );
-  }
-
-  // Build flat model options from all providers
-  const allModelOptions = Object.entries(ctx.providerModels)
-    .flatMap(([, models]) => models)
-    .filter((m, i, arr) => arr.findIndex((o) => o.value === m.value) === i);
-
-  const openModelDropdown = useSignal<string | null>(null);
-
   const count = ctx.skills.value.length;
   const badge =
     count > 0 ? (
@@ -138,16 +125,8 @@ export function SkillsSection({ adminOnly }: { adminOnly?: boolean }) {
         )}
 
         {ctx.skills.value.map((skill) => {
-          const ownedIntegrations = (skill.integrations || []).map((ig) => {
-            const status = ctx.integrationStatus.value[ig.id];
-            return { ...ig, connected: !!status?.connected };
-          });
           const ownedMcps = skill.mcpServers || [];
-          const hasSubItems =
-            ownedIntegrations.length > 0 || ownedMcps.length > 0;
-          const fieldIdBase = skill.repo.replace(/[^a-zA-Z0-9_-]/g, "-");
-          const modelInputId = `${fieldIdBase}-model`;
-          const thinkingSelectId = `${fieldIdBase}-thinking`;
+          const hasSubItems = ownedMcps.length > 0;
 
           return (
             <div key={`skill-${skill.repo}`} class="space-y-1">
@@ -172,143 +151,16 @@ export function SkillsSection({ adminOnly }: { adminOnly?: boolean }) {
                 </button>
               </ItemRow>
 
-              {skill.enabled && (
-                <div class="ml-6 pl-2 border-l-2 border-gray-100 space-y-1.5 py-1">
-                  <div class="flex items-center gap-2">
-                    <label
-                      htmlFor={modelInputId}
-                      class="text-[10px] text-gray-500 w-12 shrink-0"
-                    >
-                      Model
-                    </label>
-                    <div class="relative flex-1 min-w-0">
-                      <input
-                        id={modelInputId}
-                        type="text"
-                        value={skill.modelPreference || ""}
-                        onInput={(e) => {
-                          const val = (e.target as HTMLInputElement).value;
-                          updateSkillField(skill.repo, "modelPreference", val);
-                          openModelDropdown.value = skill.repo;
-                        }}
-                        onFocus={() => {
-                          openModelDropdown.value = skill.repo;
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Escape")
-                            openModelDropdown.value = null;
-                        }}
-                        placeholder="default"
-                        class="w-full text-[11px] px-1.5 py-0.5 rounded border border-gray-200 bg-white text-gray-700"
-                      />
-                      {openModelDropdown.value === skill.repo && (
-                        <div class="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded shadow-lg max-h-48 overflow-y-auto">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              updateSkillField(
-                                skill.repo,
-                                "modelPreference",
-                                ""
-                              );
-                              openModelDropdown.value = null;
-                            }}
-                            class="w-full text-left px-2 py-1 text-[11px] hover:bg-gray-100 text-gray-500"
-                          >
-                            Default
-                          </button>
-                          {allModelOptions
-                            .filter(
-                              (m) =>
-                                !skill.modelPreference ||
-                                m.label
-                                  .toLowerCase()
-                                  .includes(
-                                    (skill.modelPreference || "").toLowerCase()
-                                  ) ||
-                                m.value
-                                  .toLowerCase()
-                                  .includes(
-                                    (skill.modelPreference || "").toLowerCase()
-                                  )
-                            )
-                            .map((m) => (
-                              <button
-                                key={m.value}
-                                type="button"
-                                onClick={() => {
-                                  updateSkillField(
-                                    skill.repo,
-                                    "modelPreference",
-                                    m.value
-                                  );
-                                  openModelDropdown.value = null;
-                                }}
-                                class="w-full text-left px-2 py-1 text-[11px] hover:bg-gray-100 text-gray-800"
-                              >
-                                {m.label}
-                              </button>
-                            ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  <div class="flex items-center gap-2">
-                    <label
-                      htmlFor={thinkingSelectId}
-                      class="text-[10px] text-gray-500 w-12 shrink-0"
-                    >
-                      Thinking
-                    </label>
-                    <select
-                      id={thinkingSelectId}
-                      class="text-[11px] px-1.5 py-0.5 rounded border border-gray-200 bg-white text-gray-700 flex-1 min-w-0"
-                      value={skill.thinkingLevel || ""}
-                      onChange={(e) =>
-                        updateSkillField(
-                          skill.repo,
-                          "thinkingLevel",
-                          (e.target as HTMLSelectElement).value
-                        )
-                      }
-                    >
-                      <option value="">Default</option>
-                      <option value="off">Off</option>
-                      <option value="low">Low</option>
-                      <option value="medium">Medium</option>
-                      <option value="high">High</option>
-                    </select>
-                  </div>
-                </div>
-              )}
-
               {hasSubItems && skill.enabled && (
                 <div class="ml-6 pl-2 border-l-2 border-purple-100 space-y-1">
-                  {[
-                    ...ownedIntegrations.map((ig) => ({
-                      key: `skill-ig-${ig.id}`,
-                      badge: ig.authType || "oauth",
-                      name: ig.label || ig.id,
-                      status: ig.connected ? "connected" : "not connected",
-                      statusColor: ig.connected
-                        ? "text-green-600"
-                        : "text-gray-400",
-                    })),
-                    ...ownedMcps.map((m) => ({
-                      key: `skill-mcp-${m.id}`,
-                      badge: "mcp",
-                      name: m.name || m.id,
-                      status: "included",
-                      statusColor: "text-gray-500",
-                    })),
-                  ].map((item) => (
+                  {ownedMcps.map((m) => (
                     <SubItem
-                      key={item.key}
-                      badge={item.badge}
+                      key={`skill-mcp-${m.id}`}
+                      badge="mcp"
                       badgeColor="bg-gray-100 text-gray-600"
-                      name={item.name}
-                      status={item.status}
-                      statusColor={item.statusColor}
+                      name={m.name || m.id}
+                      status="included"
+                      statusColor="text-gray-500"
                     />
                   ))}
                 </div>

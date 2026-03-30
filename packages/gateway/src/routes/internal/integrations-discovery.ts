@@ -90,7 +90,6 @@ export function createIntegrationsDiscoveryRoutes(
             score: result.score,
             uri: result.uri,
             installs: result.installs,
-            integrations: content.integrations,
             mcpServers: content.mcpServers,
             nixPackages: content.nixPackages,
             permissions: content.permissions,
@@ -145,7 +144,6 @@ export function createIntegrationsDiscoveryRoutes(
           id,
           name: content.name,
           description: content.description,
-          integrations: content.integrations,
           mcpServers: content.mcpServers,
           nixPackages: content.nixPackages,
           permissions: content.permissions,
@@ -171,7 +169,7 @@ export function createIntegrationsDiscoveryRoutes(
     }
   );
 
-  // Installed capabilities for an agent (skills, integrations, MCP servers)
+  // Installed capabilities for an agent (skills and MCP servers)
   router.get(
     "/internal/integrations/installed",
     authenticateWorker,
@@ -183,14 +181,6 @@ export function createIntegrationsDiscoveryRoutes(
         id: string;
         name: string;
         enabled: boolean;
-      }> = [];
-      const integrations: Array<{
-        id: string;
-        label: string;
-        authType: string;
-        connected: boolean;
-        configured: boolean;
-        accounts: Array<{ accountId: string; grantedScopes: string[] }>;
       }> = [];
       const mcpServers: Array<{
         id: string;
@@ -226,11 +216,10 @@ export function createIntegrationsDiscoveryRoutes(
       logger.info("Installed capabilities query", {
         agentId,
         skillCount: skills.length,
-        integrationCount: integrations.length,
         mcpCount: mcpServers.length,
       });
 
-      return c.json({ skills, integrations, mcpServers });
+      return c.json({ skills, mcpServers });
     }
   );
 
@@ -307,7 +296,6 @@ export function createIntegrationsDiscoveryRoutes(
             source,
             uri: null,
             description: content.description,
-            integrations: content.integrations || [],
             mcpServers: content.mcpServers || [],
             nixPackages: content.nixPackages || [],
             permissions: content.permissions || [],
@@ -324,7 +312,6 @@ export function createIntegrationsDiscoveryRoutes(
           source,
           uri: null,
           description: content.description,
-          integrations: content.integrations || [],
           mcpServers: content.mcpServers || [],
           nixPackages: content.nixPackages || [],
           permissions: content.permissions || [],
@@ -342,7 +329,6 @@ export function createIntegrationsDiscoveryRoutes(
           source: "mcp-registry",
           uri: null,
           description: mcp.description,
-          integrations: [],
           mcpServers: [],
           nixPackages: [],
           permissions: [],

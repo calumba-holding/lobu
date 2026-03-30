@@ -52,16 +52,6 @@ export interface SettingsPageOptions {
   ownerPlatform?: string;
   baseProviderNames?: string[];
   configManagedProviders?: string[];
-  integrationStatus?: Record<
-    string,
-    {
-      label: string;
-      connected: boolean;
-      configured: boolean;
-      accounts: { accountId: string; grantedScopes: string[] }[];
-      availableScopes: string[];
-    }
-  >;
 }
 
 export function renderSettingsPage(
@@ -175,7 +165,6 @@ export function renderSettingsPage(
     providerIconUrls: Object.fromEntries(
       providers.map((p) => [p.id, p.iconUrl])
     ),
-    integrationStatus: options?.integrationStatus ?? {},
     settingsMode: payload.settingsMode || "admin",
     allowedScopes: payload.allowedScopes,
     isAdmin: !!payload.isAdmin,

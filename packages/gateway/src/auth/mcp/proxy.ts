@@ -989,6 +989,20 @@ export class McpProxy {
       const { startDeviceAuth } = await import(
         "../../routes/internal/device-auth"
       );
+
+      // Check if a device auth flow is already pending (avoid duplicate starts)
+      const pendingKey = `device-auth:${agentId}:${userId}:${mcpId}`;
+      const pending = await this.redisClient.get(pendingKey);
+      if (pending) {
+        // Return the existing pending flow's info instead of starting a new one
+        return JSON.stringify({
+          status: "login_required",
+          message:
+            "Authentication is required. A login flow is already in progress. STOP calling tools and tell the user to complete login in their browser. Do NOT retry this tool call.",
+          note: "Do NOT call any owletto tools until the user completes login.",
+        });
+      }
+
       const result = await startDeviceAuth(
         this.redisClient,
         this.configService as any,
@@ -1001,7 +1015,7 @@ export class McpProxy {
       return JSON.stringify({
         status: "login_required",
         message:
-          "Authentication is required. Show the user this login link and code. After they complete login, call owletto_login_check to finish, then retry the original request.",
+          "Authentication is required. STOP calling tools and show the user this login link and code. Do NOT retry this tool call — wait for the user to complete login first.",
         verification_url: url,
         user_code: result.userCode,
         expires_in_seconds: result.expiresIn,

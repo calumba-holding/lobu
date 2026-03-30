@@ -22,6 +22,7 @@ interface StoredCredential {
 
 interface StoredDeviceAuth {
   deviceCode: string;
+  userCode?: string;
   clientId: string;
   clientSecret?: string;
   interval: number;
@@ -279,8 +280,41 @@ export async function startDeviceAuth(
   verificationUriComplete?: string;
   expiresIn: number;
 } | null> {
+  // Reuse existing pending device auth flow if not expired
+  const existingRaw = await redis.get(deviceAuthKey(agentId, userId, mcpId));
+  if (existingRaw) {
+    try {
+      const existing = JSON.parse(existingRaw) as StoredDeviceAuth;
+      if (existing.expiresAt > Date.now()) {
+        const httpServer = await mcpConfigService.getHttpServer(mcpId, agentId);
+        const issuer = httpServer
+          ? deriveOAuthBaseUrl(httpServer.upstreamUrl)
+          : existing.issuer;
+        const verificationUri = `${issuer}/oauth/device`;
+        logger.info("Reusing existing pending device auth", {
+          mcpId,
+          agentId,
+          userId,
+        });
+        return {
+          userCode: existing.userCode || "",
+          verificationUri,
+          verificationUriComplete: existing.userCode
+            ? `${verificationUri}?user_code=${existing.userCode}`
+            : verificationUri,
+          expiresIn: Math.floor((existing.expiresAt - Date.now()) / 1000),
+        };
+      }
+    } catch {
+      // Corrupted state — fall through to start new flow
+    }
+  }
+
   const httpServer = await mcpConfigService.getHttpServer(mcpId, agentId);
-  if (!httpServer) return null;
+  if (!httpServer) {
+    logger.warn("startDeviceAuth: httpServer not found", { mcpId, agentId });
+    return null;
+  }
 
   const issuer = deriveOAuthBaseUrl(httpServer.upstreamUrl);
 
@@ -338,6 +372,7 @@ export async function startDeviceAuth(
 
   const deviceState: StoredDeviceAuth = {
     deviceCode: started.deviceAuthId,
+    userCode: started.userCode,
     clientId: client.clientId,
     clientSecret: client.clientSecret,
     interval: started.interval,
@@ -401,7 +436,11 @@ export function createDeviceAuthRoutes(
 
       return c.json(result);
     } catch (error) {
-      logger.error("Failed to start device auth", { mcpId, error });
+      logger.error("Failed to start device auth", {
+        mcpId,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
       return c.json({ error: "Failed to start device authentication" }, 500);
     }
   });

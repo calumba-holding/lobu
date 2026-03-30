@@ -1,5 +1,4 @@
 import {
-  type AgentIntegrationConfig,
   type AuthProfile,
   BaseRedisStore,
   decrypt,
@@ -47,8 +46,6 @@ export interface AgentSettings {
   mcpServers?: Record<string, McpServerConfig>;
   /** Internal marker: MCP IDs already acknowledged to the user in chat */
   mcpInstallNotified?: Record<string, number>;
-  /** Agent-created API key integrations, keyed by integration ID */
-  agentIntegrations?: Record<string, AgentIntegrationConfig>;
   /** Workspace identity/instruction files (markdown content) */
   soulMd?: string;
   /** Workspace user-specific context (markdown content) */
@@ -57,8 +54,6 @@ export interface AgentSettings {
   identityMd?: string;
   /** Skills configuration - enabled skills from skills.sh */
   skillsConfig?: SkillsConfig;
-  /** Internal marker: domains auto-granted from enabled skills */
-  skillAutoGrantedDomains?: string[];
   /** Tool permission configuration - allowed/denied tools */
   toolsConfig?: ToolsConfig;
   /** OpenClaw plugin configuration */

@@ -93,17 +93,6 @@ const skillFetchRoute = createRoute({
             description: z.string(),
             content: z.string(),
             fetchedAt: z.number(),
-            integrations: z
-              .array(
-                z.object({
-                  id: z.string(),
-                  label: z.string().optional(),
-                  authType: z.enum(["oauth", "api-key"]).optional(),
-                  scopes: z.array(z.string()).optional(),
-                  apiDomains: z.array(z.string()).optional(),
-                })
-              )
-              .optional(),
             mcpServers: z
               .array(
                 z.object({
@@ -203,7 +192,6 @@ export function createIntegrationsRoutes(
         description: skillContent.description,
         content: skillContent.content,
         fetchedAt: Date.now(),
-        integrations: skillContent.integrations,
         mcpServers: skillContent.mcpServers,
         nixPackages: skillContent.nixPackages,
         permissions: skillContent.permissions,

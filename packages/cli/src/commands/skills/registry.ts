@@ -10,13 +10,6 @@ export interface RegistrySkill {
   description: string;
   instructions?: string;
   hidden?: boolean;
-  integrations?: Array<{
-    id: string;
-    label?: string;
-    authType?: string;
-    scopesConfig?: { default: string[]; available: string[] };
-    apiDomains?: string[];
-  }>;
   mcpServers?: Array<{
     id: string;
     name?: string;
@@ -82,8 +75,4 @@ export function getSkillById(id: string): RegistrySkill | undefined {
 
 export function isProviderSkill(skill: RegistrySkill): boolean {
   return !!(skill.providers && skill.providers.length > 0);
-}
-
-export function isIntegrationSkill(skill: RegistrySkill): boolean {
-  return !!(skill.integrations && skill.integrations.length > 0);
 }
