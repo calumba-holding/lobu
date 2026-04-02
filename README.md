@@ -7,6 +7,8 @@ Sandboxed, persistent, powered by the OpenClaw runtime and Lobu Skills.
 
 **Batteries included.** Lobu bundles sandboxed execution, MCP proxy, and gateway-level network isolation. One deployment, everything included.
 
+<video src="https://community.lobu.ai/demo.mp4" controls width="100%"></video>
+
 ## Channels & API
 
 **REST API** — Programmatic agent creation, control, and state management.
@@ -14,8 +16,6 @@ Sandboxed, persistent, powered by the OpenClaw runtime and Lobu Skills.
 [![API Docs](https://img.shields.io/badge/API_Docs-0096FF?style=for-the-badge&logo=readme&logoColor=white)](https://community.lobu.ai/api/docs)
 
 **Slack** — Multi-channel/DM agents with rich interactivity.
-
-[![Add to Slack](https://img.shields.io/badge/Add_to_Slack-4A154B?style=for-the-badge&logo=slack&logoColor=white)](https://community.lobu.ai/slack/install) [![Join Community](https://img.shields.io/badge/Join_Community-4A154B?style=for-the-badge&logo=slack&logoColor=white)](https://join.slack.com/t/peerbot/shared_invite/zt-391o8tyw2-iyupjTG1xHIz9Og8C7JOnw)
 
 **Telegram** — Long-polling bot integration with interactive agent workflows.
 
