@@ -12,7 +12,6 @@ import {
   isSecretField,
   type PlatformAdapterConfig,
   type PlatformConnection,
-  SUPPORTED_PLATFORMS,
 } from "./types";
 
 type HistoryRecord = {
@@ -25,18 +24,21 @@ type HistoryRecord = {
 const logger = createLogger("chat-instance-manager");
 const SLACK_SYSTEM_AGENT_PREFIX = "system:connection:slack";
 
-const ADAPTER_FACTORIES: Record<string, (config: any) => Promise<any>> = {
-  telegram: async (c) =>
-    (await import("@chat-adapter/telegram")).createTelegramAdapter(c),
-  slack: async (c) =>
-    (await import("@chat-adapter/slack")).createSlackAdapter(c),
-  discord: async (c) =>
-    (await import("@chat-adapter/discord")).createDiscordAdapter(c),
-  whatsapp: async (c) =>
-    (await import("@chat-adapter/whatsapp")).createWhatsAppAdapter(c),
-  teams: async (c) =>
-    (await import("@chat-adapter/teams")).createTeamsAdapter(c),
-};
+export const ADAPTER_FACTORIES: Record<string, (config: any) => Promise<any>> =
+  {
+    telegram: async (c) =>
+      (await import("@chat-adapter/telegram")).createTelegramAdapter(c),
+    slack: async (c) =>
+      (await import("@chat-adapter/slack")).createSlackAdapter(c),
+    discord: async (c) =>
+      (await import("@chat-adapter/discord")).createDiscordAdapter(c),
+    whatsapp: async (c) =>
+      (await import("@chat-adapter/whatsapp")).createWhatsAppAdapter(c),
+    teams: async (c) =>
+      (await import("@chat-adapter/teams")).createTeamsAdapter(c),
+    gchat: async (c) =>
+      (await import("@chat-adapter/gchat")).createGoogleChatAdapter(c),
+  };
 
 interface ManagedInstance {
   connection: PlatformConnection;
@@ -163,7 +165,7 @@ export class ChatInstanceManager {
     settings?: ConnectionSettings,
     metadata: Record<string, any> = {}
   ): Promise<PlatformConnection> {
-    if (!SUPPORTED_PLATFORMS.includes(platform as any)) {
+    if (!(platform in ADAPTER_FACTORIES)) {
       throw new Error(`Unsupported platform: ${platform}`);
     }
     if (config.platform !== platform) {
@@ -679,7 +681,8 @@ export class ChatInstanceManager {
         this,
         connection,
         chat,
-        this.services.getGrantStore()
+        this.services.getGrantStore(),
+        this.services.getAgentSettingsStore()
       );
       this.instances.get(connection.id)!.interactionCleanup =
         interactionCleanup;
@@ -1017,13 +1020,12 @@ export class ChatInstanceManager {
    * These are lightweight adapters that delegate to this manager.
    */
   createPlatformAdapters(): PlatformAdapter[] {
-    const platforms = ["slack", "telegram", "whatsapp"] as const;
-    return platforms.map((name) => this.createPlatformAdapter(name));
+    return Object.keys(ADAPTER_FACTORIES).map((name) =>
+      this.createPlatformAdapter(name)
+    );
   }
 
-  private createPlatformAdapter(
-    name: "slack" | "telegram" | "whatsapp"
-  ): PlatformAdapter {
+  private createPlatformAdapter(name: string): PlatformAdapter {
     return {
       name,
       initialize: async () => {
@@ -1113,7 +1115,7 @@ export class ChatInstanceManager {
   }
 
   async sendPlatformMessage(
-    name: "slack" | "telegram" | "whatsapp",
+    name: string,
     message: string,
     options: {
       agentId: string;
