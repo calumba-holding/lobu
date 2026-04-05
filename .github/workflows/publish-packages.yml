@@ -1,0 +1,63 @@
+name: Publish Packages
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish-packages:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: 'https://registry.npmjs.org'
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.12
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build packages
+        run: |
+          cd packages/core && bun run build
+          cd ../gateway && bun run build
+          cd ../worker && bun run build
+
+      - name: Authenticate to npm
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
+          npm whoami
+
+      - name: Stage publish artifacts
+        run: |
+          mkdir -p .publish/artifacts
+          node scripts/stage-publish-package.mjs packages/core .publish/core
+          node scripts/stage-publish-package.mjs packages/gateway .publish/gateway
+          node scripts/stage-publish-package.mjs packages/worker .publish/worker
+          npm pack --ignore-scripts .publish/core --pack-destination .publish/artifacts
+          npm pack --ignore-scripts .publish/gateway --pack-destination .publish/artifacts
+          npm pack --ignore-scripts .publish/worker --pack-destination .publish/artifacts
+
+      - name: Publish @lobu/core
+        run: npm publish .publish/artifacts/lobu-core-*.tgz --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @lobu/gateway
+        run: npm publish .publish/artifacts/lobu-gateway-*.tgz --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @lobu/worker
+        run: npm publish .publish/artifacts/lobu-worker-*.tgz --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
