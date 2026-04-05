@@ -16,7 +16,7 @@
     },
     "packages/cli": {
       "name": "@lobu/cli",
-      "version": "3.0.4",
+      "version": "3.0.5",
       "bin": {
         "lobu": "bin/lobu.js",
       },
@@ -39,7 +39,7 @@
     },
     "packages/core": {
       "name": "@lobu/core",
-      "version": "2.0.0",
+      "version": "3.0.5",
       "dependencies": {
         "@opentelemetry/api": "^1.9.0",
         "@opentelemetry/exporter-trace-otlp-http": "^0.57.0",
@@ -58,7 +58,7 @@
     },
     "packages/gateway": {
       "name": "@lobu/gateway",
-      "version": "1.0.0",
+      "version": "3.0.5",
       "dependencies": {
         "@chat-adapter/discord": "^4",
         "@chat-adapter/gchat": "^4",
@@ -74,7 +74,7 @@
         "@scalar/hono-api-reference": "^0.9.39",
         "@sentry/node": "^10.19.0",
         "bullmq": "^5.31.5",
-        "chat": "^4",
+        "chat": "4.20.0",
         "commander": "^14.0.1",
         "cron-parser": "^5.5.0",
         "dockerode": "^4.0.7",
@@ -111,7 +111,7 @@
     },
     "packages/worker": {
       "name": "@lobu/worker",
-      "version": "2.3.0",
+      "version": "3.0.5",
       "bin": {
         "lobu-worker": "./dist/index.js",
       },
