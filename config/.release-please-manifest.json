@@ -1,5 +1,7 @@
 {
   ".": "2.6.1",
   "packages/cli": "3.0.1",
+  "packages/core": "2.0.0",
+  "packages/gateway": "1.0.0",
   "packages/worker": "0.1.0"
 }

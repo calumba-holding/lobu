@@ -10,6 +10,16 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.js"
+    },
+    "./dist/connections": {
+      "types": "./dist/connections/index.d.ts",
+      "import": "./dist/connections/index.js",
+      "require": "./dist/connections/index.js"
+    },
+    "./dist/api": {
+      "types": "./dist/api/index.d.ts",
+      "import": "./dist/api/index.js",
+      "require": "./dist/api/index.js"
     }
   },
   "scripts": {
@@ -34,7 +44,7 @@
     "@scalar/hono-api-reference": "^0.9.39",
     "@sentry/node": "^10.19.0",
     "bullmq": "^5.31.5",
-    "chat": "^4",
+    "chat": "4.20.0",
     "commander": "^14.0.1",
     "cron-parser": "^5.5.0",
     "dockerode": "^4.0.7",

@@ -35,6 +35,7 @@
     "docker:build": "docker build -f docker/Dockerfile.gateway -t lobu-gateway . && docker build -f docker/Dockerfile.worker -t lobu-worker .",
     "k8s:deploy": "helm upgrade --install lobu charts/lobu --dependency-update",
     "k8s:uninstall": "helm uninstall lobu",
+    "stage:publish": "node scripts/stage-publish-package.mjs",
     "slack:manifest:print": "bun run scripts/slack-manifest.ts print",
     "slack:manifest:validate": "bun run scripts/slack-manifest.ts validate",
     "slack:manifest:update": "bun run scripts/slack-manifest.ts update"
@@ -50,5 +51,18 @@
   },
   "patchedDependencies": {
     "@chat-adapter/telegram@4.20.0": "patches/@chat-adapter%2Ftelegram@4.20.0.patch"
+  },
+  "pnpm": {
+    "packageExtensions": {
+      "chat": {
+        "exports": {
+          ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js",
+            "default": "./dist/index.js"
+          }
+        }
+      }
+    }
   }
 }

@@ -45,8 +45,9 @@ jobs:
       - name: Build packages
         if: ${{ steps.release.outputs.releases_created == 'true' }}
         run: |
-          # Build core first (dependency for both cli and worker)
+          # Build core first (dependency for gateway and worker)
           cd packages/core && bun run build
+          cd ../gateway && bun run build
           cd ../cli && bun run build
           cd ../worker && bun run build
 
@@ -56,6 +57,32 @@ jobs:
           echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
           npm whoami
 
+      - name: Stage @lobu/core
+        if: ${{ steps.release.outputs['packages/core--release_created'] }}
+        run: |
+          mkdir -p .publish/artifacts
+          node scripts/stage-publish-package.mjs packages/core .publish/core
+          npm pack --ignore-scripts .publish/core --pack-destination .publish/artifacts
+
+      - name: Publish @lobu/core to NPM
+        if: ${{ steps.release.outputs['packages/core--release_created'] }}
+        run: npm publish .publish/artifacts/lobu-core-*.tgz --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Stage @lobu/gateway
+        if: ${{ steps.release.outputs['packages/gateway--release_created'] }}
+        run: |
+          mkdir -p .publish/artifacts
+          node scripts/stage-publish-package.mjs packages/gateway .publish/gateway
+          npm pack --ignore-scripts .publish/gateway --pack-destination .publish/artifacts
+
+      - name: Publish @lobu/gateway to NPM
+        if: ${{ steps.release.outputs['packages/gateway--release_created'] }}
+        run: npm publish .publish/artifacts/lobu-gateway-*.tgz --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: Publish @lobu/cli to NPM
         if: ${{ steps.release.outputs['packages/cli--release_created'] }}
         working-directory: packages/cli
@@ -63,10 +90,16 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      - name: Stage @lobu/worker
+        if: ${{ steps.release.outputs['packages/worker--release_created'] }}
+        run: |
+          mkdir -p .publish/artifacts
+          node scripts/stage-publish-package.mjs packages/worker .publish/worker
+          npm pack --ignore-scripts .publish/worker --pack-destination .publish/artifacts
+
       - name: Publish @lobu/worker to NPM
         if: ${{ steps.release.outputs['packages/worker--release_created'] }}
-        working-directory: packages/worker
-        run: npm publish --access public
+        run: npm publish .publish/artifacts/lobu-worker-*.tgz --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 

@@ -5,7 +5,7 @@ import type {
   InstructionContext,
   WorkerTokenData,
 } from "@lobu/core";
-import { createLogger, verifyWorkerToken } from "@lobu/core";
+import { createLogger, encrypt, verifyWorkerToken } from "@lobu/core";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { stream } from "hono/streaming";
@@ -315,13 +315,22 @@ export class WorkerGateway {
         availableProjects: [],
       };
 
-      // Build settings URL for soul-empty fallback
-      const settingsUrl = new URL(
-        agentId
-          ? `/api/v1/agents/${encodeURIComponent(agentId)}/config`
-          : "/api/v1/agents",
-        baseUrl
+      // Build settings URL as a short-lived claim link so platform users
+      // can open it without a pre-existing browser session.
+      const CLAIM_TTL_MS = 10 * 60 * 1000; // 10 minutes
+      const claimToken = encrypt(
+        JSON.stringify({
+          userId,
+          platform: platform || "unknown",
+          agentId: agentId || undefined,
+          exp: Date.now() + CLAIM_TTL_MS,
+        })
       );
+      const settingsUrl = new URL("/connect/claim", baseUrl);
+      settingsUrl.searchParams.set("claim", claimToken);
+      if (agentId) {
+        settingsUrl.searchParams.set("agent", agentId);
+      }
 
       // Fetch MCP config and session context in parallel
       const [mcpConfig, contextData] = await Promise.all([

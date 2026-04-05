@@ -12,6 +12,7 @@ import {
 import {
   setSettingsSessionCookie,
   verifySettingsSession,
+  verifySettingsToken,
 } from "./settings-auth";
 
 const logger = createLogger("cli-auth-routes");
@@ -755,6 +756,41 @@ export function createConnectAuthRoutes(config: CliAuthRoutesConfig): Hono {
         500
       );
     }
+  });
+
+  /**
+   * Claim route — validates an encrypted claim token and establishes a
+   * settings session cookie, then redirects to the agent config page.
+   */
+  router.get("/connect/claim", async (c) => {
+    const claim = c.req.query("claim")?.trim();
+    const agentParam = c.req.query("agent")?.trim();
+    if (!claim) {
+      return c.html(
+        renderPage("Invalid Link", "Missing claim token.", "error"),
+        400
+      );
+    }
+
+    const payload = verifySettingsToken(claim);
+    if (!payload) {
+      return c.html(
+        renderPage(
+          "Link Expired",
+          "This settings link has expired or is invalid. Ask the bot to send a new one.",
+          "error"
+        ),
+        410
+      );
+    }
+
+    setSettingsSessionCookie(c, payload);
+
+    const targetAgentId = agentParam || payload.agentId;
+    const redirectUrl = targetAgentId
+      ? `/api/v1/agents/${encodeURIComponent(targetAgentId)}/config`
+      : "/api/v1/agents";
+    return c.redirect(redirectUrl);
   });
 
   router.get("/connect/oauth/callback", async (c) => {

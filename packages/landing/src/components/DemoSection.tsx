@@ -419,7 +419,7 @@ export function DemoSection() {
             />
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
               <ShipCard
-                title="Embed with TypeScript"
+                title="Embed in your app"
                 description="Mount Lobu inside Next.js, Express, Hono, Fastify, or any Node.js framework. Works anywhere that speaks Web Standard Request/Response."
                 code={embedSnippet}
                 href="/deployment/embedding/"

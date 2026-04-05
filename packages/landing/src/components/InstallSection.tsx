@@ -12,7 +12,7 @@ const localDev = {
 
 const embedWithTypescript = {
   id: "embed",
-  label: "Embed with TypeScript",
+  label: "Embed in your app",
   badges: ["Next.js", "Express", "Hono", "Fastify", "Bun", "Deno"],
   docsHref: "/deployment/embedding/",
   steps: [

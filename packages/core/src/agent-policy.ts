@@ -195,7 +195,7 @@ export function renderDetectedToolIntentRules(prompt: string): string {
 
 export function buildUnconfiguredAgentNotice(settingsUrl?: string): string {
   const settingsHint = settingsUrl
-    ? ` Admin configuration URL: ${settingsUrl}`
+    ? `\n\n[Open Agent Settings](${settingsUrl})`
     : "";
   return `## Agent Configuration Notice
 
