@@ -70,34 +70,6 @@ const runtimeLayer = {
   ],
 };
 
-export const infraBadges = [
-  {
-    label: "Kubernetes",
-    color: "bg-blue-900/40 text-blue-400 border-blue-800/50",
-  },
-  {
-    label: "Firecracker",
-    color: "bg-orange-900/40 text-orange-400 border-orange-800/50",
-  },
-  {
-    label: "gVisor",
-    color: "bg-green-900/40 text-green-400 border-green-800/50",
-  },
-  {
-    label: "just-bash",
-    color: "bg-yellow-900/40 text-yellow-400 border-yellow-800/50",
-  },
-  {
-    label: "OpenTelemetry",
-    color: "bg-purple-900/40 text-purple-400 border-purple-800/50",
-  },
-  {
-    label: "Kata Containers",
-    color: "bg-amber-900/40 text-amber-400 border-amber-800/50",
-  },
-  { label: "Nix", color: "bg-cyan-900/40 text-cyan-400 border-cyan-800/50" },
-];
-
 function Arrow() {
   return (
     <svg

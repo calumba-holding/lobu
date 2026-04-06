@@ -1,4 +1,4 @@
-import { ArchitectureDiagram, infraBadges } from "./ArchitectureDiagram";
+import { ArchitectureDiagram } from "./ArchitectureDiagram";
 
 export function ArchitectureSection() {
   return (
@@ -17,19 +17,6 @@ export function ArchitectureSection() {
           Security-first. Zero trust by default. Every agent runs in an isolated
           sandbox with no direct network access.
         </p>
-
-        {/* Infra badges */}
-        <div class="flex flex-wrap justify-center gap-2 mb-12">
-          {infraBadges.map((badge) => (
-            <span
-              key={badge.label}
-              class={`text-[10px] font-medium px-2.5 py-1 rounded-full border ${badge.color}`}
-            >
-              {badge.label}
-            </span>
-          ))}
-        </div>
-
         {/* Layer diagram */}
         <ArchitectureDiagram />
       </div>
