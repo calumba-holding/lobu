@@ -1,7 +1,7 @@
 {
-  ".": "3.0.6",
-  "packages/cli": "3.0.6",
-  "packages/core": "3.0.6",
-  "packages/gateway": "3.0.6",
-  "packages/worker": "3.0.6"
+  ".": "3.0.7",
+  "packages/cli": "3.0.7",
+  "packages/core": "3.0.7",
+  "packages/gateway": "3.0.7",
+  "packages/worker": "3.0.7"
 }
