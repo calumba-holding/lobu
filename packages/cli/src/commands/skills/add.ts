@@ -13,7 +13,7 @@ export async function skillsAddCommand(
   if (!skill) {
     console.log(chalk.red(`\n  Skill "${skillId}" not found.`));
     console.log(
-      chalk.dim("  Run `lobu skills list` to see available skills.\n")
+      chalk.dim("  Run `npx @lobu/cli skills list` to see available skills.\n")
     );
     return;
   }
@@ -76,7 +76,9 @@ export async function skillsAddCommand(
     if (envVars.length > 0) {
       console.log(chalk.dim("\n  Required secrets:"));
       for (const v of envVars) {
-        console.log(chalk.cyan(`    lobu secrets set ${v} <your-key>`));
+        console.log(
+          chalk.cyan(`    npx @lobu/cli secrets set ${v} <your-key>`)
+        );
       }
     }
   }

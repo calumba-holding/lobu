@@ -15,7 +15,9 @@ export async function providersAddCommand(
   if (!skill || !isProviderSkill(skill)) {
     console.log(chalk.red(`\n  Provider "${providerId}" not found.`));
     console.log(
-      chalk.dim("  Run `lobu providers list` to see available providers.\n")
+      chalk.dim(
+        "  Run `npx @lobu/cli providers list` to see available providers.\n"
+      )
     );
     return;
   }
@@ -92,7 +94,9 @@ export async function providersAddCommand(
 
   if (!apiKey) {
     console.log(chalk.dim("\n  Set the API key:"));
-    console.log(chalk.cyan(`    lobu secrets set ${envVar} <your-key>`));
+    console.log(
+      chalk.cyan(`    npx @lobu/cli secrets set ${envVar} <your-key>`)
+    );
   }
   console.log();
 }

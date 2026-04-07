@@ -553,7 +553,7 @@ export async function initCommand(
       console.log(chalk.dim(`     ${displayUrl}\n`));
     }
     console.log(chalk.cyan("  3. Start the services:"));
-    console.log(chalk.dim("     lobu run -d\n"));
+    console.log(chalk.dim("     npx @lobu/cli run -d\n"));
     if (includeOwlettoLocal) {
       console.log(chalk.cyan("  4. Set up Owletto (first run):"));
       console.log(

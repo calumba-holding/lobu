@@ -743,7 +743,7 @@ export function SkillsSection() {
                 class="text-[11px] px-2 py-1 rounded"
                 style={{ backgroundColor: "var(--color-page-surface-dim)" }}
               >
-                lobu run
+                npx @lobu/cli run
               </code>
               <span>Run locally</span>
             </div>

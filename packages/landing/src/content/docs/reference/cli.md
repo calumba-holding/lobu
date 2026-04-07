@@ -20,7 +20,7 @@ lobu <command>
 
 ## Commands
 
-### `lobu init [name]`
+### `init [name]`
 
 Scaffold a new agent project with `lobu.toml`, Docker Compose, and environment config.
 
@@ -42,36 +42,36 @@ Interactive prompts guide you through deployment mode, provider, skills, platfor
 
 ---
 
-### `lobu run`
+### `run`
 
 Run the agent stack. Validates `lobu.toml`, prepares environment variables, then starts `docker compose up`. Extra flags are forwarded to Docker Compose.
 
 ```bash
-lobu run -d          # detached mode
-lobu run -d --build  # rebuild containers
+npx @lobu/cli run -d          # detached mode
+npx @lobu/cli run -d --build  # rebuild containers
 ```
 
 ---
 
-### `lobu validate`
+### `validate`
 
 Validate `lobu.toml` schema, skill IDs, and provider configuration.
 
 ```bash
-lobu validate
+npx @lobu/cli validate
 ```
 
 Returns exit code `1` if validation fails.
 
 ---
 
-### `lobu login`
+### `login`
 
 Authenticate with a remote Lobu gateway. Opens a browser for OAuth by default.
 
 ```bash
-lobu login
-lobu login --token <api-token>   # CI/CD
+npx @lobu/cli login
+npx @lobu/cli login --token <api-token>   # CI/CD
 ```
 
 Options:
@@ -82,44 +82,44 @@ Options:
 
 ---
 
-### `lobu logout`
+### `logout`
 
 Clear stored credentials.
 
 ```bash
-lobu logout
+npx @lobu/cli logout
 ```
 
 ---
 
-### `lobu whoami`
+### `whoami`
 
 Show the current authenticated user and linked agent.
 
 ```bash
-lobu whoami
+npx @lobu/cli whoami
 ```
 
 ---
 
-### `lobu status`
+### `status`
 
 Show agent health and version info.
 
 ```bash
-lobu status
+npx @lobu/cli status
 ```
 
 ---
 
-### `lobu secrets`
+### `secrets`
 
 Manage agent secrets (stored in `.env` for local dev).
 
 ```bash
-lobu secrets set OPENAI_API_KEY sk-...
-lobu secrets list
-lobu secrets delete OPENAI_API_KEY
+npx @lobu/cli secrets set OPENAI_API_KEY sk-...
+npx @lobu/cli secrets list
+npx @lobu/cli secrets delete OPENAI_API_KEY
 ```
 
 | Subcommand | Description |
@@ -130,15 +130,15 @@ lobu secrets delete OPENAI_API_KEY
 
 ---
 
-### `lobu skills`
+### `skills`
 
 Browse and manage skills from the registry.
 
 ```bash
-lobu skills list                # browse all skills
-lobu skills search "calendar"   # search by name or description
-lobu skills info google-workspace  # show details and required secrets
-lobu skills add google-workspace   # add to lobu.toml
+npx @lobu/cli skills list                # browse all skills
+npx @lobu/cli skills search "calendar"   # search by name or description
+npx @lobu/cli skills info google-workspace  # show details and required secrets
+npx @lobu/cli skills add google-workspace   # add to lobu.toml
 ```
 
 | Subcommand | Description |
@@ -150,13 +150,13 @@ lobu skills add google-workspace   # add to lobu.toml
 
 ---
 
-### `lobu providers`
+### `providers`
 
 Browse and manage LLM providers.
 
 ```bash
-lobu providers list       # browse available providers
-lobu providers add gemini  # add to lobu.toml
+npx @lobu/cli providers list       # browse available providers
+npx @lobu/cli providers add gemini  # add to lobu.toml
 ```
 
 | Subcommand | Description |
@@ -172,13 +172,13 @@ npx @lobu/cli init my-agent
 
 # 2. Configure
 cd my-agent
-lobu skills add google-workspace
-lobu providers add gemini
-lobu secrets set GEMINI_API_KEY ...
+npx @lobu/cli skills add google-workspace
+npx @lobu/cli providers add gemini
+npx @lobu/cli secrets set GEMINI_API_KEY ...
 
 # 3. Validate
-lobu validate
+npx @lobu/cli validate
 
 # 4. Run locally
-lobu run -d
+npx @lobu/cli run -d
 ```

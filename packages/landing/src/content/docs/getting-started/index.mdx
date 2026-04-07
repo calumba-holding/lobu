@@ -36,28 +36,28 @@ Lobu supports two configuration approaches depending on how you deploy:
 
 ### File-based (CLI / Docker)
 
-After `lobu init`, your project is configured through `lobu.toml`. Use the CLI to add providers and skills at any time:
+After `init`, your project is configured through `lobu.toml`. Use the CLI to add providers and skills at any time:
 
 ```bash
 # Browse and add providers
-lobu providers list
-lobu providers add gemini          # prompts for API key, updates lobu.toml + .env
+npx @lobu/cli providers list
+npx @lobu/cli providers add gemini          # prompts for API key, updates lobu.toml + .env
 
 # Browse and add skills
-lobu skills list
-lobu skills add github
-lobu skills add linear
+npx @lobu/cli skills list
+npx @lobu/cli skills add github
+npx @lobu/cli skills add linear
 
 # Manage secrets
-lobu secrets set GEMINI_API_KEY AIza...
-lobu secrets list
+npx @lobu/cli secrets set GEMINI_API_KEY AIza...
+npx @lobu/cli secrets list
 
 # Validate and run
-lobu validate
-lobu run -d
+npx @lobu/cli validate
+npx @lobu/cli run -d
 ```
 
-Changes to `lobu.toml` take effect on next `lobu run` restart.
+Changes to `lobu.toml` take effect on next restart.
 
 ### Embedded (library)
 

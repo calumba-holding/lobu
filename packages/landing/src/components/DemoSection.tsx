@@ -71,7 +71,7 @@ const initLines: TermLine[] = [
   { text: "", color: "" },
   { text: "Next steps:", color: "#facc15" },
   { text: "  cd landing-demo-agent", color: "#67e8f9" },
-  { text: "  lobu run -d", color: "#67e8f9" },
+  { text: "  npx @lobu/cli run -d", color: "#67e8f9" },
 ];
 
 const agentPrompt = [
@@ -82,7 +82,7 @@ const agentPrompt = [
   "2. Help me shape the agent behavior by editing those files directly.",
   "3. Use Lobu skills when they make sense: https://lobu.ai/getting-started/skills/",
   "4. Suggest any provider, skill, or connection changes needed in lobu.toml.",
-  "5. Keep the project runnable with `lobu run -d`.",
+  "5. Keep the project runnable with `npx @lobu/cli run -d`.",
   "",
   "Explain what you change and why.",
 ].join("\n");
@@ -107,7 +107,7 @@ const embedSnippet = [
 
 const selfHostSnippet = [
   "$ cd landing-demo-agent",
-  "$ lobu run -d",
+  "$ npx @lobu/cli run -d",
   "# iterate locally",
   "",
   "$ docker compose up -d",

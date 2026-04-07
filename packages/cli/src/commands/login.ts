@@ -134,7 +134,9 @@ export async function loginCommand(options: {
           `\n  Already logged in to ${target.name} as ${existing.email ?? "user"}.`
         )
       );
-      console.log(chalk.dim("  Run `lobu logout` first to switch accounts.\n"));
+      console.log(
+        chalk.dim("  Run `npx @lobu/cli logout` first to switch accounts.\n")
+      );
       return;
     }
 
@@ -177,7 +179,9 @@ export async function loginCommand(options: {
           `\n  Already logged in to ${target.name} as ${existing.email ?? existing.name ?? "user"}.`
         )
       );
-      console.log(chalk.dim("  Run `lobu logout` first to switch accounts.\n"));
+      console.log(
+        chalk.dim("  Run `npx @lobu/cli logout` first to switch accounts.\n")
+      );
       return;
     }
 
@@ -261,7 +265,9 @@ export async function loginCommand(options: {
         `\n  Already logged in to ${target.name} as ${existing.email ?? "user"}.`
       )
     );
-    console.log(chalk.dim("  Run `lobu logout` first to switch accounts.\n"));
+    console.log(
+      chalk.dim("  Run `npx @lobu/cli logout` first to switch accounts.\n")
+    );
     return;
   }
 
@@ -432,7 +438,7 @@ export async function loginCommand(options: {
     }
   }
 
-  spinner.fail("Login request expired. Run `lobu login` again.");
+  spinner.fail("Login request expired. Run `npx @lobu/cli login` again.");
   console.log();
 }
 
