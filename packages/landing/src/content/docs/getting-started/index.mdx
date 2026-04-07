@@ -28,9 +28,66 @@ npx @lobu/cli init my-agent
 cd my-agent && npx @lobu/cli run -d
 ```
 
-See the [CLI Reference](/reference/cli/) for all available commands.
+The `init` wizard walks you through deployment mode, AI provider, skills, messaging platform, and memory configuration. All choices are saved to `lobu.toml` and `.env`.
 
-After deployment, connect your messaging platforms ([Slack](/platforms/slack/), [Discord](/platforms/discord/), [Teams](/platforms/teams/), [Google Chat](/platforms/google-chat/), [WhatsApp](/platforms/whatsapp/), [Telegram](/platforms/telegram/)) via the admin page or the connections API — no platform-specific env vars needed.
+## Configuration
+
+Lobu supports two configuration approaches depending on how you deploy:
+
+### File-based (CLI / Docker)
+
+After `lobu init`, your project is configured through `lobu.toml`. Use the CLI to add providers and skills at any time:
+
+```bash
+# Browse and add providers
+lobu providers list
+lobu providers add gemini          # prompts for API key, updates lobu.toml + .env
+
+# Browse and add skills
+lobu skills list
+lobu skills add github
+lobu skills add linear
+
+# Manage secrets
+lobu secrets set GEMINI_API_KEY AIza...
+lobu secrets list
+
+# Validate and run
+lobu validate
+lobu run -d
+```
+
+Changes to `lobu.toml` take effect on next `lobu run` restart.
+
+### Embedded (library)
+
+When using `@lobu/gateway` as a library, configure agents in code:
+
+```typescript
+import { Lobu } from "@lobu/gateway";
+
+const lobu = new Lobu({
+  redis: process.env.REDIS_URL!,
+  agents: [{
+    id: "support",
+    providers: [{ id: "openai", key: process.env.OPENAI_API_KEY! }],
+    skills: ["github"],
+  }],
+});
+await lobu.start();
+```
+
+See [Embed in Your App](/deployment/embedding/) for framework-specific examples.
+
+### Admin UI & REST API
+
+Both modes expose an admin page at `/agents` and a REST API at `/api/docs` for runtime management — adding providers, connections, and viewing agent status.
+
+## Connect messaging platforms
+
+After deployment, connect [Slack](/platforms/slack/), [Discord](/platforms/discord/), [Teams](/platforms/teams/), [Google Chat](/platforms/google-chat/), [WhatsApp](/platforms/whatsapp/), or [Telegram](/platforms/telegram/) via the admin page or the connections API — no platform-specific env vars needed.
+
+See the [CLI Reference](/reference/cli/) for all available commands.
 
 ## Managed (Community)
 
