@@ -3,7 +3,7 @@ title: Microsoft Teams
 description: Connect a Lobu agent to Microsoft Teams as a bot.
 ---
 
-Lobu connects to Microsoft Teams through the [Chat SDK](https://github.com/nicepkg/chat) Teams adapter, using Azure Bot Framework under the hood.
+Lobu connects to Microsoft Teams through the [Chat SDK](https://github.com/vercel/chat) Teams adapter, using Azure Bot Framework under the hood.
 
 ## Setup
 

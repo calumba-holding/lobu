@@ -30,12 +30,13 @@ npx @lobu/cli init my-agent
 
 Generates:
 
-- `lobu.toml` — agent configuration (skills, providers, identity)
-- `docker-compose.yml` — service definitions (gateway, Redis, worker)
+- `lobu.toml` — agent configuration (skills, providers, connections, network)
+- `docker-compose.yml` — service definitions (gateway, Redis, optional Owletto)
 - `.env` — credentials and environment variables
-- `Dockerfile.worker` — worker image customization
-- `IDENTITY.md` — agent identity prompt
-- `.gitignore`, `README.md`
+- `agents/{name}/` — agent directory with `IDENTITY.md`, `SOUL.md`, `USER.md`, and `skills/`
+- `skills/` — shared skills directory (available to all agents)
+- `AGENTS.md`, `TESTING.md`, `README.md`, `.gitignore`
+- `Dockerfile.worker` — worker image customization (Docker mode only)
 
 Interactive prompts guide you through deployment mode, provider, skills, platform, and memory configuration.
 
