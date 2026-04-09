@@ -10,6 +10,8 @@ export interface DeviceCodeClientConfig {
   tokenUrl: string;
   deviceAuthorizationUrl: string;
   scope: string;
+  /** RFC 8707 resource indicator included in token requests. */
+  resource?: string;
   tokenEndpointAuthMethod?:
     | "none"
     | "client_secret_post"
@@ -68,10 +70,14 @@ export class GenericDeviceCodeClient extends BaseOAuth2Client {
   }
 
   async requestDeviceCode(): Promise<DeviceAuthorizationStartResult> {
-    const { headers, body } = this.buildAuthenticatedFormBody({
+    const params: Record<string, string> = {
       client_id: this.config.clientId,
       scope: this.config.scope,
-    });
+    };
+    if (this.config.resource) {
+      params.resource = this.config.resource;
+    }
+    const { headers, body } = this.buildAuthenticatedFormBody(params);
 
     const response = await fetch(this.config.deviceAuthorizationUrl, {
       method: "POST",
@@ -103,11 +109,15 @@ export class GenericDeviceCodeClient extends BaseOAuth2Client {
     deviceAuthId: string,
     intervalSeconds?: number
   ): Promise<DeviceAuthorizationPollResult> {
-    const { headers, body } = this.buildAuthenticatedFormBody({
+    const params: Record<string, string> = {
       grant_type: DEVICE_CODE_GRANT_TYPE,
       device_code: deviceAuthId,
       client_id: this.config.clientId,
-    });
+    };
+    if (this.config.resource) {
+      params.resource = this.config.resource;
+    }
+    const { headers, body } = this.buildAuthenticatedFormBody(params);
 
     const response = await fetch(this.config.tokenUrl, {
       method: "POST",

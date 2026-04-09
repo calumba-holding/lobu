@@ -1,4 +1,9 @@
-import { createLogger, decrypt, encrypt } from "@lobu/core";
+import {
+  type McpOAuthConfig,
+  createLogger,
+  decrypt,
+  encrypt,
+} from "@lobu/core";
 import { Hono } from "hono";
 import type Redis from "ioredis";
 import { GenericDeviceCodeClient } from "../../auth/external/device-code-client";
@@ -18,6 +23,8 @@ interface StoredCredential {
   clientId: string;
   clientSecret?: string;
   tokenUrl: string;
+  /** RFC 8707 resource indicator, included in refresh requests. */
+  resource?: string;
 }
 
 interface StoredDeviceAuth {
@@ -29,6 +36,12 @@ interface StoredDeviceAuth {
   expiresAt: number;
   tokenUrl: string;
   issuer: string;
+  /** Stored so poll/complete can reconstruct the client without re-deriving. */
+  deviceAuthorizationUrl?: string;
+  /** RFC 8707 resource indicator. */
+  resource?: string;
+  /** Custom scopes from oauth config. */
+  scope?: string;
 }
 
 interface StoredClient {
@@ -39,6 +52,17 @@ interface StoredClient {
 export interface DeviceAuthConfig {
   redis: Redis;
   mcpConfigService: McpConfigService;
+}
+
+interface ResolvedOAuthEndpoints {
+  registrationUrl: string;
+  deviceAuthorizationUrl: string;
+  tokenUrl: string;
+  verificationUri: string;
+  scope: string;
+  clientId?: string;
+  clientSecret?: string;
+  resource?: string;
 }
 
 function credentialKey(agentId: string, userId: string, mcpId: string): string {
@@ -59,6 +83,36 @@ function refreshLockKey(
   mcpId: string
 ): string {
   return `auth:refresh-lock:${agentId}:${userId}:${mcpId}`;
+}
+
+function deriveOAuthBaseUrl(upstreamUrl: string): string {
+  const url = new URL(upstreamUrl);
+  url.pathname = "/";
+  url.search = "";
+  url.hash = "";
+  return url.toString().replace(/\/$/, "");
+}
+
+/**
+ * Resolve OAuth endpoints from explicit config, falling back to
+ * auto-derived endpoints from the MCP server's URL origin.
+ */
+function resolveOAuthEndpoints(
+  upstreamUrl: string,
+  oauth?: McpOAuthConfig
+): ResolvedOAuthEndpoints {
+  const issuer = deriveOAuthBaseUrl(upstreamUrl);
+  return {
+    registrationUrl: oauth?.registrationUrl ?? `${issuer}/oauth/register`,
+    deviceAuthorizationUrl:
+      oauth?.deviceAuthorizationUrl ?? `${issuer}/oauth/device_authorization`,
+    tokenUrl: oauth?.tokenUrl ?? `${issuer}/oauth/token`,
+    verificationUri: oauth?.authUrl ?? `${issuer}/oauth/device`,
+    scope: oauth?.scopes?.join(" ") || DEFAULT_MCP_SCOPE,
+    clientId: oauth?.clientId,
+    clientSecret: oauth?.clientSecret,
+    resource: oauth?.resource,
+  };
 }
 
 export async function getStoredCredential(
@@ -120,6 +174,9 @@ export async function refreshCredential(
     if (credential.clientSecret) {
       body.client_secret = credential.clientSecret;
     }
+    if (credential.resource) {
+      body.resource = credential.resource;
+    }
 
     const response = await fetch(credential.tokenUrl, {
       method: "POST",
@@ -156,6 +213,7 @@ export async function refreshCredential(
       clientId: credential.clientId,
       clientSecret: credential.clientSecret,
       tokenUrl: credential.tokenUrl,
+      resource: credential.resource,
     };
 
     await storeCredential(redis, agentId, userId, mcpId, refreshed);
@@ -201,8 +259,11 @@ export async function tryCompletePendingDeviceAuth(
       clientId: deviceState.clientId,
       clientSecret: deviceState.clientSecret,
       tokenUrl: deviceState.tokenUrl,
-      deviceAuthorizationUrl: `${deviceState.issuer}/oauth/device_authorization`,
-      scope: DEFAULT_MCP_SCOPE,
+      deviceAuthorizationUrl:
+        deviceState.deviceAuthorizationUrl ??
+        `${deviceState.issuer}/oauth/device_authorization`,
+      scope: deviceState.scope ?? DEFAULT_MCP_SCOPE,
+      resource: deviceState.resource,
       tokenEndpointAuthMethod: deviceState.clientSecret
         ? "client_secret_post"
         : "none",
@@ -231,6 +292,7 @@ export async function tryCompletePendingDeviceAuth(
       clientId: deviceState.clientId,
       clientSecret: deviceState.clientSecret,
       tokenUrl: deviceState.tokenUrl,
+      resource: deviceState.resource,
     };
 
     await storeCredential(redis, agentId, userId, mcpId, storedCred);
@@ -251,17 +313,12 @@ export async function tryCompletePendingDeviceAuth(
   }
 }
 
-function deriveOAuthBaseUrl(upstreamUrl: string): string {
-  const url = new URL(upstreamUrl);
-  url.pathname = "/";
-  url.search = "";
-  url.hash = "";
-  return url.toString().replace(/\/$/, "");
-}
-
 /**
  * Start device-code auth flow for a given MCP server.
  * Reusable by the MCP proxy to auto-initiate auth on "unauthorized" errors.
+ *
+ * When the MCP server's oauth config provides a clientId, dynamic client
+ * registration is skipped entirely.
  */
 export async function startDeviceAuth(
   redis: Redis,
@@ -269,7 +326,7 @@ export async function startDeviceAuth(
     getHttpServer: (
       id: string,
       agentId?: string
-    ) => Promise<{ upstreamUrl: string } | undefined>;
+    ) => Promise<{ upstreamUrl: string; oauth?: McpOAuthConfig } | undefined>;
   },
   mcpId: string,
   agentId: string,
@@ -290,7 +347,11 @@ export async function startDeviceAuth(
         const issuer = httpServer
           ? deriveOAuthBaseUrl(httpServer.upstreamUrl)
           : existing.issuer;
-        const verificationUri = `${issuer}/oauth/device`;
+        const endpoints = httpServer
+          ? resolveOAuthEndpoints(httpServer.upstreamUrl, httpServer.oauth)
+          : null;
+        const verificationUri =
+          endpoints?.verificationUri ?? `${issuer}/oauth/device`;
         logger.info("Reusing existing pending device auth", {
           mcpId,
           agentId,
@@ -316,53 +377,71 @@ export async function startDeviceAuth(
     return null;
   }
 
-  const issuer = deriveOAuthBaseUrl(httpServer.upstreamUrl);
+  const endpoints = resolveOAuthEndpoints(
+    httpServer.upstreamUrl,
+    httpServer.oauth
+  );
 
-  // Check cached client registration
+  // Resolve client: use explicit config clientId, or cached registration, or register new
   let client: StoredClient | null = null;
-  const cachedClient = await redis.get(clientCacheKey(mcpId));
-  if (cachedClient) {
-    try {
-      client = JSON.parse(cachedClient) as StoredClient;
-    } catch {
-      client = null;
-    }
-  }
 
-  // Register a new client if needed
-  if (!client) {
-    const regResponse = await fetch(`${issuer}/oauth/register`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        grant_types: [DEVICE_CODE_GRANT_TYPE, "refresh_token"],
-        token_endpoint_auth_method: "none",
-        client_name: "Lobu Gateway Device Auth",
-        scope: DEFAULT_MCP_SCOPE,
-      }),
-    });
-
-    if (!regResponse.ok) return null;
-
-    const registration = (await regResponse.json()) as {
-      client_id: string;
-      client_secret?: string;
-    };
-
+  if (endpoints.clientId) {
+    // Config provides a pre-registered client — skip dynamic registration
     client = {
-      clientId: registration.client_id,
-      clientSecret: registration.client_secret,
+      clientId: endpoints.clientId,
+      clientSecret: endpoints.clientSecret,
     };
+    logger.info("Using pre-registered OAuth client from config", {
+      mcpId,
+      clientId: endpoints.clientId,
+    });
+  } else {
+    // Check cached client registration
+    const cachedClient = await redis.get(clientCacheKey(mcpId));
+    if (cachedClient) {
+      try {
+        client = JSON.parse(cachedClient) as StoredClient;
+      } catch {
+        client = null;
+      }
+    }
 
-    await redis.set(clientCacheKey(mcpId), JSON.stringify(client));
+    // Register a new client if needed
+    if (!client) {
+      const regResponse = await fetch(endpoints.registrationUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          grant_types: [DEVICE_CODE_GRANT_TYPE, "refresh_token"],
+          token_endpoint_auth_method: "none",
+          client_name: "Lobu Gateway Device Auth",
+          scope: endpoints.scope,
+        }),
+      });
+
+      if (!regResponse.ok) return null;
+
+      const registration = (await regResponse.json()) as {
+        client_id: string;
+        client_secret?: string;
+      };
+
+      client = {
+        clientId: registration.client_id,
+        clientSecret: registration.client_secret,
+      };
+
+      await redis.set(clientCacheKey(mcpId), JSON.stringify(client));
+    }
   }
 
   const deviceCodeClient = new GenericDeviceCodeClient({
     clientId: client.clientId,
     clientSecret: client.clientSecret,
-    tokenUrl: `${issuer}/oauth/token`,
-    deviceAuthorizationUrl: `${issuer}/oauth/device_authorization`,
-    scope: DEFAULT_MCP_SCOPE,
+    tokenUrl: endpoints.tokenUrl,
+    deviceAuthorizationUrl: endpoints.deviceAuthorizationUrl,
+    scope: endpoints.scope,
+    resource: endpoints.resource,
     tokenEndpointAuthMethod: client.clientSecret
       ? "client_secret_post"
       : "none",
@@ -377,8 +456,11 @@ export async function startDeviceAuth(
     clientSecret: client.clientSecret,
     interval: started.interval,
     expiresAt: Date.now() + started.expiresIn * 1000,
-    tokenUrl: `${issuer}/oauth/token`,
-    issuer,
+    tokenUrl: endpoints.tokenUrl,
+    issuer: deriveOAuthBaseUrl(httpServer.upstreamUrl),
+    deviceAuthorizationUrl: endpoints.deviceAuthorizationUrl,
+    resource: endpoints.resource,
+    scope: endpoints.scope,
   };
 
   await redis.set(
@@ -483,8 +565,11 @@ export function createDeviceAuthRoutes(
         clientId: deviceState.clientId,
         clientSecret: deviceState.clientSecret,
         tokenUrl: deviceState.tokenUrl,
-        deviceAuthorizationUrl: `${deviceState.issuer}/oauth/device_authorization`,
-        scope: DEFAULT_MCP_SCOPE,
+        deviceAuthorizationUrl:
+          deviceState.deviceAuthorizationUrl ??
+          `${deviceState.issuer}/oauth/device_authorization`,
+        scope: deviceState.scope ?? DEFAULT_MCP_SCOPE,
+        resource: deviceState.resource,
         tokenEndpointAuthMethod: deviceState.clientSecret
           ? "client_secret_post"
           : "none",
@@ -530,6 +615,7 @@ export function createDeviceAuthRoutes(
         clientId: deviceState.clientId,
         clientSecret: deviceState.clientSecret,
         tokenUrl: deviceState.tokenUrl,
+        resource: deviceState.resource,
       };
 
       await storeCredential(redis, agentId, userId, mcpId, storedCred);

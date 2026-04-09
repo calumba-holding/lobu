@@ -43,7 +43,6 @@ export class SystemConfigResolver {
           config.args = [...mcp.args];
         }
         if (mcp.oauth) config.oauth = mcp.oauth;
-        if (mcp.resource) config.resource = mcp.resource;
         if (mcp.inputs) config.inputs = mcp.inputs;
         if (mcp.headers) config.headers = mcp.headers;
 

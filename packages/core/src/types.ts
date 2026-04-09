@@ -91,6 +91,25 @@ export type ThinkingLevel = "off" | "low" | "medium" | "high";
 /**
  * MCP server declared by a skill manifest.
  */
+export interface McpOAuthConfig {
+  /** Authorization endpoint (user verification page for device-code flow). */
+  authUrl?: string;
+  /** Token endpoint. Falls back to `{origin}/oauth/token`. */
+  tokenUrl?: string;
+  /** Pre-registered client ID. When provided, dynamic client registration is skipped. */
+  clientId?: string;
+  /** Client secret for confidential clients. */
+  clientSecret?: string;
+  /** OAuth scopes. Falls back to `mcp:read mcp:write profile:read`. */
+  scopes?: string[];
+  /** Device authorization endpoint. Falls back to `{origin}/oauth/device_authorization`. */
+  deviceAuthorizationUrl?: string;
+  /** Dynamic client registration endpoint. Falls back to `{origin}/oauth/register`. */
+  registrationUrl?: string;
+  /** RFC 8707 resource indicator included in token requests. */
+  resource?: string;
+}
+
 export interface SkillMcpServer {
   id: string;
   name?: string;
@@ -98,16 +117,7 @@ export interface SkillMcpServer {
   type?: "sse" | "stdio";
   command?: string;
   args?: string[];
-  oauth?: {
-    authUrl: string;
-    tokenUrl: string;
-    clientId: string;
-    clientSecret?: string;
-    scopes?: string[];
-    grantType?: string;
-    responseType?: string;
-  };
-  resource?: string;
+  oauth?: McpOAuthConfig;
   inputs?: Array<{ id: string; label?: string; type?: string }>;
   headers?: Record<string, string>;
 }

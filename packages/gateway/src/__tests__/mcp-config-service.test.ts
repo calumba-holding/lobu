@@ -256,7 +256,7 @@ describe("McpConfigService", () => {
       "login-mcp": {
         url: "https://login.example.com/mcp",
         type: "sse",
-        loginUrl: "https://login.example.com/auth",
+        loginUrl: "https://login.example.com/auth", // backward compat: loginUrl → oauth: {}
       },
       "input-mcp": {
         url: "https://input.example.com/mcp",

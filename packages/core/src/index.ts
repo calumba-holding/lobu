@@ -86,6 +86,7 @@ export type {
   RegistryEntry,
   SessionContext,
   SkillConfig,
+  McpOAuthConfig,
   SkillMcpServer,
   SkillsConfig,
   SuggestedPrompt,

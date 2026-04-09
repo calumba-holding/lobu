@@ -1,4 +1,8 @@
-import { createLogger, verifyWorkerToken } from "@lobu/core";
+import {
+  type McpOAuthConfig,
+  createLogger,
+  verifyWorkerToken,
+} from "@lobu/core";
 import type { SystemConfigResolver } from "../../services/system-config-resolver";
 import type { AgentSettingsStore } from "../settings/agent-settings-store";
 
@@ -10,14 +14,12 @@ interface McpInput {
   description: string;
 }
 
-interface HttpMcpServerConfig {
+export interface HttpMcpServerConfig {
   id: string;
   upstreamUrl: string;
-  oauth?: unknown;
+  oauth?: McpOAuthConfig;
   inputs?: McpInput[];
   headers?: Record<string, string>;
-  loginUrl?: string;
-  resource?: string;
 }
 
 interface WorkerMcpConfig {
@@ -182,9 +184,7 @@ export class McpConfigService {
     const statuses: McpStatus[] = [];
 
     for (const [id, httpServer] of httpServers) {
-      const hasOAuth = !!httpServer.oauth;
-      const hasLoginUrl = !!httpServer.loginUrl;
-      const requiresAuth = hasOAuth || hasLoginUrl;
+      const requiresAuth = !!httpServer.oauth;
       const requiresInput = !!(
         httpServer.inputs && httpServer.inputs.length > 0
       );
@@ -280,6 +280,45 @@ export class McpConfigService {
   }
 }
 
+/**
+ * Parse and validate an oauth config from raw MCP server config.
+ * Handles backward compat: migrates top-level `resource` into `oauth.resource`,
+ * and treats `loginUrl` presence as `oauth: {}` (requiresAuth flag).
+ */
+function parseOAuthConfig(raw: any): McpOAuthConfig | undefined {
+  const hasLoginUrl = typeof raw.loginUrl === "string";
+  const hasOAuth = raw.oauth && typeof raw.oauth === "object";
+
+  if (!hasOAuth && !hasLoginUrl && typeof raw.resource !== "string") {
+    return undefined;
+  }
+
+  const config: McpOAuthConfig = {};
+
+  if (hasOAuth) {
+    const obj = raw.oauth;
+    if (typeof obj.authUrl === "string") config.authUrl = obj.authUrl;
+    if (typeof obj.tokenUrl === "string") config.tokenUrl = obj.tokenUrl;
+    if (typeof obj.clientId === "string") config.clientId = obj.clientId;
+    if (typeof obj.clientSecret === "string")
+      config.clientSecret = obj.clientSecret;
+    if (Array.isArray(obj.scopes))
+      config.scopes = obj.scopes.filter((s: unknown) => typeof s === "string");
+    if (typeof obj.deviceAuthorizationUrl === "string")
+      config.deviceAuthorizationUrl = obj.deviceAuthorizationUrl;
+    if (typeof obj.registrationUrl === "string")
+      config.registrationUrl = obj.registrationUrl;
+    if (typeof obj.resource === "string") config.resource = obj.resource;
+  }
+
+  // Migrate top-level resource into oauth.resource (backward compat)
+  if (typeof raw.resource === "string" && !config.resource) {
+    config.resource = raw.resource;
+  }
+
+  return config;
+}
+
 function normalizeConfig(config: { mcpServers: Record<string, any> }) {
   const rawServers: Record<string, any> = {};
   const httpServers = new Map<string, HttpMcpServerConfig>();
@@ -296,10 +335,7 @@ function normalizeConfig(config: { mcpServers: Record<string, any> }) {
       httpServers.set(id, {
         id,
         upstreamUrl: cloned.url,
-        oauth:
-          cloned.oauth && typeof cloned.oauth === "object"
-            ? cloned.oauth
-            : undefined,
+        oauth: parseOAuthConfig(cloned),
         inputs: Array.isArray(cloned.inputs)
           ? cloned.inputs.filter(
               (input: any) =>
@@ -312,10 +348,6 @@ function normalizeConfig(config: { mcpServers: Record<string, any> }) {
           cloned.headers && typeof cloned.headers === "object"
             ? cloned.headers
             : undefined,
-        loginUrl:
-          typeof cloned.loginUrl === "string" ? cloned.loginUrl : undefined,
-        resource:
-          typeof cloned.resource === "string" ? cloned.resource : undefined,
       });
     }
   }
@@ -343,10 +375,7 @@ function toHttpServerConfig(
   return {
     id,
     upstreamUrl: cloned.url,
-    oauth:
-      cloned.oauth && typeof cloned.oauth === "object"
-        ? cloned.oauth
-        : undefined,
+    oauth: parseOAuthConfig(cloned),
     inputs: Array.isArray(cloned.inputs)
       ? cloned.inputs.filter(
           (input: any) =>
@@ -357,7 +386,6 @@ function toHttpServerConfig(
       cloned.headers && typeof cloned.headers === "object"
         ? cloned.headers
         : undefined,
-    loginUrl: typeof cloned.loginUrl === "string" ? cloned.loginUrl : undefined,
   };
 }
 

@@ -85,11 +85,9 @@ interface JsonRpcResponse {
 interface HttpMcpServerConfig {
   id: string;
   upstreamUrl: string;
-  oauth?: unknown;
+  oauth?: import("@lobu/core").McpOAuthConfig;
   inputs?: unknown[];
   headers?: Record<string, string>;
-  loginUrl?: string;
-  resource?: string;
 }
 
 interface McpConfigSource {
