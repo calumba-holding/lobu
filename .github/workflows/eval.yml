@@ -62,7 +62,13 @@ jobs:
       - name: Start stack
         working-directory: examples/${{ matrix.example }}
         run: |
-          mkdir -p data
+          mkdir -p data && chmod 777 data
+          # Disable Redis write-stop-on-error for CI
+          cat > docker-compose.override.yml <<'YAML'
+          services:
+            redis:
+              command: redis-server --maxmemory 256mb --maxmemory-policy noeviction --save "" --stop-writes-on-bgsave-error no --dir /tmp
+          YAML
           docker compose up -d
           echo "Waiting for gateway to be ready..."
           for i in $(seq 1 30); do
