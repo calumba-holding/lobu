@@ -1,71 +1,184 @@
 ---
 title: Comparison
-description: How Lobu differs from OpenClaw and why we built a separate gateway.
+description: How Lobu compares to other agent deployment options.
 ---
 
-See also: [Capabilities](/getting-started/capabilities/) and [Skills](/getting-started/skills/).
+Lobu is multi-tenant agent infrastructure. It handles sandboxing, persistence, platform delivery, and network isolation so you can ship agents to your users without building that plumbing yourself.
 
-Lobu and OpenClaw are complementary, but they solve different layers of the problem.
+This page compares Lobu against the alternatives you'd evaluate when deploying agents to production.
 
-- **OpenClaw** provides the agent runtime — the AI execution engine that runs tools, manages sessions, and talks to LLM providers.
-- **Lobu** provides deployment, orchestration, isolation, and multi-platform delivery around that runtime.
+## At a glance
 
-## Why Not Just Use OpenClaw Directly?
+| | Lobu | OpenClaw (direct) | DeepAgents Deploy | Claude Managed Agents |
+|---|---|---|---|---|
+| **What it is** | Self-hosted multi-tenant gateway | Single-user agent runtime | Hosted agent deployment (LangSmith) | Hosted managed agents |
+| **Multi-tenant** | Per-user/channel isolation | Single user | Per-thread sandbox | Per-conversation |
+| **Platforms** | Slack, Telegram, WhatsApp, Discord, Teams, REST API | CLI and API | API endpoints (MCP, A2A, Agent Protocol) | API |
+| **Embeddable** | Mount inside Next.js, Express, Hono, Fastify | No | No | No |
+| **Self-hosted** | Docker, Kubernetes | Single process | LangSmith hosted (self-host option) | Cloud only |
+| **Model support** | Any provider via config | Any provider | Any LangChain-compatible provider | Anthropic only |
+| **Runtime** | OpenClaw | OpenClaw | LangGraph | Claude |
+| **Network isolation** | Gateway-mediated egress, domain filtering | Host network | Sandbox-level | Platform-managed |
+| **Secrets handling** | Gateway proxy, workers never see credentials | Direct env vars | Environment variables | Platform-managed |
+| **MCP support** | Proxied through gateway with secret injection | Direct | HTTP/SSE only | Yes |
+| **Agent Protocol / A2A** | Not yet | No | Yes | No |
+| **Built-in evals** | YAML eval framework with model comparison | No | No | No |
+| **Memory** | Owletto plugin (self-hosted) | Local | LangSmith APIs | Platform-managed |
+| **Scale-to-zero** | Built-in idle timeout | Always running | Managed by LangSmith | Managed |
+| **Config format** | `lobu.toml` + IDENTITY/SOUL/USER.md | CLI flags | `deepagents.toml` + AGENTS.md | Dashboard |
+| **License** | Open source | Open source | MIT (harness), proprietary (hosting) | Proprietary |
 
-OpenClaw is a powerful runtime (~800k lines of code), but it was designed as a **single-tenant, single-user system** — by design. The creator of OpenClaw, Peter Steinberger, has been explicit about this:
+## Sandboxing and deployment modes
 
-<blockquote class="twitter-tweet"><p lang="en" dir="ltr">Since I spend my night again sifting through security advisories, folks, security researches, slop clankers, PLEASE - read <a href="https://t.co/Y6PYY4zg5W">https://t.co/Y6PYY4zg5W</a> and <a href="https://t.co/FSsm4M4FSq">https://t.co/FSsm4M4FSq</a><br><br>The security model of OpenClaw is that it&#39;s your PERSONAL assistant (one user - 1...many agents).<br><br>IT IS…</p>&mdash; Peter Steinberger 🦞 (@steipete) <a href="https://twitter.com/steipete/status/2026092642623201379?ref_src=twsrc%5Etfw">February 24, 2026</a></blockquote>
-<script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
+Lobu offers three deployment modes, each with different isolation guarantees. No other platform in this space provides all three.
 
-OpenClaw assumes one user runs one agent on their own machine. That's great for local development, but production deployments need:
+### Kubernetes (production, on-premise)
 
-- **Multi-tenant isolation** — every user gets their own sandboxed worker, not a shared process.
-- **Platform routing** — messages arrive from Slack, Telegram, WhatsApp, or REST API and need to reach the right worker.
-- **Credential separation** — workers must never see real API keys. The gateway proxies all provider calls and injects credentials at the edge.
-- **Network control** — workers run on an isolated internal network with no direct internet access. The gateway is the single egress point with domain-level allowlists.
-- **Scale-to-zero** — idle workers shut down and wake on demand, so you only pay for active compute.
+Each user session gets its own **pod** with:
+- **Pod-level isolation** — constrained resources, separate PID/network namespaces
+- **NetworkPolicies** — workers cannot reach the internet directly; all egress routes through the gateway proxy
+- **RBAC** — gateway has minimum permissions to create/delete worker resources
+- **PVC per session** — workspace files persist across restarts while remaining isolated per user
+- **Runtime hardening** — designed to run with **gVisor** (GCP), **Kata Containers**, or **Firecracker microVMs** where available
 
-OpenClaw doesn't have opinions about any of this. Lobu does.
+This is the strongest isolation model and the one suited for on-premise enterprise deployments where compliance requires that agent-generated code cannot escape its sandbox.
 
-## What Lobu Built from Scratch
+### Docker Compose (single-machine production)
 
-The Lobu gateway is an entirely separate codebase — not a fork or wrapper around OpenClaw's server. It handles:
+Each user session gets its own **container** on an internal Docker network:
+- Workers are not exposed to the host network
+- All outbound traffic routes through the gateway HTTP proxy with domain filtering
+- Scoped workspace volumes per session
 
-1. **Platform adapters** — Slack (Events API + Socket Mode), Telegram (Grammy long-polling), WhatsApp (Cloud API webhooks), and a REST endpoint for programmatic access.
-2. **Worker lifecycle** — spawning, routing, health checks, idle timeouts, persistent volumes, and cleanup.
-3. **Auth & secrets** — device-code auth for MCP servers, provider key resolution by agent ID, and a settings UI per user. Third-party API auth is handled by Owletto.
-4. **Proxy layer** — an HTTP proxy (port 8118) that enforces domain allowlists at the network layer. Workers send all outbound traffic through this proxy.
-5. **Skills registry** — a curated catalog of MCP servers and LLM providers that workers can use, managed via `lobu.toml` and the settings page.
+Good for single-machine deployments and local development.
 
-OpenClaw runs inside each worker as the agent execution engine. Everything outside the worker boundary is Lobu.
+### Embedded (library mode, no Docker required)
 
-## How Lobu Uses OpenClaw Runtime
+Uses [just-bash](https://github.com/nicholasgasior/just-bash) (virtual bash) + **Nix** for reproducible packages. Each user gets an isolated virtual filesystem and bash session at ~50MB memory footprint. Tested at **300 concurrent instances on a single machine**.
 
-Inside each worker, Lobu runs OpenClaw sessions and tool execution.
+Mount Lobu inside Next.js, Express, Hono, Fastify, or Bun — no Docker or Kubernetes needed. See [Embed in Your App](/deployment/embedding/).
 
-1. Gateway receives user messages (Slack/Telegram/WhatsApp/API).
-2. Gateway routes jobs to isolated worker instances.
-3. Worker executes with OpenClaw using Lobu's tool policy and workspace model.
-4. Gateway streams responses and manages auth/secrets. Integration OAuth is handled by Owletto.
+### Comparison to other sandboxing approaches
+
+| | Lobu (K8s) | Lobu (Docker) | Lobu (Embedded) | E2B | DeepAgents Deploy |
+|---|---|---|---|---|---|
+| Isolation | Pod + gVisor/Kata | Container | Virtual fs + Nix | Firecracker microVM | Daytona/Modal/Runloop |
+| Self-hosted | Yes | Yes | Yes | Cloud API | LangSmith hosted |
+| Network control | Gateway proxy + domain filtering | Gateway proxy + domain filtering | Gateway proxy | Sandbox-level | Sandbox-level |
+| Startup time | Seconds (pod creation) | Seconds (container creation) | Instant (in-process) | <200ms | Varies by provider |
+| Persistence | PVC per session | Volume per session | Directory per session | 24hr max | Thread-scoped, resets on restart |
+| Per-user isolation | Yes | Yes | Yes | Per-sandbox | Per-thread |
+
+## MCP proxy and credential isolation
+
+Lobu's MCP proxy is a key differentiator for on-premise and security-conscious deployments.
+
+**How it works**: workers call MCP tools through the gateway. The gateway resolves `${env:VAR}` secrets and injects OAuth tokens before forwarding to the upstream MCP server. Workers never see credentials — they receive opaque proxy URLs.
+
+| | Lobu | DeepAgents Deploy | Claude Managed Agents | Direct MCP |
+|---|---|---|---|---|
+| Secret injection | Gateway proxy resolves at request time | Environment variables | Platform-managed | Direct env vars |
+| OAuth management | Owletto handles token refresh | Manual | Platform-managed | Manual |
+| Transport support | HTTP, SSE, stdio (proxied) | HTTP/SSE only (no stdio) | Yes | All |
+| Worker sees credentials | Never | Yes (env vars) | N/A | Yes |
+| Audit trail | Gateway logs all MCP calls | No | No | No |
+
+For enterprises with compliance requirements, the fact that agent code never touches API keys or OAuth tokens — even if the agent is compromised — is the deciding factor.
+
+## Why Lobu for on-premise
+
+Hosted platforms (DeepAgents Deploy, Claude Managed Agents) require sending your data, prompts, and agent memory to a third party. For regulated industries (finance, healthcare, government) or organizations with data residency requirements, this is a non-starter.
+
+Lobu runs entirely on your infrastructure:
+- **Data stays in your network** — Redis, workspaces, and memory are all self-hosted
+- **No external dependencies** — the gateway, workers, and MCP proxy run on your machines
+- **Network-level isolation** — workers on an internal network with gateway-mediated egress
+- **Credential separation** — secrets never leave the gateway process
+- **Audit everything** — gateway logs all LLM calls, MCP tool invocations, and network requests
+- **Air-gapped compatible** — with local LLM providers (Ollama, vLLM), Lobu can run fully disconnected
+
+## When to use Lobu
+
+Lobu is the right choice when you need to **give multiple users their own agents**:
+
+- **SaaS products** — embed agents in your app where each user gets isolated persistence, tools, and context.
+- **Internal teams** — deploy a single bot to Slack or Teams where every employee gets their own sandboxed agent.
+- **Customer support** — agents that handle tickets autonomously with human-in-the-loop approval gates.
+- **Managed agent services** — operate agents for clients with per-tenant isolation and network controls.
+
+If you need a single personal agent for yourself, use OpenClaw directly.
 
 ## Lobu vs OpenClaw
 
+Lobu and OpenClaw are complementary. OpenClaw is the agent runtime — the execution engine that runs tools, manages sessions, and talks to LLM providers. Lobu is the infrastructure layer that deploys, isolates, and delivers that runtime to multiple users.
+
+OpenClaw is a powerful runtime (~800k lines of code), but it was designed as a **single-tenant, single-user system**. Production deployments need multi-tenant isolation, platform routing, credential separation, network control, and scale-to-zero — concerns OpenClaw doesn't have opinions about.
+
 | Capability | Lobu | OpenClaw |
 |---|---|---|
-| Runtime engine | Uses OpenClaw in workers | Native runtime |
 | Architecture | Multi-tenant gateway + isolated workers | Single-tenant, single-user |
-| Platform delivery | Slack, Telegram, WhatsApp, REST API | CLI and API |
+| Platform delivery | Slack, Telegram, WhatsApp, Discord, Teams, REST API | CLI and API |
 | Worker isolation | Sandboxed containers, no direct internet | Runs on host |
 | Secret handling | Gateway proxy injects credentials | Direct env vars |
 | Egress control | Domain allowlists via HTTP proxy | Host network |
 | Scale-to-zero | Built-in idle timeout and wake | Always running |
-| Deployment | Docker Compose or Kubernetes | Single process |
+| Deployment | Docker Compose, Kubernetes, or embedded | Single process |
 
-## Why This Split Matters
+Inside each Lobu worker, the full OpenClaw runtime runs untouched. Lobu rewrites only the gateway layer (~40k LOC) to be multi-tenant.
 
-Using Lobu with OpenClaw gives you:
+## Lobu vs DeepAgents Deploy
 
-- OpenClaw's agent runtime capabilities (tool use, sessions, LLM integration)
-- Lobu's production concerns: isolation, routing, persistence, multi-tenant operations, and controlled network/auth boundaries
+[DeepAgents Deploy](https://github.com/langchain-ai/deepagents) (LangChain) deploys a single agent to a hosted LangSmith server with 30+ API endpoints.
 
-You get the full power of the OpenClaw runtime without having to build the infrastructure to run it safely for multiple users.
+**Where they overlap**: both use a TOML config file, support MCP, and offer model-agnostic provider selection.
+
+**Where they differ**:
+
+| | Lobu | DeepAgents Deploy |
+|---|---|---|
+| Hosting | Self-hosted (you own the infra) | Hosted on LangSmith |
+| Multi-tenant | Per-user sandboxed workers | Per-thread sandbox |
+| Platform delivery | Native Slack/Telegram/WhatsApp/Discord/Teams | API endpoints only |
+| Embeddable | Yes — mount in Node.js frameworks | No |
+| Network isolation | Gateway-mediated domain filtering | Sandbox-level |
+| Protocols | MCP | MCP, A2A, Agent Protocol |
+| Evals | Built-in YAML framework | Not included |
+| Memory ownership | Fully self-hosted (Owletto) | LangSmith APIs (self-host option) |
+| Runtime | OpenClaw | LangGraph |
+
+**Choose DeepAgents Deploy** if you want zero-ops hosted deployment and need A2A multi-agent orchestration.
+
+**Choose Lobu** if you need multi-tenant isolation for your users, platform-native messaging, embeddability in your app, or full infrastructure control.
+
+## Lobu vs Claude Managed Agents
+
+Claude Managed Agents is Anthropic's hosted agent platform.
+
+| | Lobu | Claude Managed Agents |
+|---|---|---|
+| Model support | Any provider | Anthropic only |
+| Self-hosted | Yes | Cloud only |
+| Open source | Yes | Proprietary |
+| Platform delivery | Slack, Telegram, WhatsApp, Discord, Teams | API |
+| Embeddable | Yes | No |
+| Network isolation | Domain-filtered egress | Platform-managed |
+| Evals | Built-in | Not included |
+
+**Choose Claude Managed Agents** if you're committed to Anthropic models and want a fully managed experience.
+
+**Choose Lobu** if you need model flexibility, self-hosting, platform delivery, or the ability to embed agents in your product.
+
+## Lobu vs building it yourself
+
+The alternative to Lobu is often "we'll build it ourselves." Here's what that entails:
+
+- **Sandboxing**: per-user container orchestration with workspace persistence
+- **Platform adapters**: Slack Events API, Telegram long-polling, WhatsApp webhooks, each with their own auth flows
+- **Credential isolation**: proxy layer that injects secrets without exposing them to agent code
+- **Network policy**: domain-filtered egress on an internal network
+- **MCP proxy**: secret injection, OAuth token refresh, and routing for MCP servers
+- **Scale-to-zero**: idle detection, teardown, and wake-on-message
+- **Eval framework**: automated quality testing across models
+- **Admin UI**: per-agent configuration, connection management, status monitoring
+
+Lobu handles all of this out of the box. The gateway is ~40k lines of TypeScript that took months to build and harden.

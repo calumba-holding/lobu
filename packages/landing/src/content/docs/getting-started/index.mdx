@@ -15,17 +15,44 @@ For the full request flow and security details, see the [Architecture guide](/gu
 
 ## Learn the platform
 
-- [Capabilities](/getting-started/capabilities/)
-- [Skills](/getting-started/skills/)
-- [Comparison](/getting-started/comparison/)
-- [CLI Reference](/reference/cli/)
-- [Providers](/reference/providers/)
+**Understand**
+- [Capabilities](/getting-started/capabilities/) — what agents can do
+- [Skills](/getting-started/skills/) — tools and integrations
+- [Comparison](/getting-started/comparison/) — how Lobu compares
+
+**Build**
+- [Agent Prompts](/guides/agent-prompts/) — customize behavior with IDENTITY.md, SOUL.md, USER.md
+- [Skills Authoring](/guides/skills-authoring/) — create custom skills and MCP servers
+- [Agent Settings](/guides/agent-settings/) — per-agent configuration
+- [Agent Management](/guides/admin-ui/) — manage agents, providers, connections via API
+
+**Test and evaluate**
+- [Testing](/guides/testing/) — test locally via CLI, REST API, and platforms
+- [Evaluations](/guides/evals/) — automated quality checks with YAML eval files
+
+**Reference**
+- [CLI Reference](/reference/cli/) — all commands and flags
+- [lobu.toml Reference](/reference/lobu-toml/) — full configuration schema
+- [Providers](/reference/providers/) — supported LLM providers
+- [Observability](/guides/observability/) — tracing, logging, error monitoring
 
 ## Quick start
 
 ```bash
+# 1. Scaffold and run
 npx @lobu/cli init my-agent
 cd my-agent && npx @lobu/cli run -d
+
+# 2. Chat with your agent
+npx @lobu/cli chat "Hello, what can you do?"
+
+# 3. Customize behavior (edit prompt files)
+#    agents/my-agent/IDENTITY.md  — who the agent is
+#    agents/my-agent/SOUL.md      — instructions and rules
+#    agents/my-agent/USER.md      — user context
+
+# 4. Run evals to measure quality
+npx @lobu/cli eval
 ```
 
 The `init` wizard walks you through deployment mode, AI provider, skills, messaging platform, and memory configuration. All choices are saved to `lobu.toml` and `.env`.
@@ -34,7 +61,7 @@ The `init` wizard walks you through deployment mode, AI provider, skills, messag
 
 Lobu supports two configuration approaches depending on how you deploy:
 
-### File-based (CLI / Docker)
+### CLI
 
 After `init`, your project is configured through `lobu.toml`. Use the CLI to add providers and skills at any time:
 
@@ -57,7 +84,7 @@ npx @lobu/cli validate
 npx @lobu/cli run -d
 ```
 
-Changes to `lobu.toml` take effect on next restart.
+See the [CLI Reference](/reference/cli/) for all available commands.
 
 ### Embedded (library)
 
@@ -79,42 +106,5 @@ await lobu.start();
 
 See [Embed in Your App](/deployment/embedding/) for framework-specific examples.
 
-### Admin UI & REST API
-
 Both modes expose an admin page at `/agents` and a REST API at `/api/docs` for runtime management — adding providers, connections, and viewing agent status.
 
-## Connect messaging platforms
-
-After deployment, connect [Slack](/platforms/slack/), [Discord](/platforms/discord/), [Teams](/platforms/teams/), [Google Chat](/platforms/google-chat/), [WhatsApp](/platforms/whatsapp/), or [Telegram](/platforms/telegram/) via the admin page or the connections API — no platform-specific env vars needed.
-
-See the [CLI Reference](/reference/cli/) for all available commands.
-
-## Managed (Community)
-
-[![Add to Slack](https://img.shields.io/badge/Add_to_Slack-4A154B?style=for-the-badge&logo=slack&logoColor=white)](https://community.lobu.ai/slack/install)
-[![Join Community](https://img.shields.io/badge/Join_Community-4A154B?style=for-the-badge&logo=slack&logoColor=white)](https://join.slack.com/t/peerbot/shared_invite/zt-391o8tyw2-iyupjTG1xHIz9Og8C7JOnw)
-{/* Telegram try button intentionally hidden */}
-
-Managed access is currently free.
-
-Notes:
-
-- Pricing will be based on compute machine usage in the future.
-- LLM keys belong to you (bring your own provider keys).
-- OpenClaw workers scale to zero when idle and wake when you send a message.
-
-## Self-hosted
-
-Self-hosted gives you full control of infrastructure and runtime policy.
-
-Main differences from managed:
-
-- You run the infrastructure (Docker or Kubernetes).
-- You manage ops, networking policy, and upgrades.
-- You pay infra costs directly in your own environment.
-
-Choose a deployment guide:
-
-- [Embed in Your App](/deployment/embedding/)
-- [Docker Deployment](/deployment/docker/)
-- [Kubernetes Deployment](/deployment/kubernetes/)

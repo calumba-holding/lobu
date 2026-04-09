@@ -105,6 +105,23 @@ const embedSnippet = [
   "export const POST = handler;",
 ].join("\n");
 
+const testEvalLines: TermLine[] = [
+  { text: '$ lobu chat "Hello, what can you do?"', color: "#4ade80" },
+  { text: "I can help with code reviews, manage GitHub", color: "#c9cdd4" },
+  { text: "issues, and answer questions about your...", color: "#c9cdd4" },
+  { text: "", color: "" },
+  { text: "$ lobu eval", color: "#4ade80" },
+  { text: "", color: "" },
+  { text: "Running 3 evals (9 trials)...", color: "#8f96a3" },
+  { text: "", color: "" },
+  { text: "  ping               3/3 passed  avg 0.95", color: "#4ade80" },
+  { text: "  context-retention  3/3 passed  avg 0.88", color: "#4ade80" },
+  { text: "  follows-instr.     2/3 passed  avg 0.76", color: "#facc15" },
+  { text: "", color: "" },
+  { text: "Overall: 89% pass rate", color: "#4ade80" },
+  { text: "Report: evals/evals-report.md", color: "#8f96a3" },
+];
+
 const selfHostSnippet = [
   "$ cd landing-demo-agent",
   "$ npx @lobu/cli run -d",
@@ -411,9 +428,42 @@ export function DemoSection() {
             <PromptWindow label="paste into your agent" prompt={agentPrompt} />
           </div>
 
+          <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] gap-6 items-start">
+            <div class="min-w-0">
+              <SectionIntro
+                step="03"
+                title="Test and evaluate"
+                body="Chat with your agent from the terminal, route test messages through Slack or Telegram, and run automated evals to measure quality across models."
+              />
+              <p
+                class="text-sm leading-relaxed"
+                style={{ color: "var(--color-page-text-muted)" }}
+              >
+                See the{" "}
+                <a
+                  href="/guides/testing/"
+                  class="underline decoration-dotted underline-offset-2 hover:opacity-80"
+                  style={{ color: "var(--color-tg-accent)" }}
+                >
+                  Testing guide
+                </a>{" "}
+                and{" "}
+                <a
+                  href="/guides/evals/"
+                  class="underline decoration-dotted underline-offset-2 hover:opacity-80"
+                  style={{ color: "var(--color-tg-accent)" }}
+                >
+                  Evaluations guide
+                </a>
+                .
+              </p>
+            </div>
+            <TerminalWindow label="test and evaluate" lines={testEvalLines} />
+          </div>
+
           <div>
             <SectionIntro
-              step="03"
+              step="04"
               title="Ship it the way you want"
               body="When the agent is ready, keep the same Lobu project and choose the runtime model that fits your product."
             />
