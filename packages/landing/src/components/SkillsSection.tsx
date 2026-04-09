@@ -273,7 +273,7 @@ const anatomy = [
   {
     label: "System Packages",
     description:
-      "Declare Nix packages your skill needs (ffmpeg, poppler, gh, ripgrep). Installed once, persisted across sessions. Your agent gets a real Linux environment.",
+      "Declare Nix packages your skill needs (ffmpeg, poppler, gh, ripgrep). Installed once, persisted across sessions.",
     badge: "nix",
     color: "bg-cyan-900/40 text-cyan-400 border-cyan-800/50",
   },
@@ -535,7 +535,7 @@ export function SkillsSection() {
           >
             A skill isn't a prompt template — it's a full sandboxed computer.
             System packages, network policies, tool permissions, MCP servers,
-            and integrations, all bundled into one installable unit.
+            and integrations — all bundled into one installable unit.
           </p>
         </div>
 
@@ -783,9 +783,9 @@ export function SkillsSection() {
                   {v.description}
                 </p>
                 <div class="flex flex-wrap gap-1.5">
-                  {v.skills.map((s) => (
+                  {v.skills.map((skill) => (
                     <span
-                      key={s}
+                      key={skill}
                       class="text-[10px] font-mono px-2 py-0.5 rounded"
                       style={{
                         backgroundColor: "var(--color-page-surface-dim)",
@@ -793,7 +793,7 @@ export function SkillsSection() {
                         border: "1px solid var(--color-page-border)",
                       }}
                     >
-                      {s}
+                      {skill}
                     </span>
                   ))}
                 </div>
@@ -844,8 +844,7 @@ export function SkillsSection() {
                 class="text-xs mb-3 leading-relaxed"
                 style={{ color: "var(--color-page-text-muted)" }}
               >
-                Use any MCP server. Lobu works with built-in registry MCPs and
-                your own custom MCP endpoints.
+                Built-in registry MCPs and your own custom endpoints.
               </p>
               <div class="flex flex-wrap gap-1.5">
                 {[
