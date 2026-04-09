@@ -48,8 +48,10 @@ export async function evalCommand(
   }
 
   // Parse --model flag: "provider/model" or just "model"
-  let provider = agent.providers[0]?.id ?? "claude";
-  let model = agent.providers[0]?.model ?? "auto";
+  // Only override provider/model when --model is explicitly set;
+  // otherwise let the gateway use the agent's lobu.toml config.
+  let provider: string | undefined;
+  let model: string | undefined;
   if (options.model) {
     const slashIdx = options.model.indexOf("/");
     if (slashIdx !== -1) {
@@ -59,6 +61,8 @@ export async function evalCommand(
       model = options.model;
     }
   }
+  const reportProvider = provider ?? agent.providers[0]?.id ?? "default";
+  const reportModel = model ?? agent.providers[0]?.model ?? "auto";
 
   // Discover eval files
   const evalsDir = join(cwd, agent.dir, "evals");
@@ -174,8 +178,8 @@ export async function evalCommand(
 
   const report: EvalReport = {
     agent: agentId,
-    model,
-    provider,
+    model: reportModel,
+    provider: reportProvider,
     timestamp: new Date().toISOString(),
     summary: {
       total: results.length,
