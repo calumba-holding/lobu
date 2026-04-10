@@ -14,6 +14,8 @@ import type { McpConfigService } from "../auth/mcp/config-service";
 import type { McpProxy } from "../auth/mcp/proxy";
 import type { McpTool } from "../auth/mcp/tool-cache";
 import type { ProviderCatalogService } from "../auth/provider-catalog";
+import { getStoredCredential } from "../routes/internal/device-auth";
+import type { WritableSecretStore } from "../secrets";
 import { resolveEffectiveModelRef } from "../auth/settings/model-selection";
 import type { IMessageQueue } from "../infrastructure/queue";
 import type { InstructionService } from "../services/instruction-service";
@@ -42,6 +44,7 @@ export class WorkerGateway {
   private providerCatalogService?: ProviderCatalogService;
   private settingsResolver?: SettingsResolver;
   private systemSkillsService?: SystemSkillsService;
+  private secretStore?: WritableSecretStore;
 
   constructor(
     queue: IMessageQueue,
@@ -52,7 +55,8 @@ export class WorkerGateway {
     mcpProxy?: McpProxy,
     providerCatalogService?: ProviderCatalogService,
     settingsResolver?: SettingsResolver,
-    systemSkillsService?: SystemSkillsService
+    systemSkillsService?: SystemSkillsService,
+    secretStore?: WritableSecretStore
   ) {
     this.queue = queue;
     this.publicGatewayUrl = publicGatewayUrl;
@@ -68,6 +72,7 @@ export class WorkerGateway {
     this.providerCatalogService = providerCatalogService;
     this.settingsResolver = settingsResolver;
     this.systemSkillsService = systemSkillsService;
+    this.secretStore = secretStore;
 
     // Setup Hono app
     this.app = new Hono();
@@ -105,6 +110,72 @@ export class WorkerGateway {
     );
 
     logger.debug("Worker gateway routes registered");
+  }
+
+  private async enrichMcpStatus(
+    mcpStatus: Array<{
+      id: string;
+      name: string;
+      requiresAuth: boolean;
+      requiresInput: boolean;
+    }>,
+    agentId: string,
+    userId: string
+  ): Promise<
+    Array<{
+      id: string;
+      name: string;
+      requiresAuth: boolean;
+      requiresInput: boolean;
+      authenticated: boolean;
+      configured: boolean;
+    }>
+  > {
+    const secretStore = this.secretStore;
+    if (!secretStore || !agentId || !userId) {
+      return mcpStatus.map((mcp) => ({
+        ...mcp,
+        authenticated: false,
+        configured: !mcp.requiresInput,
+      }));
+    }
+
+    const redis = this.queue.getRedisClient();
+    return Promise.all(
+      mcpStatus.map(async (mcp) => {
+        if (!mcp.requiresAuth) {
+          return {
+            ...mcp,
+            authenticated: false,
+            configured: !mcp.requiresInput,
+          };
+        }
+
+        let credential: Awaited<ReturnType<typeof getStoredCredential>> = null;
+        try {
+          credential = await getStoredCredential(
+            redis as any,
+            secretStore,
+            agentId,
+            userId,
+            mcp.id
+          );
+        } catch (error) {
+          logger.warn("Failed to look up stored MCP credential", {
+            mcpId: mcp.id,
+            agentId,
+            userId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+
+        return {
+          ...mcp,
+          authenticated: !!credential,
+          configured: !mcp.requiresInput,
+        };
+      })
+    );
   }
 
   /**
@@ -346,13 +417,19 @@ export class WorkerGateway {
         ),
       ]);
 
+      const enrichedMcpStatus = await this.enrichMcpStatus(
+        contextData.mcpStatus,
+        agentId || userId,
+        userId
+      );
+
       // Fetch tool lists and instructions for ALL MCPs (unauthenticated ones
       // will attempt discovery without credentials)
       const mcpTools: Record<string, McpTool[]> = {};
       const mcpInstructions: Record<string, string> = {};
-      if (this.mcpProxy && contextData.mcpStatus.length > 0) {
+      if (this.mcpProxy && enrichedMcpStatus.length > 0) {
         const toolResults = await Promise.allSettled(
-          contextData.mcpStatus.map(async (mcp) => {
+          enrichedMcpStatus.map(async (mcp) => {
             const result = await this.mcpProxy?.fetchToolsForMcp(
               mcp.id,
               agentId || userId,
@@ -482,7 +559,7 @@ export class WorkerGateway {
         .join("\n\n");
 
       logger.info(
-        `Session context for ${userId}: ${Object.keys(mcpConfig.mcpServers || {}).length} MCPs, ${contextData.agentInstructions.length} chars agent instructions, ${contextData.platformInstructions.length} chars platform instructions, ${contextData.networkInstructions.length} chars network instructions, ${mergedSkillsInstructions.length} chars skills instructions, ${contextData.mcpStatus.length} MCP status entries, ${Object.keys(mcpTools).length} MCP tool lists, ${Object.keys(mcpInstructions).length} MCP instructions, ${skillsConfig.length} skills, provider: ${providerConfig.defaultProvider || "none"}`
+        `Session context for ${userId}: ${Object.keys(mcpConfig.mcpServers || {}).length} MCPs, ${contextData.agentInstructions.length} chars agent instructions, ${contextData.platformInstructions.length} chars platform instructions, ${contextData.networkInstructions.length} chars network instructions, ${mergedSkillsInstructions.length} chars skills instructions, ${enrichedMcpStatus.length} MCP status entries, ${Object.keys(mcpTools).length} MCP tool lists, ${Object.keys(mcpInstructions).length} MCP instructions, ${skillsConfig.length} skills, provider: ${providerConfig.defaultProvider || "none"}`
       );
 
       return c.json({
@@ -491,7 +568,7 @@ export class WorkerGateway {
         platformInstructions: contextData.platformInstructions,
         networkInstructions: contextData.networkInstructions,
         skillsInstructions: mergedSkillsInstructions,
-        mcpStatus: contextData.mcpStatus,
+        mcpStatus: enrichedMcpStatus,
         mcpTools,
         mcpInstructions,
         mcpContext,

@@ -51,7 +51,7 @@ export interface DeviceAuthConfig {
   secretStore: WritableSecretStore;
 }
 
-interface StoredCredentialPointer {
+interface SecretPointer {
   secretRef: string;
 }
 
@@ -64,6 +64,131 @@ interface ResolvedOAuthEndpoints {
   clientId?: string;
   clientSecret?: string;
   resource?: string;
+}
+
+async function getSecretBackedJson<T>(
+  redis: Redis,
+  secretStore: WritableSecretStore,
+  key: string,
+  context: Record<string, unknown>
+): Promise<T | null> {
+  const raw = await redis.get(key);
+  if (!raw) return null;
+
+  let pointer: SecretPointer;
+  try {
+    pointer = JSON.parse(raw) as SecretPointer;
+  } catch (error) {
+    logger.warn("Corrupted secret pointer in Redis", {
+      key,
+      ...context,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+
+  if (typeof pointer.secretRef !== "string") {
+    logger.warn("Secret pointer missing secretRef", { key, ...context });
+    return null;
+  }
+
+  const value = await secretStore.get(pointer.secretRef);
+  if (!value) {
+    logger.warn("Unresolved secret ref", {
+      key,
+      ...context,
+      secretRef: pointer.secretRef,
+    });
+    return null;
+  }
+
+  try {
+    return JSON.parse(value) as T;
+  } catch (error) {
+    logger.warn("Failed to parse secret-backed JSON payload", {
+      key,
+      ...context,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
+async function putSecretBackedJson<T>(
+  redis: Redis,
+  secretStore: WritableSecretStore,
+  key: string,
+  secretName: string,
+  value: T,
+  ttlSeconds?: number
+): Promise<void> {
+  const secretRef = await secretStore.put(secretName, JSON.stringify(value), {
+    ttlSeconds,
+  });
+
+  try {
+    if (ttlSeconds) {
+      await redis.set(key, JSON.stringify({ secretRef }), "EX", ttlSeconds);
+    } else {
+      await redis.set(key, JSON.stringify({ secretRef }));
+    }
+  } catch (error) {
+    // Redis write failed — clean up the orphaned secret we just wrote so the
+    // store doesn't accumulate unreachable credentials.
+    try {
+      await secretStore.delete(secretRef);
+    } catch (cleanupError) {
+      logger.warn("Failed to clean up orphaned secret after Redis write", {
+        key,
+        secretRef,
+        error:
+          cleanupError instanceof Error
+            ? cleanupError.message
+            : String(cleanupError),
+      });
+    }
+    throw error;
+  }
+}
+
+async function deleteSecretBackedJson(
+  redis: Redis,
+  secretStore: WritableSecretStore,
+  key: string,
+  context: Record<string, unknown>
+): Promise<boolean> {
+  const raw = await redis.get(key);
+  if (!raw) return false;
+
+  let secretRef: string | null = null;
+  try {
+    const pointer = JSON.parse(raw) as SecretPointer;
+    if (typeof pointer.secretRef === "string") {
+      secretRef = pointer.secretRef;
+    }
+  } catch (error) {
+    logger.warn("Failed to parse secret pointer while deleting", {
+      key,
+      ...context,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  if (secretRef) {
+    try {
+      await secretStore.delete(secretRef);
+    } catch (error) {
+      logger.warn("Failed to delete secret while cleaning up pointer", {
+        key,
+        ...context,
+        secretRef,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  await redis.del(key);
+  return true;
 }
 
 function credentialKey(agentId: string, userId: string, mcpId: string): string {
@@ -123,43 +248,12 @@ export async function getStoredCredential(
   userId: string,
   mcpId: string
 ): Promise<StoredCredential | null> {
-  const raw = await redis.get(credentialKey(agentId, userId, mcpId));
-  if (!raw) return null;
-
-  let pointer: StoredCredentialPointer;
-  try {
-    pointer = JSON.parse(raw) as StoredCredentialPointer;
-  } catch (error) {
-    logger.warn("Corrupted credential pointer in Redis", {
-      agentId,
-      userId,
-      mcpId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return null;
-  }
-
-  if (typeof pointer.secretRef !== "string") {
-    logger.warn("Credential pointer missing secretRef", {
-      agentId,
-      userId,
-      mcpId,
-    });
-    return null;
-  }
-
-  const value = await secretStore.get(pointer.secretRef);
-  if (!value) {
-    logger.warn("Unresolved credential secret ref", {
-      agentId,
-      userId,
-      mcpId,
-      secretRef: pointer.secretRef,
-    });
-    return null;
-  }
-
-  return JSON.parse(value) as StoredCredential;
+  return getSecretBackedJson<StoredCredential>(
+    redis,
+    secretStore,
+    credentialKey(agentId, userId, mcpId),
+    { agentId, userId, mcpId }
+  );
 }
 
 async function storeCredential(
@@ -170,16 +264,12 @@ async function storeCredential(
   mcpId: string,
   credential: StoredCredential
 ): Promise<void> {
-  const secretRef = await secretStore.put(
-    `mcp-auth/${agentId}/${userId}/${mcpId}/credential`,
-    JSON.stringify(credential),
-    { ttlSeconds: 90 * 24 * 60 * 60 }
-  );
-  // Store with 90-day TTL (tokens can be refreshed before expiry)
-  await redis.set(
+  await putSecretBackedJson(
+    redis,
+    secretStore,
     credentialKey(agentId, userId, mcpId),
-    JSON.stringify({ secretRef }),
-    "EX",
+    `mcp-auth/${agentId}/${userId}/${mcpId}/credential`,
+    credential,
     90 * 24 * 60 * 60
   );
 }
@@ -197,32 +287,21 @@ export async function deleteCredential(
   mcpId: string
 ): Promise<boolean> {
   const pointerKey = credentialKey(agentId, userId, mcpId);
-  const raw = await redis.get(pointerKey);
-  if (!raw) return false;
-
-  try {
-    const pointer = JSON.parse(raw) as StoredCredentialPointer;
-    if (typeof pointer.secretRef === "string") {
-      await secretStore.delete(pointer.secretRef);
-    }
-  } catch (error) {
-    logger.warn(
-      {
-        agentId,
-        userId,
-        mcpId,
-        error: error instanceof Error ? error.message : String(error),
-      },
-      "Failed to parse credential pointer while deleting"
-    );
-  }
-
-  await redis.del(pointerKey);
+  const deleted = await deleteSecretBackedJson(redis, secretStore, pointerKey, {
+    agentId,
+    userId,
+    mcpId,
+  });
   // Also clean up any pending device-auth flow state so a subsequent
   // start() kicks off fresh.
-  await redis.del(deviceAuthKey(agentId, userId, mcpId));
+  await deleteSecretBackedJson(
+    redis,
+    secretStore,
+    deviceAuthKey(agentId, userId, mcpId),
+    { agentId, userId, mcpId, scope: "device-auth" }
+  );
   logger.info("Deleted MCP credential", { agentId, userId, mcpId });
-  return true;
+  return deleted;
 }
 
 export async function refreshCredential(
@@ -326,18 +405,21 @@ export async function tryCompletePendingDeviceAuth(
   userId: string,
   mcpId: string
 ): Promise<string | null> {
-  const raw = await redis.get(deviceAuthKey(agentId, userId, mcpId));
-  if (!raw) return null;
-
-  let deviceState: StoredDeviceAuth;
-  try {
-    deviceState = JSON.parse(raw) as StoredDeviceAuth;
-  } catch {
-    return null;
-  }
+  const deviceState = await getSecretBackedJson<StoredDeviceAuth>(
+    redis,
+    secretStore,
+    deviceAuthKey(agentId, userId, mcpId),
+    { agentId, userId, mcpId, scope: "device-auth" }
+  );
+  if (!deviceState) return null;
 
   if (Date.now() > deviceState.expiresAt) {
-    await redis.del(deviceAuthKey(agentId, userId, mcpId));
+    await deleteSecretBackedJson(
+      redis,
+      secretStore,
+      deviceAuthKey(agentId, userId, mcpId),
+      { agentId, userId, mcpId, scope: "device-auth" }
+    );
     return null;
   }
 
@@ -366,7 +448,12 @@ export async function tryCompletePendingDeviceAuth(
     }
 
     if (pollResult.status === "error") {
-      await redis.del(deviceAuthKey(agentId, userId, mcpId));
+      await deleteSecretBackedJson(
+        redis,
+        secretStore,
+        deviceAuthKey(agentId, userId, mcpId),
+        { agentId, userId, mcpId, scope: "device-auth" }
+      );
       return null;
     }
 
@@ -390,7 +477,12 @@ export async function tryCompletePendingDeviceAuth(
       mcpId,
       storedCred
     );
-    await redis.del(deviceAuthKey(agentId, userId, mcpId));
+    await deleteSecretBackedJson(
+      redis,
+      secretStore,
+      deviceAuthKey(agentId, userId, mcpId),
+      { agentId, userId, mcpId, scope: "device-auth" }
+    );
 
     logger.info("Device auth auto-completed by proxy", {
       mcpId,
@@ -416,6 +508,7 @@ export async function tryCompletePendingDeviceAuth(
  */
 export async function startDeviceAuth(
   redis: Redis,
+  secretStore: WritableSecretStore,
   mcpConfigService: {
     getHttpServer: (
       id: string,
@@ -432,37 +525,35 @@ export async function startDeviceAuth(
   expiresIn: number;
 } | null> {
   // Reuse existing pending device auth flow if not expired
-  const existingRaw = await redis.get(deviceAuthKey(agentId, userId, mcpId));
-  if (existingRaw) {
-    try {
-      const existing = JSON.parse(existingRaw) as StoredDeviceAuth;
-      if (existing.expiresAt > Date.now()) {
-        const httpServer = await mcpConfigService.getHttpServer(mcpId, agentId);
-        const issuer = httpServer
-          ? deriveOAuthBaseUrl(httpServer.upstreamUrl)
-          : existing.issuer;
-        const endpoints = httpServer
-          ? resolveOAuthEndpoints(httpServer.upstreamUrl, httpServer.oauth)
-          : null;
-        const verificationUri =
-          endpoints?.verificationUri ?? `${issuer}/oauth/device`;
-        logger.info("Reusing existing pending device auth", {
-          mcpId,
-          agentId,
-          userId,
-        });
-        return {
-          userCode: existing.userCode || "",
-          verificationUri,
-          verificationUriComplete: existing.userCode
-            ? `${verificationUri}?user_code=${existing.userCode}`
-            : verificationUri,
-          expiresIn: Math.floor((existing.expiresAt - Date.now()) / 1000),
-        };
-      }
-    } catch {
-      // Corrupted state — fall through to start new flow
-    }
+  const existing = await getSecretBackedJson<StoredDeviceAuth>(
+    redis,
+    secretStore,
+    deviceAuthKey(agentId, userId, mcpId),
+    { agentId, userId, mcpId, scope: "device-auth" }
+  );
+  if (existing?.expiresAt && existing.expiresAt > Date.now()) {
+    const httpServer = await mcpConfigService.getHttpServer(mcpId, agentId);
+    const issuer = httpServer
+      ? deriveOAuthBaseUrl(httpServer.upstreamUrl)
+      : existing.issuer;
+    const endpoints = httpServer
+      ? resolveOAuthEndpoints(httpServer.upstreamUrl, httpServer.oauth)
+      : null;
+    const verificationUri =
+      endpoints?.verificationUri ?? `${issuer}/oauth/device`;
+    logger.info("Reusing existing pending device auth", {
+      mcpId,
+      agentId,
+      userId,
+    });
+    return {
+      userCode: existing.userCode || "",
+      verificationUri,
+      verificationUriComplete: existing.userCode
+        ? `${verificationUri}?user_code=${existing.userCode}`
+        : verificationUri,
+      expiresIn: Math.floor((existing.expiresAt - Date.now()) / 1000),
+    };
   }
 
   const httpServer = await mcpConfigService.getHttpServer(mcpId, agentId);
@@ -491,14 +582,12 @@ export async function startDeviceAuth(
     });
   } else {
     // Check cached client registration
-    const cachedClient = await redis.get(clientCacheKey(mcpId));
-    if (cachedClient) {
-      try {
-        client = JSON.parse(cachedClient) as StoredClient;
-      } catch {
-        client = null;
-      }
-    }
+    client = await getSecretBackedJson<StoredClient>(
+      redis,
+      secretStore,
+      clientCacheKey(mcpId),
+      { mcpId, scope: "device-client" }
+    );
 
     // Register a new client if needed
     if (!client) {
@@ -525,7 +614,13 @@ export async function startDeviceAuth(
         clientSecret: registration.client_secret,
       };
 
-      await redis.set(clientCacheKey(mcpId), JSON.stringify(client));
+      await putSecretBackedJson(
+        redis,
+        secretStore,
+        clientCacheKey(mcpId),
+        `mcp-auth/clients/${mcpId}/registration`,
+        client
+      );
     }
   }
 
@@ -557,10 +652,12 @@ export async function startDeviceAuth(
     scope: endpoints.scope,
   };
 
-  await redis.set(
+  await putSecretBackedJson(
+    redis,
+    secretStore,
     deviceAuthKey(agentId, userId, mcpId),
-    JSON.stringify(deviceState),
-    "EX",
+    `mcp-auth/${agentId}/${userId}/${mcpId}/device-auth`,
+    deviceState,
     started.expiresIn
   );
 
@@ -595,6 +692,7 @@ export function createDeviceAuthRoutes(
     try {
       const result = await startDeviceAuth(
         redis,
+        config.secretStore,
         mcpConfigService,
         mcpId,
         agentId,
@@ -633,8 +731,13 @@ export function createDeviceAuthRoutes(
     const agentId = worker.agentId || worker.userId;
     const userId = worker.userId;
 
-    const raw = await redis.get(deviceAuthKey(agentId, userId, mcpId));
-    if (!raw) {
+    const deviceState = await getSecretBackedJson<StoredDeviceAuth>(
+      redis,
+      config.secretStore,
+      deviceAuthKey(agentId, userId, mcpId),
+      { agentId, userId, mcpId, scope: "device-auth" }
+    );
+    if (!deviceState) {
       return c.json(
         {
           status: "error",
@@ -644,10 +747,13 @@ export function createDeviceAuthRoutes(
       );
     }
 
-    const deviceState = JSON.parse(raw) as StoredDeviceAuth;
-
     if (Date.now() > deviceState.expiresAt) {
-      await redis.del(deviceAuthKey(agentId, userId, mcpId));
+      await deleteSecretBackedJson(
+        redis,
+        config.secretStore,
+        deviceAuthKey(agentId, userId, mcpId),
+        { agentId, userId, mcpId, scope: "device-auth" }
+      );
       return c.json(
         { status: "error", message: "Device code expired. Start again." },
         400
@@ -685,10 +791,12 @@ export function createDeviceAuthRoutes(
             Math.floor((deviceState.expiresAt - Date.now()) / 1000),
             10
           );
-          await redis.set(
+          await putSecretBackedJson(
+            redis,
+            config.secretStore,
             deviceAuthKey(agentId, userId, mcpId),
-            JSON.stringify(deviceState),
-            "EX",
+            `mcp-auth/${agentId}/${userId}/${mcpId}/device-auth`,
+            deviceState,
             ttl
           );
         }
@@ -696,7 +804,12 @@ export function createDeviceAuthRoutes(
       }
 
       if (pollResult.status === "error") {
-        await redis.del(deviceAuthKey(agentId, userId, mcpId));
+        await deleteSecretBackedJson(
+          redis,
+          config.secretStore,
+          deviceAuthKey(agentId, userId, mcpId),
+          { agentId, userId, mcpId, scope: "device-auth" }
+        );
         return c.json({ status: "error", message: pollResult.error });
       }
 
@@ -720,7 +833,12 @@ export function createDeviceAuthRoutes(
         mcpId,
         storedCred
       );
-      await redis.del(deviceAuthKey(agentId, userId, mcpId));
+      await deleteSecretBackedJson(
+        redis,
+        config.secretStore,
+        deviceAuthKey(agentId, userId, mcpId),
+        { agentId, userId, mcpId, scope: "device-auth" }
+      );
 
       logger.info("Device auth completed", { mcpId, agentId, userId });
       return c.json({ status: "complete" });

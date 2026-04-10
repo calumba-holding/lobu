@@ -20,9 +20,24 @@ export {
   buildGatewayConfig,
   type GatewayConfig,
 } from "./config";
+export type {
+  EmbeddedAuthProvider,
+  ProviderCredentialContext,
+  RuntimeProviderCredentialLookup,
+  RuntimeProviderCredentialResolver,
+  RuntimeProviderCredentialResult,
+} from "./embedded";
 export { Gateway, type GatewayOptions } from "./gateway-main";
 export { CoreServices } from "./services/core-services";
 export { InMemoryAgentStore } from "./stores/in-memory-agent-store";
+export {
+  AwsSecretsManagerSecretStore,
+  RedisSecretStore,
+  SecretStoreRegistry,
+  type SecretStore,
+  type SecretStoreRegistryOptions,
+  type WritableSecretStore,
+} from "./secrets";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 

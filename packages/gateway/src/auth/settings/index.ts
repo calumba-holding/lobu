@@ -1,4 +1,5 @@
 export { type AgentSettings, AgentSettingsStore } from "./agent-settings-store";
+export type { AgentSettingsStoreOptions } from "./agent-settings-store";
 export {
   AuthProfilesManager,
   createAuthProfileLabel,

@@ -1,5 +1,6 @@
 import { createLogger } from "@lobu/core";
 import { Hono } from "hono";
+import type { ProviderCredentialContext } from "../embedded";
 import {
   BaseModule,
   type ModelProviderModule,
@@ -110,10 +111,14 @@ export abstract class BaseProviderModule
     return { slug, upstreamBaseUrl: envOverride || upstreamBaseUrl };
   }
 
-  async hasCredentials(agentId: string): Promise<boolean> {
+  async hasCredentials(
+    agentId: string,
+    context?: ProviderCredentialContext
+  ): Promise<boolean> {
     return this.authProfilesManager.hasProviderProfiles(
       agentId,
-      this.providerId
+      this.providerId,
+      context
     );
   }
 
@@ -124,17 +129,42 @@ export abstract class BaseProviderModule
     return !!resolveEnv(envVar);
   }
 
+  /**
+   * Build the agent/user path suffix used for agent-scoped proxy routing.
+   * Returns an empty string when no agentId is provided.
+   */
+  protected buildAgentScopedSuffix(
+    agentId?: string,
+    context?: ProviderCredentialContext
+  ): string {
+    if (!agentId) return "";
+    const agentPath = `/a/${encodeURIComponent(agentId)}`;
+    if (!context?.userId) return agentPath;
+    return `${agentPath}/u/${encodeURIComponent(context.userId)}`;
+  }
+
+  protected buildAgentScopedProxyUrl(
+    proxyUrl: string,
+    slug: string,
+    agentId?: string,
+    context?: ProviderCredentialContext
+  ): string {
+    return `${proxyUrl}/${slug}${this.buildAgentScopedSuffix(agentId, context)}`;
+  }
+
   getProxyBaseUrlMappings(
     proxyUrl: string,
-    agentId?: string
+    agentId?: string,
+    context?: ProviderCredentialContext
   ): Record<string, string> {
     const { slug, baseUrlEnvVarName, credentialEnvVarName } =
       this.providerConfig;
     if (!slug) return {};
     const envVar =
       baseUrlEnvVarName || credentialEnvVarName.replace("_KEY", "_BASE_URL");
-    const base = `${proxyUrl}/${slug}`;
-    return { [envVar]: agentId ? `${base}/a/${agentId}` : base };
+    return {
+      [envVar]: this.buildAgentScopedProxyUrl(proxyUrl, slug, agentId, context),
+    };
   }
 
   injectSystemKeyFallback(
@@ -153,13 +183,16 @@ export abstract class BaseProviderModule
 
   async buildEnvVars(
     agentId: string,
-    envVars: Record<string, string>
+    envVars: Record<string, string>,
+    context?: ProviderCredentialContext
   ): Promise<Record<string, string>> {
     const credVar = this.providerConfig.credentialEnvVarName;
     if (!envVars[credVar]) {
       const profile = await this.authProfilesManager.getBestProfile(
         agentId,
-        this.providerId
+        this.providerId,
+        undefined,
+        context
       );
       if (profile?.credential) {
         logger.info(
@@ -175,10 +208,15 @@ export abstract class BaseProviderModule
     return this.app;
   }
 
-  protected async getCredential(agentId: string): Promise<string | null> {
+  protected async getCredential(
+    agentId: string,
+    context?: ProviderCredentialContext
+  ): Promise<string | null> {
     const profile = await this.authProfilesManager.getBestProfile(
       agentId,
-      this.providerId
+      this.providerId,
+      undefined,
+      context
     );
     if (profile?.credential) {
       return profile.credential;
@@ -190,7 +228,10 @@ export abstract class BaseProviderModule
   }
 
   /** Build a structured placeholder for proxy mode (default: "lobu-proxy"). */
-  buildCredentialPlaceholder(_agentId: string): Promise<string> | string {
+  buildCredentialPlaceholder(
+    _agentId: string,
+    _context?: ProviderCredentialContext
+  ): Promise<string> | string {
     return "lobu-proxy";
   }
 

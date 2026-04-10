@@ -8,8 +8,10 @@ import {
   type SystemSkillEntry,
 } from "@lobu/core";
 import type { GatewayConfig } from "./config";
+import type { RuntimeProviderCredentialResolver } from "./embedded";
 import { type PlatformAdapter, platformRegistry } from "./platform";
 import { UnifiedThreadResponseConsumer } from "./platform/unified-thread-consumer";
+import type { SecretStoreRegistry } from "./secrets";
 import { CoreServices } from "./services/core-services";
 
 const logger = createLogger("gateway");
@@ -36,6 +38,10 @@ export interface GatewayOptions {
   accessStore?: AgentAccessStore;
   /** Provide system skills programmatically (skips file loading). */
   systemSkills?: SystemSkillEntry[];
+  /** Override the default secret-store registry (embedded mode). */
+  secretStore?: SecretStoreRegistry;
+  /** Resolve provider credentials dynamically at runtime (embedded mode). */
+  providerCredentialResolver?: RuntimeProviderCredentialResolver;
 }
 
 export class Gateway {
@@ -53,6 +59,8 @@ export class Gateway {
       connectionStore: options?.connectionStore,
       accessStore: options?.accessStore,
       systemSkills: options?.systemSkills,
+      secretStore: options?.secretStore,
+      providerCredentialResolver: options?.providerCredentialResolver,
     });
   }
 

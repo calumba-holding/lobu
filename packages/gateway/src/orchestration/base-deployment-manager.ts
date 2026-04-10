@@ -7,6 +7,7 @@ import {
   OrchestratorError,
 } from "@lobu/core";
 import type Redis from "ioredis";
+import type { ProviderCredentialContext } from "../embedded";
 import type { MessagePayload } from "../infrastructure/queue/queue-producer";
 import type { ModelProviderModule } from "../modules/module-system";
 import type { GrantStore } from "../permissions/grant-store";
@@ -103,7 +104,8 @@ export function generateDeploymentName(
 // Type for module environment variable builder function
 export type ModuleEnvVarsBuilder = (
   agentId: string,
-  envVars: Record<string, string>
+  envVars: Record<string, string>,
+  context?: ProviderCredentialContext
 ) => Promise<Record<string, string>>;
 
 // Orchestrator configuration
@@ -634,7 +636,8 @@ export abstract class BaseDeploymentManager {
   private async injectSecretPlaceholders(
     envVars: Record<string, string>,
     agentId: string,
-    deploymentName: string
+    deploymentName: string,
+    context?: ProviderCredentialContext
   ): Promise<Record<string, string>> {
     if (!this.redisClient) return envVars;
     if (!this.secretStore) {
@@ -664,8 +667,10 @@ export abstract class BaseDeploymentManager {
           (p) => p.getCredentialEnvVarName() === key
         );
         if (ownerProvider?.buildCredentialPlaceholder) {
-          envVars[key] =
-            await ownerProvider.buildCredentialPlaceholder(agentId);
+          envVars[key] = await ownerProvider.buildCredentialPlaceholder(
+            agentId,
+            context
+          );
         } else {
           envVars[key] = "lobu-proxy";
         }
@@ -701,7 +706,7 @@ export abstract class BaseDeploymentManager {
       for (const provider of this.providerModules) {
         Object.assign(
           envVars,
-          provider.getProxyBaseUrlMappings(proxyUrl, agentId)
+          provider.getProxyBaseUrlMappings(proxyUrl, agentId, context)
         );
       }
       logger.info(
@@ -728,6 +733,17 @@ export abstract class BaseDeploymentManager {
       validated;
     const teamId = validated.teamId || platformMetadata?.teamId;
     const traceId = extractTraceId(validated);
+    const providerContext: ProviderCredentialContext = {
+      userId,
+      conversationId,
+      channelId,
+      deploymentName,
+      platform,
+      connectionId:
+        typeof platformMetadata?.connectionId === "string"
+          ? platformMetadata.connectionId
+          : undefined,
+    };
 
     const workerToken = generateWorkerToken(
       userId,
@@ -769,7 +785,11 @@ export abstract class BaseDeploymentManager {
     // Include secrets from process.env for Docker deployments
     if (includeSecrets && this.moduleEnvVarsBuilder) {
       try {
-        envVars = await this.moduleEnvVarsBuilder(agentId, envVars);
+        envVars = await this.moduleEnvVarsBuilder(
+          agentId,
+          envVars,
+          providerContext
+        );
       } catch (error) {
         logger.warn("Failed to build module environment variables:", error);
       }
@@ -794,7 +814,8 @@ export abstract class BaseDeploymentManager {
     envVars = await this.injectSecretPlaceholders(
       envVars,
       agentId,
-      deploymentName
+      deploymentName,
+      providerContext
     );
 
     // Inject provider metadata into agentOptions so the worker can configure
@@ -820,7 +841,7 @@ export abstract class BaseDeploymentManager {
       for (const candidate of effectiveProviders) {
         if (
           candidate.hasSystemKey() ||
-          (await candidate.hasCredentials(agentId))
+          (await candidate.hasCredentials(agentId, providerContext))
         ) {
           primaryProvider = candidate;
           break;
@@ -860,7 +881,11 @@ export abstract class BaseDeploymentManager {
     const proxyBaseUrl = `${this.getDispatcherUrl()}/api/proxy`;
     const providerBaseUrlMappings: Record<string, string> = {};
     for (const provider of effectiveProviders) {
-      const mappings = provider.getProxyBaseUrlMappings(proxyBaseUrl, agentId);
+      const mappings = provider.getProxyBaseUrlMappings(
+        proxyBaseUrl,
+        agentId,
+        providerContext
+      );
       Object.assign(providerBaseUrlMappings, mappings);
     }
     if (Object.keys(providerBaseUrlMappings).length > 0) {

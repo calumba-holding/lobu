@@ -1,3 +1,4 @@
+import type { ProviderCredentialContext } from "../embedded";
 import { getOrchestratorModules } from "../modules/module-system";
 import { platformRegistry } from "../platform";
 import type {
@@ -20,14 +21,15 @@ import type {
  */
 export async function buildModuleEnvVars(
   agentId: string,
-  baseEnv: Record<string, string>
+  baseEnv: Record<string, string>,
+  context?: ProviderCredentialContext
 ): Promise<Record<string, string>> {
   let envVars = { ...baseEnv };
 
   const orchestratorModules = getOrchestratorModules();
   for (const module of orchestratorModules) {
     if (module.buildEnvVars) {
-      envVars = await module.buildEnvVars(agentId, envVars);
+      envVars = await module.buildEnvVars(agentId, envVars, context);
     }
   }
 

@@ -4,7 +4,12 @@ import { ApiPlatform } from "./api";
 import { createGatewayApp, startGatewayServer } from "./cli/gateway";
 import { buildGatewayConfig, type GatewayConfig } from "./config";
 import { ChatInstanceManager, ChatResponseBridge } from "./connections";
+import type {
+  EmbeddedAuthProvider,
+  RuntimeProviderCredentialResolver,
+} from "./embedded";
 import { Gateway } from "./gateway-main";
+import type { SecretStoreRegistry } from "./secrets";
 import { InMemoryAgentStore } from "./stores/in-memory-agent-store";
 
 const logger = createLogger("lobu");
@@ -40,6 +45,12 @@ export interface LobuConfig {
   publicUrl?: string;
   /** Admin password for API auth. Auto-generated if not provided. */
   adminPassword?: string;
+  /** Custom auth provider for embedded settings access. */
+  authProvider?: EmbeddedAuthProvider;
+  /** Override the default secret-store registry in embedded mode. */
+  secretStore?: SecretStoreRegistry;
+  /** Resolve provider credentials dynamically at runtime in embedded mode. */
+  providerCredentialResolver?: RuntimeProviderCredentialResolver;
 }
 
 // ── Lobu Facade ────────────────────────────────────────────────────────────
@@ -52,10 +63,12 @@ export class Lobu {
   private chatInstanceManager: ChatInstanceManager | null = null;
   private initialized = false;
   private port: number;
+  private readonly authProvider?: EmbeddedAuthProvider;
 
   constructor(config: LobuConfig) {
     this.agentConfigs = config.agents ?? [];
     this.port = config.port ?? 8080;
+    this.authProvider = config.authProvider;
 
     if (config.memory) {
       process.env.MEMORY_URL = config.memory;
@@ -89,6 +102,8 @@ export class Lobu {
       configStore: store,
       connectionStore: store,
       accessStore: store,
+      secretStore: config.secretStore,
+      providerCredentialResolver: config.providerCredentialResolver,
     });
 
     // Register API platform (always enabled)
@@ -188,6 +203,7 @@ export class Lobu {
       platformRegistry: this.gateway.getPlatformRegistry(),
       coreServices,
       chatInstanceManager: this.chatInstanceManager,
+      authProvider: this.authProvider,
     });
   }
 

@@ -120,11 +120,6 @@ function extractSessionToken(c: Context): string | null {
     return authHeader.substring(7);
   }
 
-  const tokenFromQuery = c.req.query("workerToken");
-  if (typeof tokenFromQuery === "string") {
-    return tokenFromQuery;
-  }
-
   return null;
 }
 
@@ -1268,6 +1263,7 @@ export class McpProxy {
 
       const result = await startDeviceAuth(
         this.redisClient,
+        this.secretStore,
         this.configService as any,
         mcpId,
         agentId,

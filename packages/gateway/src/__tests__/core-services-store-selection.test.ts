@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import type { SecretPutOptions, SecretRef } from "@lobu/core";
 import type { GatewayConfig } from "../config";
 import { CoreServices } from "../services/core-services";
+import {
+  type SecretListEntry,
+  SecretStoreRegistry,
+  type WritableSecretStore,
+} from "../secrets";
 import {
   RedisAgentAccessStore,
   RedisAgentConfigStore,
@@ -76,6 +82,57 @@ function createGatewayConfig(
   };
 }
 
+class InMemoryWritableStore implements WritableSecretStore {
+  private readonly entries = new Map<
+    string,
+    { value: string; updatedAt: number }
+  >();
+
+  constructor(private readonly scheme: string = "host") {}
+
+  async get(ref: SecretRef): Promise<string | null> {
+    if (!ref.startsWith(`${this.scheme}://`)) {
+      return null;
+    }
+
+    const name = decodeURIComponent(ref.slice(`${this.scheme}://`.length));
+    return this.entries.get(name)?.value ?? null;
+  }
+
+  async put(
+    name: string,
+    value: string,
+    _options?: SecretPutOptions
+  ): Promise<SecretRef> {
+    this.entries.set(name, { value, updatedAt: Date.now() });
+    return `${this.scheme}://${encodeURIComponent(name)}` as SecretRef;
+  }
+
+  async delete(nameOrRef: string): Promise<void> {
+    const name = nameOrRef.startsWith(`${this.scheme}://`)
+      ? decodeURIComponent(nameOrRef.slice(`${this.scheme}://`.length))
+      : nameOrRef;
+    this.entries.delete(name);
+  }
+
+  async list(prefix?: string): Promise<SecretListEntry[]> {
+    const entries: SecretListEntry[] = [];
+    for (const [name, entry] of this.entries) {
+      if (prefix && !name.startsWith(prefix)) {
+        continue;
+      }
+
+      entries.push({
+        ref: `${this.scheme}://${encodeURIComponent(name)}` as SecretRef,
+        backend: this.scheme,
+        name,
+        updatedAt: entry.updatedAt,
+      });
+    }
+    return entries;
+  }
+}
+
 afterEach(() => {
   delete process.env.LOBU_WORKSPACE_ROOT;
 });
@@ -92,6 +149,49 @@ describe("CoreServices store selection", () => {
       RedisAgentConnectionStore
     );
     expect(coreServices.getAccessStore()).toBeInstanceOf(RedisAgentAccessStore);
+  });
+
+  test("uses the host-provided secret store for persisted auth profiles", async () => {
+    const hostStore = new InMemoryWritableStore();
+    const hostRegistry = new SecretStoreRegistry(hostStore, {
+      host: hostStore,
+    });
+    const coreServices = new CoreServices(createGatewayConfig(), {
+      secretStore: hostRegistry,
+    });
+    (coreServices as any).queue = new MockMessageQueue();
+
+    await (coreServices as any).initializeSessionServices();
+
+    const agentSettingsStore = coreServices.getAgentSettingsStore();
+    await agentSettingsStore.saveSettings("agent-1", {
+      authProfiles: [
+        {
+          id: "profile-1",
+          provider: "openai",
+          model: "*",
+          credential: "sk-host-store-only",
+          label: "host-backed",
+          authType: "api-key",
+          createdAt: Date.now(),
+        },
+      ],
+    });
+
+    const redis = (coreServices as any).queue.getRedisClient();
+    const rawSettings = await redis.get("agent:settings:agent-1");
+    expect(rawSettings).toContain("host://");
+
+    const [, redisSecretKeys] = await redis.scan(
+      "0",
+      "MATCH",
+      "lobu:test:secret-store:*"
+    );
+    expect(redisSecretKeys).toHaveLength(0);
+
+    const hostEntries = await hostStore.list("agents/agent-1/");
+    expect(hostEntries).toHaveLength(1);
+    expect(await hostStore.get(hostEntries[0]!.ref)).toBe("sk-host-store-only");
   });
 });
 

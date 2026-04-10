@@ -6,6 +6,7 @@ import {
   safeJsonStringify,
 } from "@lobu/core";
 import type Redis from "ioredis";
+import type { RuntimeProviderCredentialResolver } from "../../embedded";
 import { deleteSecretsByPrefix, type WritableSecretStore } from "../../secrets";
 
 // Re-export so existing imports from this module keep working.
@@ -15,6 +16,10 @@ export interface AgentSettingsContext {
   localSettings: AgentSettings | null;
   effectiveSettings: AgentSettings | null;
   templateAgentId?: string;
+}
+
+export interface AgentSettingsStoreOptions {
+  runtimeCredentialResolver?: RuntimeProviderCredentialResolver;
 }
 
 /**
@@ -55,7 +60,8 @@ export class AgentSettingsStore extends BaseRedisStore<AgentSettings> {
 
   constructor(
     redis: Redis,
-    private readonly secretStore: WritableSecretStore
+    private readonly secretStore: WritableSecretStore,
+    private readonly options: AgentSettingsStoreOptions = {}
   ) {
     super({
       redis,
@@ -70,6 +76,12 @@ export class AgentSettingsStore extends BaseRedisStore<AgentSettings> {
 
   getEphemeralAuthProfiles(): EphemeralAuthProfileRegistry {
     return this.ephemeralAuthProfiles;
+  }
+
+  getRuntimeCredentialResolver():
+    | RuntimeProviderCredentialResolver
+    | undefined {
+    return this.options.runtimeCredentialResolver;
   }
 
   /**

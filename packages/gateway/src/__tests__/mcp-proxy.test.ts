@@ -148,7 +148,7 @@ describe("McpProxy", () => {
       expect(res.status).toBe(200);
     });
 
-    test("accepts workerToken query param", async () => {
+    test("rejects workerToken query param", async () => {
       const configSource = createMockConfigSource({
         "test-mcp": TEST_SERVER,
       });
@@ -167,7 +167,7 @@ describe("McpProxy", () => {
         `/test-mcp/tools?workerToken=${validToken}`,
         { method: "GET" }
       );
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(401);
     });
   });
 

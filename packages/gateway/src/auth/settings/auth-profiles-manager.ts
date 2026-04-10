@@ -1,4 +1,8 @@
 import { type AuthProfile, createLogger } from "@lobu/core";
+import type {
+  ProviderCredentialContext,
+  RuntimeProviderCredentialResolver,
+} from "../../embedded";
 import type { WritableSecretStore } from "../../secrets";
 import type {
   AgentSettingsStore,
@@ -31,12 +35,17 @@ export class AuthProfilesManager {
    * manager would be invisible to provider modules' own managers.
    */
   private readonly ephemeralProfiles: EphemeralAuthProfileRegistry;
+  private readonly runtimeCredentialResolver?: RuntimeProviderCredentialResolver;
 
   constructor(
     private readonly agentSettingsStore: AgentSettingsStore,
-    private readonly secretStore: WritableSecretStore
+    private readonly secretStore: WritableSecretStore,
+    runtimeCredentialResolver?: RuntimeProviderCredentialResolver
   ) {
     this.ephemeralProfiles = agentSettingsStore.getEphemeralAuthProfiles();
+    this.runtimeCredentialResolver =
+      runtimeCredentialResolver ??
+      agentSettingsStore.getRuntimeCredentialResolver();
   }
 
   async listProfiles(agentId: string): Promise<AuthProfile[]> {
@@ -75,8 +84,14 @@ export class AuthProfilesManager {
 
   async hasProviderProfiles(
     agentId: string,
-    provider: string
+    provider: string,
+    context?: ProviderCredentialContext
   ): Promise<boolean> {
+    if (
+      await this.resolveRuntimeProfile(agentId, provider, undefined, context)
+    ) {
+      return true;
+    }
     const profiles = await this.listProfiles(agentId);
     return profiles.some((profile) => profile.provider === provider);
   }
@@ -92,8 +107,19 @@ export class AuthProfilesManager {
   async getBestProfile(
     agentId: string,
     provider: string,
-    model?: string
+    model?: string,
+    context?: ProviderCredentialContext
   ): Promise<AuthProfile | null> {
+    const runtimeProfile = await this.resolveRuntimeProfile(
+      agentId,
+      provider,
+      model,
+      context
+    );
+    if (runtimeProfile) {
+      return runtimeProfile;
+    }
+
     const providerProfiles = await this.getProviderProfiles(agentId, provider);
     if (providerProfiles.length === 0) {
       return null;
@@ -410,6 +436,75 @@ export class AuthProfilesManager {
     }
 
     return next;
+  }
+
+  private async resolveRuntimeProfile(
+    agentId: string,
+    provider: string,
+    model?: string,
+    context?: ProviderCredentialContext
+  ): Promise<AuthProfile | null> {
+    if (!this.runtimeCredentialResolver) {
+      return null;
+    }
+
+    let resolved: Awaited<ReturnType<RuntimeProviderCredentialResolver>>;
+    try {
+      resolved = await this.runtimeCredentialResolver({
+        ...context,
+        agentId,
+        provider,
+        model,
+      });
+    } catch (error) {
+      logger.warn("Runtime credential resolver threw", {
+        agentId,
+        provider,
+        model,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+
+    if (!resolved || (!resolved.credential && !resolved.credentialRef)) {
+      return null;
+    }
+
+    if (resolved.credential && resolved.credentialRef) {
+      logger.warn(
+        "Runtime credential resolver returned both credential and credentialRef; preferring credential",
+        { agentId, provider, model }
+      );
+    }
+
+    try {
+      const profile = await this.resolveProfile({
+        id: `runtime:${agentId}:${provider}:${model ?? "*"}`,
+        provider,
+        ...(resolved.credential
+          ? { credential: resolved.credential }
+          : { credentialRef: resolved.credentialRef }),
+        authType: resolved.authType ?? "api-key",
+        label: resolved.label ?? `${provider} (runtime resolver)`,
+        model: model?.trim() || ANY_MODEL_SCOPE,
+        metadata: resolved.metadata,
+        createdAt: Date.now(),
+      });
+
+      if (!profile.credential && !profile.credentialRef) {
+        return null;
+      }
+
+      return profile;
+    } catch (error) {
+      logger.warn("Failed to resolve runtime credential profile", {
+        agentId,
+        provider,
+        model,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
   }
 }
 

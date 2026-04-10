@@ -397,6 +397,136 @@ describe("AgentSettingsStore", () => {
     });
   });
 
+  describe("runtime credential resolver", () => {
+    test("returns runtime plaintext credentials without persisting settings", async () => {
+      const resolverCalls: Array<Record<string, string | undefined>> = [];
+      const runtimeStore = new AgentSettingsStore(redis as any, secretStore, {
+        runtimeCredentialResolver: async (input) => {
+          resolverCalls.push({
+            agentId: input.agentId,
+            provider: input.provider,
+            model: input.model,
+            userId: input.userId,
+          });
+          return {
+            credential: "sk-runtime-user-key",
+            label: "runtime override",
+          };
+        },
+      });
+      const runtimeManager = new AuthProfilesManager(runtimeStore, secretStore);
+
+      const profile = await runtimeManager.getBestProfile(
+        "agent-1",
+        "openai",
+        "gpt-5",
+        { userId: "user-123" }
+      );
+
+      expect(profile?.credential).toBe("sk-runtime-user-key");
+      expect(profile?.label).toBe("runtime override");
+      expect(await runtimeStore.getSettings("agent-1")).toBeNull();
+      expect(await secretStore.list("agents/agent-1/")).toHaveLength(0);
+      expect(resolverCalls).toEqual([
+        {
+          agentId: "agent-1",
+          provider: "openai",
+          model: "gpt-5",
+          userId: "user-123",
+        },
+      ]);
+    });
+
+    test("resolves runtime credential refs through the configured secret store", async () => {
+      const runtimeRef = await secretStore.put(
+        "runtime/openai/user-456",
+        "sk-runtime-ref-key"
+      );
+      const runtimeStore = new AgentSettingsStore(redis as any, secretStore, {
+        runtimeCredentialResolver: () => ({
+          credentialRef: runtimeRef,
+          authType: "oauth",
+          metadata: { email: "user@example.com" },
+        }),
+      });
+      const runtimeManager = new AuthProfilesManager(runtimeStore, secretStore);
+
+      const profile = await runtimeManager.getBestProfile("agent-1", "openai");
+
+      expect(profile?.credential).toBe("sk-runtime-ref-key");
+      expect(profile?.credentialRef).toBeUndefined();
+      expect(profile?.authType).toBe("oauth");
+      expect(profile?.metadata?.email).toBe("user@example.com");
+      expect(await runtimeStore.getSettings("agent-1")).toBeNull();
+    });
+
+    test("swallows resolver errors and falls back to persisted profiles", async () => {
+      const persistedStore = new AgentSettingsStore(redis as any, secretStore, {
+        runtimeCredentialResolver: () => {
+          throw new Error("resolver boom");
+        },
+      });
+      await persistedStore.saveSettings("agent-1", {
+        authProfiles: [
+          {
+            id: "persisted",
+            provider: "openai",
+            model: "*",
+            credential: "sk-persisted-fallback",
+            label: "persisted",
+            authType: "api-key",
+            createdAt: Date.now(),
+          },
+        ],
+      });
+      const persistedManager = new AuthProfilesManager(
+        persistedStore,
+        secretStore
+      );
+
+      const profile = await persistedManager.getBestProfile(
+        "agent-1",
+        "openai"
+      );
+      expect(profile?.credential).toBe("sk-persisted-fallback");
+    });
+
+    test("ignores resolver results with neither credential nor credentialRef", async () => {
+      const emptyStore = new AgentSettingsStore(redis as any, secretStore, {
+        runtimeCredentialResolver: () => ({ label: "nothing" }),
+      });
+      const emptyManager = new AuthProfilesManager(emptyStore, secretStore);
+
+      const profile = await emptyManager.getBestProfile("agent-1", "openai");
+      expect(profile).toBeNull();
+    });
+
+    test("ignores context fields that would override explicit lookup args", async () => {
+      const calls: Array<Record<string, unknown>> = [];
+      const contextStore = new AgentSettingsStore(redis as any, secretStore, {
+        runtimeCredentialResolver: (input) => {
+          calls.push({ ...input });
+          return { credential: "sk-context-safe" };
+        },
+      });
+      const contextManager = new AuthProfilesManager(contextStore, secretStore);
+
+      await contextManager.getBestProfile("agent-1", "openai", "gpt-5", {
+        userId: "user-42",
+        // @ts-expect-error — simulate a malformed context trying to override
+        agentId: "evil-agent",
+        provider: "evil-provider",
+      } as any);
+
+      expect(calls[0]).toMatchObject({
+        agentId: "agent-1",
+        provider: "openai",
+        model: "gpt-5",
+        userId: "user-42",
+      });
+    });
+  });
+
   describe("findTemplateAgentId", () => {
     test("returns first agent with installedProviders", async () => {
       // Agent without installedProviders

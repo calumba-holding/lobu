@@ -7,6 +7,7 @@ import {
   type WorkerContext,
   type WorkerModule,
 } from "@lobu/core";
+import type { ProviderCredentialContext } from "../embedded";
 
 export interface ModelOption {
   value: string;
@@ -17,7 +18,8 @@ export interface OrchestratorModule<TModuleData = unknown>
   extends ModuleInterface<TModuleData> {
   buildEnvVars(
     agentId: string,
-    baseEnv: Record<string, string>
+    baseEnv: Record<string, string>,
+    context?: ProviderCredentialContext
   ): Promise<Record<string, string>>;
   getContainerAddress(): string;
 }
@@ -40,11 +42,15 @@ export interface ModelProviderModule extends OrchestratorModule {
   getSecretEnvVarNames(): string[];
   getCredentialEnvVarName(): string;
   getUpstreamConfig?(): ProviderUpstreamConfig | null;
-  hasCredentials(agentId: string): Promise<boolean>;
+  hasCredentials(
+    agentId: string,
+    context?: ProviderCredentialContext
+  ): Promise<boolean>;
   hasSystemKey(): boolean;
   getProxyBaseUrlMappings(
     proxyUrl: string,
-    agentId?: string
+    agentId?: string,
+    context?: ProviderCredentialContext
   ): Record<string, string>;
   injectSystemKeyFallback(
     envVars: Record<string, string>
@@ -52,7 +58,10 @@ export interface ModelProviderModule extends OrchestratorModule {
   getApp?(): any;
   getModelOptions?(agentId: string, userId: string): Promise<ModelOption[]>;
   getCliBackendConfig?(): CliBackendConfig | null;
-  buildCredentialPlaceholder?(agentId: string): Promise<string> | string;
+  buildCredentialPlaceholder?(
+    agentId: string,
+    context?: ProviderCredentialContext
+  ): Promise<string> | string;
   startDeviceCode?(agentId: string): Promise<{
     userCode: string;
     deviceAuthId: string;
@@ -131,7 +140,8 @@ export abstract class BaseModule<TModuleData = unknown>
 
   async buildEnvVars(
     _agentId: string,
-    baseEnv: Record<string, string>
+    baseEnv: Record<string, string>,
+    _context?: ProviderCredentialContext
   ): Promise<Record<string, string>> {
     return baseEnv;
   }

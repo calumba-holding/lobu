@@ -76,12 +76,16 @@ export class BedrockProviderModule extends BaseProviderModule {
 
   override getProxyBaseUrlMappings(
     proxyUrl: string,
-    agentId?: string
+    agentId?: string,
+    context?: import("../../embedded").ProviderCredentialContext
   ): Record<string, string> {
     const gatewayBase = proxyUrl.replace(/\/api\/proxy\/?$/, "");
     const base = `${gatewayBase}${BEDROCK_ROUTE_PREFIX}`;
     return {
-      [BEDROCK_BASE_URL_ENV]: agentId ? `${base}/a/${agentId}` : base,
+      [BEDROCK_BASE_URL_ENV]: `${base}${this.buildAgentScopedSuffix(
+        agentId,
+        context
+      )}`,
     };
   }
 

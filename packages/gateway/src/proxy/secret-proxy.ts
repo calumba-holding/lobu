@@ -3,6 +3,7 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import type Redis from "ioredis";
 import type { AuthProfilesManager } from "../auth/settings/auth-profiles-manager";
+import type { ProviderCredentialContext } from "../embedded";
 import type { ProviderUpstreamConfig } from "../modules/module-system";
 import type { SecretStore } from "../secrets";
 
@@ -10,6 +11,15 @@ const logger = createLogger("secret-proxy");
 
 const PLACEHOLDER_PREFIX = "lobu_secret_";
 const REDIS_KEY_PREFIX = "lobu:secret:";
+
+function safeDecodePathSegment(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
 
 export interface SecretMapping {
   agentId: string;
@@ -171,6 +181,7 @@ export class SecretProxy {
     let forwardPath = rawPath;
     let resolvedSlug: string | undefined;
     let urlAgentId: string | undefined;
+    let providerContext: ProviderCredentialContext | undefined;
     const slugMatch = rawPath.match(/^\/([^/]+)(\/.*)?$/);
     if (slugMatch) {
       const candidateSlug = slugMatch[1]!;
@@ -182,10 +193,14 @@ export class SecretProxy {
 
         // Extract agentId from /a/{agentId} path segment if present.
         // URL format: /api/proxy/{slug}/a/{agentId}/v1/chat/completions
-        const agentMatch = forwardPath.match(/^\/a\/([^/]+)(\/.*)?$/);
+        const agentMatch = forwardPath.match(
+          /^\/a\/([^/]+)(?:\/u\/([^/]+))?(\/.*)?$/
+        );
         if (agentMatch) {
-          urlAgentId = agentMatch[1];
-          forwardPath = agentMatch[2] || "";
+          urlAgentId = safeDecodePathSegment(agentMatch[1]);
+          const userId = safeDecodePathSegment(agentMatch[2]);
+          forwardPath = agentMatch[3] || "";
+          providerContext = userId ? { userId } : undefined;
         }
       }
     }
@@ -217,7 +232,9 @@ export class SecretProxy {
       if (providerId) {
         const profile = await this.authProfilesManager.getBestProfile(
           urlAgentId,
-          providerId
+          providerId,
+          undefined,
+          providerContext
         );
         if (profile?.credential) {
           headers.authorization = `Bearer ${profile.credential}`;

@@ -77,13 +77,18 @@ export class ApiKeyProviderModule extends BaseProviderModule {
    */
   override getProxyBaseUrlMappings(
     proxyUrl: string,
-    agentId?: string
+    agentId?: string,
+    context?: import("../embedded").ProviderCredentialContext
   ): Record<string, string> {
-    const mappings = super.getProxyBaseUrlMappings(proxyUrl, agentId);
+    const mappings = super.getProxyBaseUrlMappings(proxyUrl, agentId, context);
     if (this.apiKeyConfig.sdkCompat === "openai") {
       const slug = this.providerConfig.slug || this.providerId;
-      const base = `${proxyUrl}/${slug}`;
-      mappings.OPENAI_BASE_URL = agentId ? `${base}/a/${agentId}` : base;
+      mappings.OPENAI_BASE_URL = this.buildAgentScopedProxyUrl(
+        proxyUrl,
+        slug,
+        agentId,
+        context
+      );
     }
     return mappings;
   }
@@ -112,9 +117,9 @@ export class ApiKeyProviderModule extends BaseProviderModule {
 
   async getModelOptions(
     agentId: string,
-    _userId: string
+    userId: string
   ): Promise<ModelOption[]> {
-    const key = await this.getCredential(agentId);
+    const key = await this.getCredential(agentId, { userId });
     if (!key) return [];
 
     // Gemini uses a non-standard models endpoint with key-in-query auth

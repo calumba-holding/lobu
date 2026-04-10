@@ -31,6 +31,7 @@ import { UserAgentsStore } from "../auth/user-agents-store";
 import { ChannelBindingService } from "../channels";
 import { registerBuiltInCommands } from "../commands/built-in-commands";
 import type { AgentConfig, GatewayConfig } from "../config";
+import type { RuntimeProviderCredentialResolver } from "../embedded";
 import {
   type FileLoadedAgent,
   loadAgentConfigFromFiles,
@@ -178,6 +179,8 @@ export class CoreServices {
     connectionStore?: AgentConnectionStore;
     accessStore?: AgentAccessStore;
     systemSkills?: SystemSkillEntry[];
+    secretStore?: SecretStoreRegistry;
+    providerCredentialResolver?: RuntimeProviderCredentialResolver;
   };
 
   constructor(
@@ -187,6 +190,8 @@ export class CoreServices {
       connectionStore?: AgentConnectionStore;
       accessStore?: AgentAccessStore;
       systemSkills?: SystemSkillEntry[];
+      secretStore?: SecretStoreRegistry;
+      providerCredentialResolver?: RuntimeProviderCredentialResolver;
     }
   ) {
     this.options = options;
@@ -332,23 +337,28 @@ export class CoreServices {
       redisClient,
       this.config.secrets.redis.prefix
     );
-    this.secretStore = new SecretStoreRegistry(
-      redisSecretStore,
-      { secret: redisSecretStore },
-      {
-        readOnlyStores: {
-          "aws-sm": new AwsSecretsManagerSecretStore(
-            this.config.secrets.aws.region
-          ),
-        },
-      }
-    );
+    this.secretStore =
+      this.options?.secretStore ??
+      new SecretStoreRegistry(
+        redisSecretStore,
+        { secret: redisSecretStore },
+        {
+          readOnlyStores: {
+            "aws-sm": new AwsSecretsManagerSecretStore(
+              this.config.secrets.aws.region
+            ),
+          },
+        }
+      );
     logger.debug("Secret store initialized");
 
     // Initialize agent configuration stores
     this.agentSettingsStore = new AgentSettingsStore(
       redisClient,
-      this.secretStore
+      this.secretStore,
+      {
+        runtimeCredentialResolver: this.options?.providerCredentialResolver,
+      }
     );
     this.channelBindingService = new ChannelBindingService(redisClient);
     this.userAgentsStore = new UserAgentsStore(redisClient);
@@ -788,7 +798,8 @@ export class CoreServices {
       this.mcpProxy,
       this.providerCatalogService,
       this.settingsResolver,
-      this.systemSkillsService
+      this.systemSkillsService,
+      this.secretStore
     );
     logger.debug("Worker gateway initialized");
 
