@@ -35,7 +35,16 @@
           "path": "packages/cli/package.json",
           "jsonpath": "$.version"
         },
-        "charts/lobu/Chart.yaml"
+        {
+          "type": "yaml",
+          "path": "charts/lobu/Chart.yaml",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "yaml",
+          "path": "charts/lobu/Chart.yaml",
+          "jsonpath": "$.appVersion"
+        }
       ]
     }
   }
