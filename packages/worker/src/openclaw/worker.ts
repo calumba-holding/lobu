@@ -40,6 +40,7 @@ import {
   generateImage,
 } from "../shared/tool-implementations";
 import {
+  createMcpAuthToolDefinitions,
   createMcpToolDefinitions,
   createOpenClawCustomTools,
 } from "./custom-tools";
@@ -1058,6 +1059,18 @@ Use it when the user references past discussions or you need context.`);
       customTools.push(...pluginTools);
       logger.info(
         `Loaded ${pluginTools.length} tool(s) from ${loadedPlugins.length} plugin(s)`
+      );
+    }
+
+    const authToolDefs = createMcpAuthToolDefinitions(
+      context.mcpStatus,
+      gwParams,
+      new Set(customTools.map((tool) => tool.name))
+    );
+    if (authToolDefs.length > 0) {
+      customTools.push(...authToolDefs);
+      logger.info(
+        `Registered ${authToolDefs.length} MCP auth tool(s): ${authToolDefs.map((t) => t.name).join(", ")}`
       );
     }
 

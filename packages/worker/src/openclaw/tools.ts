@@ -11,6 +11,7 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { isDirectPackageInstallCommand } from "./tool-policy";
+import { stripSensitiveWorkerEnv } from "../shared/sensitive-env";
 
 type RequiredParamGroup = {
   keys: readonly string[];
@@ -156,9 +157,18 @@ export function createOpenClawTools(
     schema: buildEditSchema(),
   });
 
-  const bashToolOpts = options?.bashOperations
-    ? { operations: options.bashOperations }
-    : undefined;
+  const bashToolOpts = {
+    ...(options?.bashOperations ? { operations: options.bashOperations } : {}),
+    spawnHook: (params: {
+      command: string;
+      cwd: string;
+      env: Record<string, string | undefined>;
+    }) => ({
+      command: params.command,
+      cwd: params.cwd,
+      env: stripSensitiveWorkerEnv(params.env),
+    }),
+  };
   const bash = wrapBashWithProxyHint(createBashTool(cwd, bashToolOpts));
 
   return [
@@ -170,6 +180,59 @@ export function createOpenClawTools(
     createFindTool(cwd),
     createLsTool(cwd),
   ];
+}
+
+function isDirectGatewayApiAccessCommand(command: string): boolean {
+  const trimmed = command.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  if (/\$(?:\{)?(?:DISPATCHER_URL|WORKER_TOKEN)\b/.test(trimmed)) {
+    return true;
+  }
+
+  if (!/\b(?:curl|wget|http|httpie|fetch)\b/i.test(trimmed)) {
+    return false;
+  }
+
+  if (!/\/(?:internal|mcp)(?:\/|\b)/i.test(trimmed)) {
+    return false;
+  }
+
+  const gatewayTargets = new Set<string>([
+    "http://gateway",
+    "https://gateway",
+    "gateway:",
+    "http://dispatcher",
+    "https://dispatcher",
+    "dispatcher:",
+    "http://localhost",
+    "https://localhost",
+    "localhost:",
+    "http://127.0.0.1",
+    "https://127.0.0.1",
+    "127.0.0.1:",
+  ]);
+
+  const dispatcherUrl = process.env.DISPATCHER_URL?.trim();
+  if (dispatcherUrl) {
+    gatewayTargets.add(dispatcherUrl);
+    gatewayTargets.add(dispatcherUrl.replace(/\/+$/, ""));
+    try {
+      const parsed = new URL(dispatcherUrl);
+      gatewayTargets.add(`${parsed.protocol}//${parsed.host}`);
+      gatewayTargets.add(parsed.host);
+      gatewayTargets.add(parsed.hostname);
+    } catch {
+      // Ignore invalid dispatcher URLs and rely on static aliases.
+    }
+  }
+
+  const normalized = trimmed.toLowerCase();
+  return [...gatewayTargets].some((target) =>
+    normalized.includes(target.toLowerCase())
+  );
 }
 
 /**
@@ -187,6 +250,11 @@ function wrapBashWithProxyHint(tool: AgentTool<any>): AgentTool<any> {
         params && typeof params === "object" && "command" in params
           ? String((params as { command?: unknown }).command ?? "")
           : "";
+      if (isDirectGatewayApiAccessCommand(command)) {
+        throw new Error(
+          "DIRECT GATEWAY API ACCESS BLOCKED. Use the registered MCP/auth tools instead of calling gateway /mcp or /internal endpoints from Bash."
+        );
+      }
       if (isDirectPackageInstallCommand(command)) {
         throw new Error(
           "DIRECT PACKAGE INSTALL BLOCKED. Install system packages with nixPackages in lobu.toml or agent settings instead of using package managers inside the worker."

@@ -60,6 +60,7 @@ const DEFAULT_SESSION_CONTEXT = {
   gatewayInstructions: "",
   providerConfig: {} as ProviderConfig,
   skillsConfig: [] as SkillContent[],
+  mcpStatus: [] as McpStatus[],
   mcpTools: {} as Record<string, McpToolDef[]>,
   mcpContext: {} as Record<string, string>,
 } as const;
@@ -69,6 +70,7 @@ let cachedResult: {
   gatewayInstructions: string;
   providerConfig: ProviderConfig;
   skillsConfig: SkillContent[];
+  mcpStatus: McpStatus[];
   mcpTools: Record<string, McpToolDef[]>;
   mcpContext: Record<string, string>;
   cachedAt: number;
@@ -91,58 +93,42 @@ function buildMcpInstructions(
     return "";
   }
 
-  // MCPs with no tools at all that need setup (explicit auth/input requirements)
-  const undiscoveredMcps = mcpStatus.filter(
-    (mcp) =>
-      !mcpToolIds.has(mcp.id) &&
-      ((mcp.requiresAuth && !mcp.authenticated) ||
-        (mcp.requiresInput && !mcp.configured))
+  const needsAuthentication = mcpStatus.filter(
+    (mcp) => mcp.requiresAuth && !mcp.authenticated
   );
-
-  // MCPs with tools visible but still needing auth to use them
-  const unauthenticatedMcps = mcpStatus.filter(
-    (mcp) => mcpToolIds.has(mcp.id) && mcp.requiresAuth && !mcp.authenticated
+  const needsConfiguration = mcpStatus.filter(
+    (mcp) => mcp.requiresInput && !mcp.configured
   );
-
-  // MCPs with no tools and no explicit auth requirement — may need plugin-level
-  // authentication (e.g. owletto device auth flow via owletto_login tool)
-  const pluginAuthMcps = mcpStatus.filter(
-    (mcp) => !mcpToolIds.has(mcp.id) && !mcp.requiresAuth && !mcp.requiresInput
-  );
+  const undiscoveredMcps = mcpStatus.filter((mcp) => !mcpToolIds.has(mcp.id));
 
   if (
-    undiscoveredMcps.length === 0 &&
-    unauthenticatedMcps.length === 0 &&
-    pluginAuthMcps.length === 0
+    needsAuthentication.length === 0 &&
+    needsConfiguration.length === 0 &&
+    undiscoveredMcps.length === 0
   ) {
     return "";
   }
 
   const lines: string[] = ["## MCP Tools Requiring Setup"];
 
+  for (const mcp of needsAuthentication) {
+    lines.push(
+      `- ⚠️ **${mcp.name}** (id: ${mcp.id}): Authentication is required. Call \`${mcp.id}_login\` to start login. After the user completes login, call \`${mcp.id}_login_check\` before retrying its tools.`
+    );
+  }
+
+  for (const mcp of needsConfiguration) {
+    lines.push(
+      `- ⚠️ **${mcp.name}** (id: ${mcp.id}): Additional MCP input is required before this server can be used. Tell the user an admin must configure the MCP inputs in settings.`
+    );
+  }
+
   for (const mcp of undiscoveredMcps) {
-    const reasons: string[] = [];
-    if (mcp.requiresAuth && !mcp.authenticated) {
-      reasons.push("OAuth authentication");
+    if (mcp.requiresAuth || mcp.requiresInput) {
+      continue;
     }
-    if (mcp.requiresInput && !mcp.configured) {
-      reasons.push("configuration");
-    }
-
     lines.push(
-      `- ⚠️ **${mcp.name}** (id: ${mcp.id}): Requires ${reasons.join(" and ")}. Start the relevant login flow if a login tool exists; otherwise tell the user an admin must connect it.`
-    );
-  }
-
-  for (const mcp of unauthenticatedMcps) {
-    lines.push(
-      `- ⚠️ **${mcp.name}** (id: ${mcp.id}): Tools are visible but require authentication to use. Start the relevant login flow if available; otherwise tell the user an admin must connect it.`
-    );
-  }
-
-  for (const mcp of pluginAuthMcps) {
-    lines.push(
-      `- **IMPORTANT** — **${mcp.name}** (id: ${mcp.id}): Memory tools (save_knowledge, search_knowledge) are NOT available because authentication is required. You MUST call the \`${mcp.id}_login\` tool NOW to start the login flow. After the user completes login in their browser, call \`${mcp.id}_login_check\` to finish authentication. Do NOT tell the user that memory is unavailable — instead, initiate login immediately.`
+      `- ⚠️ **${mcp.name}** (id: ${mcp.id}): No tools were discovered for this MCP in the current session. Do not assume a login tool exists unless it is actually registered.`
     );
   }
 
@@ -172,6 +158,7 @@ export async function getOpenClawSessionContext(): Promise<{
   gatewayInstructions: string;
   providerConfig: ProviderConfig;
   skillsConfig: SkillContent[];
+  mcpStatus: McpStatus[];
   mcpTools: Record<string, McpToolDef[]>;
   mcpContext: Record<string, string>;
 }> {
@@ -246,6 +233,7 @@ export async function getOpenClawSessionContext(): Promise<{
       gatewayInstructions,
       providerConfig: data.providerConfig || {},
       skillsConfig: data.skillsConfig || [],
+      mcpStatus: data.mcpStatus || [],
       mcpTools,
       mcpContext,
     };

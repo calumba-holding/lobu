@@ -9,7 +9,10 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BashOperations } from "@mariozechner/pi-coding-agent";
-import { createMcpToolDefinitions } from "../openclaw/custom-tools";
+import {
+  createMcpAuthToolDefinitions,
+  createMcpToolDefinitions,
+} from "../openclaw/custom-tools";
 import {
   getOpenClawSessionContext,
   invalidateSessionContextCache,
@@ -174,6 +177,9 @@ describe("bash tool proxy hint", () => {
       "sudo apt-get install -y ffmpeg",
       "brew install node",
       "nix-shell -p python3",
+      "pip install requests",
+      "npm install -g @openai/codex",
+      "bash -lc 'pnpm add zod'",
     ];
 
     for (const cmd of blockedCommands) {
@@ -203,6 +209,55 @@ describe("bash tool proxy hint", () => {
         undefined
       )
     ).rejects.toThrow("DOMAIN BLOCKED BY PROXY");
+  });
+
+  test("blocks direct gateway API access from Bash", async () => {
+    const mockBashOps: BashOperations = {
+      exec: async (_command, _cwd, { onData }) => {
+        onData(Buffer.from("ok\n"));
+        return { exitCode: 0 };
+      },
+    };
+
+    const originalDispatcherUrl = process.env.DISPATCHER_URL;
+    const originalWorkerToken = process.env.WORKER_TOKEN;
+    process.env.DISPATCHER_URL = "http://gateway:8080";
+    process.env.WORKER_TOKEN = "secret-token";
+
+    try {
+      const tools = createOpenClawTools(tempDir, {
+        bashOperations: mockBashOps,
+      });
+      const bashTool = tools.find((t) => t.name === "bash")!;
+
+      const blockedCommands = [
+        'curl "$DISPATCHER_URL/mcp/github/tools/list_repos" -H "Authorization: Bearer $WORKER_TOKEN"',
+        "curl http://gateway:8080/internal/device-auth/status?mcpId=github",
+        'node -e \'fetch("http://gateway:8080/mcp/github/tools/list_repos", { method: "POST" })\'',
+      ];
+
+      for (const cmd of blockedCommands) {
+        await expect(
+          bashTool.execute(
+            "call-gateway",
+            { command: cmd },
+            undefined,
+            undefined
+          )
+        ).rejects.toThrow("DIRECT GATEWAY API ACCESS BLOCKED");
+      }
+    } finally {
+      if (originalDispatcherUrl === undefined) {
+        delete process.env.DISPATCHER_URL;
+      } else {
+        process.env.DISPATCHER_URL = originalDispatcherUrl;
+      }
+      if (originalWorkerToken === undefined) {
+        delete process.env.WORKER_TOKEN;
+      } else {
+        process.env.WORKER_TOKEN = originalWorkerToken;
+      }
+    }
   });
 });
 
@@ -304,6 +359,129 @@ describe("callMcpTool", () => {
 
     const result = await callMcpTool(gw, "mcp1", "missing_tool", {});
     expect(result.content[0].text).toContain("Error:");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MCP auth tools
+// ---------------------------------------------------------------------------
+
+describe("createMcpAuthToolDefinitions", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const gw = {
+    gatewayUrl: "http://gateway:8080",
+    workerToken: "worker-token",
+    channelId: "channel-1",
+    conversationId: "conv-1",
+    platform: "slack",
+  };
+
+  test("creates login, login_check, and logout tools for auth-capable MCPs", () => {
+    const tools = createMcpAuthToolDefinitions(
+      [
+        {
+          id: "github",
+          name: "GitHub",
+          requiresAuth: true,
+          authenticated: false,
+          configured: true,
+        },
+        {
+          id: "plain",
+          name: "Plain",
+          requiresAuth: false,
+          authenticated: false,
+          configured: true,
+        },
+      ] as any,
+      gw
+    );
+
+    expect(tools.map((tool) => tool.name)).toEqual([
+      "github_login",
+      "github_login_check",
+      "github_logout",
+    ]);
+  });
+
+  test("skips auth tools that would collide with existing tool names", () => {
+    const tools = createMcpAuthToolDefinitions(
+      [
+        {
+          id: "owletto",
+          name: "Owletto",
+          requiresAuth: true,
+          authenticated: false,
+          configured: true,
+        },
+      ] as any,
+      gw,
+      new Set(["owletto_login"])
+    );
+
+    expect(tools.map((tool) => tool.name)).toEqual([
+      "owletto_login_check",
+      "owletto_logout",
+    ]);
+  });
+
+  test("login tool returns a structured login_started payload", async () => {
+    globalThis.fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : input.url;
+      if (url.endsWith("/internal/device-auth/status?mcpId=github")) {
+        return new Response(JSON.stringify({ authenticated: false }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (
+        url.endsWith("/internal/device-auth/start") &&
+        init?.method === "POST"
+      ) {
+        return new Response(
+          JSON.stringify({
+            userCode: "CODE-123",
+            verificationUri: "https://example.com/device",
+            verificationUriComplete: "https://example.com/device?code=CODE-123",
+            expiresIn: 600,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    };
+
+    const [loginTool] = createMcpAuthToolDefinitions(
+      [
+        {
+          id: "github",
+          name: "GitHub",
+          requiresAuth: true,
+          authenticated: false,
+          configured: true,
+        },
+      ] as any,
+      gw
+    );
+
+    const result = await loginTool!.execute("call-1", {}, undefined, undefined);
+    const text = result.content
+      .filter((c: any) => c.type === "text")
+      .map((c: any) => c.text)
+      .join("\n");
+    const parsed = JSON.parse(text);
+
+    expect(parsed.status).toBe("login_started");
+    expect(parsed.mcp_id).toBe("github");
+    expect(parsed.user_code).toBe("CODE-123");
   });
 });
 

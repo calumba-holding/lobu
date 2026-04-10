@@ -7,12 +7,15 @@ import type { GatewayParams, TextResult } from "../shared/tool-implementations";
 import {
   askUserQuestion,
   callMcpTool,
+  checkMcpLogin,
   cancelReminder,
   generateAudio,
   generateImage,
   getChannelHistory,
   listReminders,
+  logoutMcp,
   scheduleReminder,
+  startMcpLogin,
   uploadUserFile,
 } from "../shared/tool-implementations";
 
@@ -283,6 +286,68 @@ export function createMcpToolDefinitions(
             )
           ),
       });
+    }
+  }
+
+  return tools;
+}
+
+export function createMcpAuthToolDefinitions(
+  mcpStatus: Array<{
+    id: string;
+    name: string;
+    requiresAuth: boolean;
+    requiresInput?: boolean;
+    authenticated?: boolean;
+    configured?: boolean;
+  }>,
+  gw: GatewayParams,
+  existingToolNames: Set<string> = new Set()
+): ToolDefinition[] {
+  const tools: ToolDefinition[] = [];
+
+  for (const mcp of mcpStatus) {
+    if (!mcp.requiresAuth) {
+      continue;
+    }
+
+    const loginToolName = `${mcp.id}_login`;
+    if (!existingToolNames.has(loginToolName)) {
+      tools.push(
+        defineTool({
+          name: loginToolName,
+          description: `Start the authentication flow for the ${mcp.name} MCP. Use this when ${mcp.name} requires login before its tools can be used.`,
+          parameters: Type.Object({}),
+          run: () => startMcpLogin(gw, { mcpId: mcp.id }),
+        })
+      );
+      existingToolNames.add(loginToolName);
+    }
+
+    const checkToolName = `${mcp.id}_login_check`;
+    if (!existingToolNames.has(checkToolName)) {
+      tools.push(
+        defineTool({
+          name: checkToolName,
+          description: `Check whether authentication for the ${mcp.name} MCP has completed. Call this after the user finishes login.`,
+          parameters: Type.Object({}),
+          run: () => checkMcpLogin(gw, { mcpId: mcp.id }),
+        })
+      );
+      existingToolNames.add(checkToolName);
+    }
+
+    const logoutToolName = `${mcp.id}_logout`;
+    if (!existingToolNames.has(logoutToolName)) {
+      tools.push(
+        defineTool({
+          name: logoutToolName,
+          description: `Remove the stored authentication credential for the ${mcp.name} MCP.`,
+          parameters: Type.Object({}),
+          run: () => logoutMcp(gw, { mcpId: mcp.id }),
+        })
+      );
+      existingToolNames.add(logoutToolName);
     }
   }
 

@@ -37,6 +37,39 @@ const DEFAULT_PACKAGE_MANAGER_DENY_PREFIXES = [
   "sudo nix-shell ",
   "sudo nix-env ",
   "sudo nix profile ",
+  "pip install ",
+  "pip3 install ",
+  "uv pip install ",
+  "npm install ",
+  "npm i ",
+  "pnpm install ",
+  "pnpm add ",
+  "yarn install ",
+  "yarn add ",
+  "bun install ",
+  "bun add ",
+  "cargo install ",
+  "go install ",
+  "gem install ",
+  "poetry add ",
+  "composer require ",
+];
+
+const DIRECT_PACKAGE_INSTALL_PATTERNS = [
+  /(^|[\s"'`;|&()])(?:sudo\s+)?(?:apt|apt-get|yum|dnf|apk|pacman|zypper|brew)\s+(?:install|upgrade|add)\b/i,
+  /(^|[\s"'`;|&()])(?:sudo\s+)?(?:nix-shell|nix-env)\b/i,
+  /(^|[\s"'`;|&()])(?:sudo\s+)?nix\s+profile\b/i,
+  /(^|[\s"'`;|&()])(?:pip|pip3)\s+install\b/i,
+  /(^|[\s"'`;|&()])uv\s+pip\s+install\b/i,
+  /(^|[\s"'`;|&()])npm\s+(?:install|i)\b/i,
+  /(^|[\s"'`;|&()])pnpm\s+(?:install|add)\b/i,
+  /(^|[\s"'`;|&()])yarn\s+(?:install|add|global\s+add)\b/i,
+  /(^|[\s"'`;|&()])bun\s+(?:install|add)\b/i,
+  /(^|[\s"'`;|&()])cargo\s+install\b/i,
+  /(^|[\s"'`;|&()])go\s+install\b/i,
+  /(^|[\s"'`;|&()])gem\s+install\b/i,
+  /(^|[\s"'`;|&()])poetry\s+add\b/i,
+  /(^|[\s"'`;|&()])composer\s+require\b/i,
 ];
 
 export function isDirectPackageInstallCommand(command: string): boolean {
@@ -45,8 +78,11 @@ export function isDirectPackageInstallCommand(command: string): boolean {
     return false;
   }
 
-  return DEFAULT_PACKAGE_MANAGER_DENY_PREFIXES.some((prefix) =>
-    trimmed.startsWith(prefix.toLowerCase())
+  return (
+    DEFAULT_PACKAGE_MANAGER_DENY_PREFIXES.some((prefix) =>
+      trimmed.startsWith(prefix.toLowerCase())
+    ) ||
+    DIRECT_PACKAGE_INSTALL_PATTERNS.some((pattern) => pattern.test(trimmed))
   );
 }
 

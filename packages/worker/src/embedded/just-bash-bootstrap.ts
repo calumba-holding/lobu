@@ -13,6 +13,7 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { BashOperations } from "@mariozechner/pi-coding-agent";
+import { stripSensitiveWorkerEnv } from "../shared/sensitive-env";
 
 const EMBEDDED_BASH_LIMITS = {
   maxCommandCount: 50_000,
@@ -97,10 +98,7 @@ async function buildCustomCommands(
         const invocation = buildBinaryInvocation(binaryPath, args);
 
         // Convert ctx.env (Map-like) to a plain Record for child_process
-        const envRecord: Record<string, string> = { ...process.env } as Record<
-          string,
-          string
-        >;
+        const envRecord = stripSensitiveWorkerEnv(process.env);
         if (ctx.env && typeof ctx.env.forEach === "function") {
           ctx.env.forEach((v: string, k: string) => {
             envRecord[k] = v;
@@ -194,11 +192,7 @@ export async function createEmbeddedBashOps(): Promise<BashOperations> {
   const bashInstance = new Bash({
     fs: bashFs,
     cwd: "/",
-    env: Object.fromEntries(
-      Object.entries(process.env).filter(
-        (entry): entry is [string, string] => entry[1] !== undefined
-      )
-    ),
+    env: stripSensitiveWorkerEnv(process.env),
     executionLimits: EMBEDDED_BASH_LIMITS,
     ...(network && { network }),
     ...(customCommands.length > 0 && { customCommands }),
