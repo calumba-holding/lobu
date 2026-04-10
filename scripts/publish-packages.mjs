@@ -97,7 +97,13 @@ function isVersionPublished(name, version) {
   return result.status === 0 && result.stdout.trim() === version;
 }
 
-async function publishPackage({ dir, transform }) {
+function publishArgs(otp) {
+  const args = ["publish", "--access", "public"];
+  if (otp) args.push(`--otp=${otp}`);
+  return args;
+}
+
+async function publishPackage({ dir, transform }, otp) {
   const absDir = path.join(REPO_ROOT, dir);
   const pkgPath = path.join(absDir, "package.json");
   const originalText = await readFile(pkgPath, "utf8");
@@ -121,7 +127,7 @@ async function publishPackage({ dir, transform }) {
     }
 
     console.log(`  → publishing ${pkg.name}@${pkg.version}`);
-    run("npm", ["publish", "--access", "public"], { cwd: absDir });
+    run("npm", publishArgs(otp), { cwd: absDir });
   } finally {
     if (mutated) {
       await writeFile(pkgPath, originalText, "utf8");
@@ -129,18 +135,48 @@ async function publishPackage({ dir, transform }) {
   }
 }
 
+function parseArgs(argv) {
+  // Positional bump: patch | minor | major | <explicit-version> | skip
+  // Flags: --otp=<code>, --skip-build, --skip-bump
+  const positional = [];
+  const flags = { otp: process.env.NPM_OTP, skipBuild: false, skipBump: false };
+  for (const arg of argv) {
+    if (arg.startsWith("--otp=")) {
+      flags.otp = arg.slice("--otp=".length);
+    } else if (arg === "--skip-build") {
+      flags.skipBuild = true;
+    } else if (arg === "--skip-bump") {
+      flags.skipBump = true;
+    } else {
+      positional.push(arg);
+    }
+  }
+  return { bump: positional[0] ?? "patch", ...flags };
+}
+
 async function main() {
-  const bump = process.argv[2] ?? "patch";
+  const { bump, otp, skipBuild, skipBump } = parseArgs(process.argv.slice(2));
 
-  console.log(`\n[1/3] Bumping version (${bump})`);
-  run("node", ["scripts/bump-version.mjs", bump]);
+  if (skipBump) {
+    console.log("\n[1/3] Skipping version bump (--skip-bump)");
+  } else {
+    console.log(`\n[1/3] Bumping version (${bump})`);
+    run("node", ["scripts/bump-version.mjs", bump]);
+  }
 
-  console.log("\n[2/3] Building packages");
-  run("bun", ["run", "build:packages"]);
+  if (skipBuild) {
+    console.log("\n[2/3] Skipping build (--skip-build)");
+  } else {
+    console.log("\n[2/3] Building packages");
+    run("bun", ["run", "build:packages"]);
+  }
 
   console.log("\n[3/3] Publishing to npm");
+  if (otp) {
+    console.log("  (using --otp from command line or $NPM_OTP)");
+  }
   for (const pkg of PACKAGES) {
-    await publishPackage(pkg);
+    await publishPackage(pkg, otp);
   }
 
   console.log("\nDone.");
