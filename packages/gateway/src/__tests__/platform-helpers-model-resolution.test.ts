@@ -208,6 +208,47 @@ describe("resolveAgentOptions model resolution", () => {
       ],
     });
   });
+
+  test("injects Owletto mcpUrl/gatewayAuthUrl when override omits config", async () => {
+    process.env.DISPATCHER_SERVICE_NAME = "lobu-gateway";
+    process.env.KUBERNETES_NAMESPACE = "lobu";
+
+    const settingsStore = {
+      getEffectiveSettings: async () =>
+        ({
+          pluginsConfig: {
+            plugins: [
+              {
+                source: "@lobu/owletto-openclaw",
+                slot: "memory",
+                enabled: true,
+              },
+            ],
+          },
+        }) as any,
+    };
+
+    const resolved = await resolveAgentOptions(
+      "agent-1",
+      {},
+      settingsStore as any
+    );
+
+    expect(resolved.pluginsConfig).toEqual({
+      plugins: [
+        {
+          source: "@lobu/owletto-openclaw",
+          slot: "memory",
+          enabled: true,
+          config: {
+            mcpUrl:
+              "http://lobu-gateway.lobu.svc.cluster.local:8080/mcp/owletto",
+            gatewayAuthUrl: "http://lobu-gateway.lobu.svc.cluster.local:8080",
+          },
+        },
+      ],
+    });
+  });
 });
 
 describe("hasConfiguredProvider", () => {

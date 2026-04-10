@@ -1,49 +1,44 @@
 ---
 title: Security
-description: Core security model, secrets handling, and MCP proxy behavior.
+description: Isolation, network policy, credentials, and MCP proxy behavior.
 ---
 
-Lobu is designed so agent execution is isolated while sensitive auth and network control stay centralized.
+Lobu is built so a compromised worker session cannot leak secrets or reach arbitrary networks. Secrets and outbound policy live on the gateway; workers run sandboxed with no ambient trust.
 
-## Security Model
+## Core Model
 
-- Worker execution is isolated per conversation/session.
-- Gateway is the control plane for routing, auth, and policy.
-- Outbound traffic is policy-controlled through the gateway HTTP proxy (port 8118).
-
-For deeper details, see the repository security document: [docs/SECURITY.md](https://github.com/lobu-ai/lobu/blob/main/docs/SECURITY.md).
-
-## Secrets
-
-- Provider credentials are managed on the gateway side. Integration auth (GitHub, Google, etc.) is handled by Owletto.
-- Workers should not depend on long-lived raw credentials in their runtime context.
-- Device-code auth flows and settings links are used to collect/refresh auth safely.
+- **Per-session workers** — each conversation runs in its own sandboxed worker (pod in Kubernetes, container in Docker). Workspaces and state do not cross sessions.
+- **Gateway is the control plane** — all outbound HTTP, credential resolution, tool policy, and MCP calls route through it.
+- **Workers never see real secrets** — provider credentials are replaced with opaque placeholder tokens; the gateway's secret proxy swaps them back before forwarding to upstream APIs.
 
 ## Network Isolation
 
-Lobu uses a two-network Docker architecture:
+Workers have no direct route to the internet.
 
-- **`lobu-public`**: gateway ingress (external traffic).
-- **`lobu-internal`**: worker-to-gateway traffic only. Workers have no direct external route.
+- **Docker**: two networks — `lobu-public` (gateway ingress) and `lobu-internal` (worker ↔ gateway only). The internal network is marked `internal: true`, so no egress route exists at the Docker layer.
+- **Kubernetes**: `NetworkPolicies` restrict worker egress to the gateway. Optional runtime hardening via **gVisor**, **Kata Containers**, or **Firecracker** microVMs when the cluster supports it.
 
-All worker outbound HTTP traffic routes through the gateway HTTP proxy on port 8118. Domain access is controlled by environment variables:
+All worker outbound HTTP goes through the gateway's HTTP proxy on port **8118** (`HTTP_PROXY=http://gateway:8118`). Domain access is controlled by env vars:
 
-| Variable | Description |
-|----------|-------------|
-| `WORKER_ALLOWED_DOMAINS` | Domains workers can reach. Empty = no access. `*` = unrestricted. |
-| `WORKER_DISALLOWED_DOMAINS` | Domains to block when `WORKER_ALLOWED_DOMAINS=*`. |
+| Variable | Behavior |
+|---|---|
+| `WORKER_ALLOWED_DOMAINS` | unset/empty → no access (default). `*` → unrestricted. Otherwise a comma-separated allowlist. |
+| `WORKER_DISALLOWED_DOMAINS` | Blocklist, applied when `WORKER_ALLOWED_DOMAINS=*`. |
 
-Domain format: exact match (`api.example.com`) or wildcard (`.example.com` matches all subdomains).
+Domain format: exact (`api.example.com`) or wildcard (`.example.com` matches all subdomains).
+
+## Credentials
+
+- **Provider credentials** (Anthropic, OpenAI, Bedrock, …) are stored on the gateway. Workers receive opaque placeholder tokens; the gateway secret proxy swaps them into real values only for outbound requests. A compromised worker cannot exfiltrate the underlying credential.
+- **Integration auth** (GitHub, Google, Linear, …) is handled by [Owletto](https://github.com/lobu-ai/owletto). Workers call these APIs through Owletto MCP tools and never touch OAuth tokens directly.
+- **Per-user MCP credentials** are collected via the device-auth flow and injected by the gateway MCP proxy per call.
 
 ## MCP Proxy
 
-- Workers access MCP capabilities through gateway-managed MCP config/proxy paths.
-- Per-user credentials are resolved via the device-auth flow and injected by the gateway proxy.
-- The MCP proxy blocks requests to reserved IP ranges (SSRF protection).
-- This keeps tool access extensible without exposing global secrets directly to workers.
+- Workers discover MCP tools through the gateway and call them with their own JWT token scoped to the agent.
+- The proxy enforces **SSRF protection**: upstream MCP URLs that resolve to internal or private IP ranges are blocked.
+- Tool-approval policy (allow / deny / approve-per-call) is applied by the proxy before the upstream call.
 
-## Permissions Section
+## Further Reading
 
-Permissions are managed as domain-level policies (for example `Always`, `Session`, or time-limited access):
-
-![Permissions section from homepage demo](/images/docs/security-permissions-section.png)
+See [docs/SECURITY.md](https://github.com/lobu-ai/lobu/blob/main/docs/SECURITY.md) for the detailed threat model and per-runtime controls.

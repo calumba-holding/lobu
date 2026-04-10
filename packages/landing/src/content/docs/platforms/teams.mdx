@@ -3,13 +3,8 @@ title: Microsoft Teams
 description: Connect a Lobu agent to Microsoft Teams as a bot.
 ---
 
-import { SampleChat, TEAMS_THEME } from "../../../components/SampleChat";
+import { PlatformChatExamples } from "../../../components/PlatformChatExamples";
 import { PlatformConfigTable } from "../../../components/PlatformConfigTable";
-import { useCases } from "../../../use-cases";
-
-export const networkCase = useCases.find((u) => u.id === "network");
-export const skillsCase = useCases.find((u) => u.id === "skills");
-export const schedulesCase = useCases.find((u) => u.id === "schedules");
 
 Lobu connects to Microsoft Teams through the [Chat SDK](https://github.com/vercel/chat) Teams adapter, using Azure Bot Framework under the hood.
 
@@ -20,11 +15,9 @@ Lobu connects to Microsoft Teams through the [Chat SDK](https://github.com/verce
 3. In the Azure Bot's **Channels** section, enable the **Microsoft Teams** channel.
 4. Run `lobu connections add teams` to add the connection (prompts for the app ID and app password), or run `lobu init` to scaffold a new project and pick Microsoft Teams in the wizard.
 
-<div class="not-content chat-grid-fullwidth grid gap-6 my-6 md:grid-cols-3">
-  <SampleChat useCase={networkCase} theme={TEAMS_THEME} />
-  <SampleChat useCase={skillsCase} theme={TEAMS_THEME} />
-  <SampleChat useCase={schedulesCase} theme={TEAMS_THEME} />
-</div>
+## Interactive Examples
+
+<PlatformChatExamples platform="teams" />
 
 ## Configuration
 

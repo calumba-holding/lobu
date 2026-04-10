@@ -12,88 +12,107 @@
 import type { ChatMessage, InlineButton, UseCase } from "../types";
 
 export interface ChatTheme {
-  /** Brand primary color — used for action button backgrounds and accents */
+  /** Brand primary color — used for button outline, user bubble tint, hover glow */
   primary: string;
-  /** Outer window background and border */
+  /** Outer window background */
   bg: string;
+  /** Outer window border */
   border: string;
   /** Bot (incoming) message bubble */
   botBubbleBg: string;
   botBubbleBorder: string;
-  /** User (outgoing) message bubble */
+  /** User (outgoing) message bubble — derived from primary */
   userBubbleBg: string;
   userBubbleBorder: string;
-  /** Glow/shadow color used on button hover */
+  /** Glow/shadow color used on button hover — derived from primary */
   buttonGlow: string;
+}
+
+/**
+ * Convert a hex color to "r, g, b" for rgba() composition.
+ * Only supports #rrggbb.
+ */
+function hexToRgb(hex: string): string {
+  const clean = hex.replace("#", "");
+  const r = parseInt(clean.slice(0, 2), 16);
+  const g = parseInt(clean.slice(2, 4), 16);
+  const b = parseInt(clean.slice(4, 6), 16);
+  return `${r}, ${g}, ${b}`;
+}
+
+/**
+ * Build a ChatTheme from a primary color + window chrome.
+ * User bubble tint, border, and button glow are all derived from primary.
+ */
+export function createTheme(opts: {
+  primary: string;
+  bg: string;
+  border: string;
+  botBubbleBg: string;
+  botBubbleBorder: string;
+}): ChatTheme {
+  const rgb = hexToRgb(opts.primary);
+  return {
+    primary: opts.primary,
+    bg: opts.bg,
+    border: opts.border,
+    botBubbleBg: opts.botBubbleBg,
+    botBubbleBorder: opts.botBubbleBorder,
+    userBubbleBg: `rgba(${rgb}, 0.18)`,
+    userBubbleBorder: `rgba(${rgb}, 0.4)`,
+    buttonGlow: `rgba(${rgb}, 0.35)`,
+  };
 }
 
 // --- Preset themes ---
 
-export const TELEGRAM_THEME: ChatTheme = {
+export const TELEGRAM_THEME = createTheme({
   primary: "#f97316",
   bg: "#0b0c0f",
   border: "#23262d",
   botBubbleBg: "#171a20",
   botBubbleBorder: "#2a2f38",
-  userBubbleBg: "rgba(249, 115, 22, 0.18)",
-  userBubbleBorder: "rgba(249, 115, 22, 0.35)",
-  buttonGlow: "rgba(249, 115, 22, 0.35)",
-};
+});
 
-export const SLACK_THEME: ChatTheme = {
+export const SLACK_THEME = createTheme({
   primary: "#36c5ab",
   bg: "#1a1d21",
   border: "#2c2f33",
   botBubbleBg: "#222529",
   botBubbleBorder: "#32353a",
-  userBubbleBg: "rgba(54, 197, 171, 0.18)",
-  userBubbleBorder: "rgba(54, 197, 171, 0.35)",
-  buttonGlow: "rgba(54, 197, 171, 0.35)",
-};
+});
 
-export const DISCORD_THEME: ChatTheme = {
+export const DISCORD_THEME = createTheme({
   primary: "#5865f2",
   bg: "#313338",
   border: "#3f4147",
   botBubbleBg: "#383a40",
   botBubbleBorder: "#4a4d55",
-  userBubbleBg: "rgba(88, 101, 242, 0.22)",
-  userBubbleBorder: "rgba(88, 101, 242, 0.45)",
-  buttonGlow: "rgba(88, 101, 242, 0.4)",
-};
+});
 
-export const WHATSAPP_THEME: ChatTheme = {
+export const WHATSAPP_THEME = createTheme({
   primary: "#25d366",
   bg: "#0b141a",
   border: "#1f2c33",
   botBubbleBg: "#1f2c33",
   botBubbleBorder: "#2a3942",
-  userBubbleBg: "rgba(37, 211, 102, 0.2)",
-  userBubbleBorder: "rgba(37, 211, 102, 0.4)",
-  buttonGlow: "rgba(37, 211, 102, 0.35)",
-};
+});
 
-export const TEAMS_THEME: ChatTheme = {
+export const TEAMS_THEME = createTheme({
   primary: "#6264a7",
   bg: "#1f1f1f",
   border: "#333333",
   botBubbleBg: "#292929",
   botBubbleBorder: "#3a3a3a",
-  userBubbleBg: "rgba(98, 100, 167, 0.24)",
-  userBubbleBorder: "rgba(98, 100, 167, 0.45)",
-  buttonGlow: "rgba(98, 100, 167, 0.35)",
-};
+});
 
-export const GCHAT_THEME: ChatTheme = {
+export const GCHAT_THEME = createTheme({
   primary: "#8ab4f8",
   bg: "#1f1f1f",
   border: "#303134",
   botBubbleBg: "#2a2b2e",
   botBubbleBorder: "#3c3d40",
-  userBubbleBg: "rgba(138, 180, 248, 0.22)",
-  userBubbleBorder: "rgba(138, 180, 248, 0.42)",
-  buttonGlow: "rgba(138, 180, 248, 0.35)",
-};
+});
 
 // --- ChatBubble (exported for custom compositions) ---
 

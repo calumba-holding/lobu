@@ -29,74 +29,49 @@ Agent settings control behavior of each worker session.
 - Add only required domains/grants.
 - Prefer explicit permission grants over broad access.
 
-## Memory Plugin Defaults
+## Memory Plugins
 
-Lobu agents can persist memories across conversations. The memory system is pluggable — you choose the backend during `lobu init` or by setting the `MEMORY_URL` environment variable.
+Memory is pluggable. The gateway picks a default from `MEMORY_URL`; any agent can override it via `pluginsConfig`.
 
-### Filesystem memory (`@openclaw/native-memory`)
+### Defaults
 
-The default when `MEMORY_URL` is not set. Memories are stored as files on the worker's local disk inside its workspace directory. In Kubernetes this is a per-thread PersistentVolumeClaim mounted at `/workspace`; in Docker it's a host directory at `./workspaces/{threadId}/`.
-
-Filesystem memory is simple and zero-config — it works out of the box with no external services. The trade-off is that memories are scoped to a single thread's workspace and aren't shared across threads or agents.
-
-### Owletto memory (`@lobu/owletto-openclaw`)
-
-Activated when `MEMORY_URL` is set (e.g. during `lobu init` when you select Owletto Cloud, Owletto Local, or a custom Owletto URL). Instead of writing files locally, the agent calls Owletto's MCP server to store and retrieve memories. The gateway proxies these calls through `/mcp/owletto` and automatically configures the endpoint and auth URL — no manual wiring needed.
-
-Owletto memory provides cross-session persistence, structured knowledge management (watchers, connections, knowledge graphs), and the ability to share memory across agents.
-
-### How `lobu init` configures memory
-
-During `lobu init`, the Memory prompt offers four choices:
-
-| Choice | What happens |
+| `MEMORY_URL` | Plugin used |
 |---|---|
-| **None (filesystem memory)** | `MEMORY_URL` is left unset. Gateway defaults to `@openclaw/native-memory`. |
-| **Owletto Cloud** | `MEMORY_URL` is set to `https://owletto.com/mcp`. |
-| **Owletto Local** | An Owletto container is added to your compose file and `MEMORY_URL` is set to `http://owletto:8787/mcp`. |
-| **Custom URL** | `MEMORY_URL` is set to your provided URL. |
+| unset | `@openclaw/native-memory` — files under `/workspace` (per-thread PVC in K8s, `./workspaces/{threadId}/` in Docker). Not shared across threads. |
+| set | `@lobu/owletto-openclaw` — calls Owletto's MCP server via the gateway's `/mcp/owletto` proxy. Cross-session, shareable across agents. |
 
-### Fallback behavior
+`lobu init` sets `MEMORY_URL` for you: **Owletto Cloud** → `https://owletto.com/mcp`, **Owletto Local** → adds an Owletto container and points at `http://owletto:8787/mcp`, **Custom URL** → your value, **None** → leaves it unset.
 
-The gateway checks whether each plugin package is actually installed before using it. If the preferred plugin isn't available, it falls back gracefully:
-
-1. `MEMORY_URL` set + `@lobu/owletto-openclaw` installed → **Owletto**
-2. `MEMORY_URL` set + Owletto not installed + `@openclaw/native-memory` installed → **filesystem fallback**
-3. `MEMORY_URL` unset + `@openclaw/native-memory` installed → **filesystem**
-4. Neither plugin installed → **no memory**
+If the preferred plugin isn't installed, the gateway falls back to the other one (or to no memory if neither is installed).
 
 ### Per-agent override
 
-You can override the default for a specific agent by setting `pluginsConfig` in agent settings:
+A per-agent `pluginsConfig` **replaces** the default plugin list entirely — it does not merge. Include every plugin the agent should run.
+
+Switch one agent to Owletto:
 
 ```json
 {
   "pluginsConfig": {
     "plugins": [
-      {
-        "source": "@lobu/owletto-openclaw",
-        "slot": "memory",
-        "enabled": true
-      }
+      { "source": "@lobu/owletto-openclaw", "slot": "memory", "enabled": true }
     ]
   }
 }
 ```
 
-Or switch to native memory explicitly:
+The gateway injects the internal `mcpUrl` and `gatewayAuthUrl` automatically — you don't need to hand-write them.
+
+Switch to native memory:
 
 ```json
 {
   "pluginsConfig": {
     "plugins": [
-      {
-        "source": "@openclaw/native-memory",
-        "slot": "memory",
-        "enabled": true
-      }
+      { "source": "@openclaw/native-memory", "slot": "memory", "enabled": true }
     ]
   }
 }
 ```
 
-Set `"enabled": false` to disable memory entirely for an agent.
+Disable memory for the agent by setting `"enabled": false` (or by listing no `slot: "memory"` plugin at all).

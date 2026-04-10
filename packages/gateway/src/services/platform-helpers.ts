@@ -47,17 +47,28 @@ function normalizeOwlettoPluginConfig(
   if (
     plugin.source !== OWLETTO_PLUGIN_SOURCE ||
     plugin.slot !== "memory" ||
-    !runtimeDefault?.config ||
-    !plugin.config
+    !runtimeDefault?.config
   ) {
     return plugin;
   }
 
-  const storedMcpUrl = plugin.config.mcpUrl;
-  const storedGatewayAuthUrl = plugin.config.gatewayAuthUrl;
   const runtimeMcpUrl = runtimeDefault.config.mcpUrl;
   const runtimeGatewayAuthUrl = runtimeDefault.config.gatewayAuthUrl;
 
+  const storedMcpUrl = plugin.config?.mcpUrl;
+  const storedGatewayAuthUrl = plugin.config?.gatewayAuthUrl;
+
+  // Inject runtime defaults when the override omits mcpUrl / gatewayAuthUrl
+  // entirely — users shouldn't need to hand-write internal gateway URLs.
+  const shouldInjectMcpUrl =
+    storedMcpUrl === undefined && typeof runtimeMcpUrl === "string";
+  const shouldInjectGatewayAuthUrl =
+    storedGatewayAuthUrl === undefined &&
+    typeof runtimeGatewayAuthUrl === "string";
+
+  // Rewrite stale internal URLs that look like they were captured from a
+  // previous runtime (e.g. `http://gateway:8080/mcp/owletto`) so they match
+  // the current gateway address.
   const shouldReplaceMcpUrl =
     typeof storedMcpUrl === "string" &&
     typeof runtimeMcpUrl === "string" &&
@@ -69,7 +80,12 @@ function normalizeOwlettoPluginConfig(
     runtimeGatewayAuthUrl !== storedGatewayAuthUrl &&
     /^https?:\/\/gateway(?::\d+)?\/?$/.test(storedGatewayAuthUrl);
 
-  if (!shouldReplaceMcpUrl && !shouldReplaceGatewayAuthUrl) {
+  if (
+    !shouldInjectMcpUrl &&
+    !shouldInjectGatewayAuthUrl &&
+    !shouldReplaceMcpUrl &&
+    !shouldReplaceGatewayAuthUrl
+  ) {
     return plugin;
   }
 
@@ -77,8 +93,10 @@ function normalizeOwlettoPluginConfig(
     ...plugin,
     config: {
       ...plugin.config,
-      ...(shouldReplaceMcpUrl ? { mcpUrl: runtimeMcpUrl } : {}),
-      ...(shouldReplaceGatewayAuthUrl
+      ...(shouldInjectMcpUrl || shouldReplaceMcpUrl
+        ? { mcpUrl: runtimeMcpUrl }
+        : {}),
+      ...(shouldInjectGatewayAuthUrl || shouldReplaceGatewayAuthUrl
         ? { gatewayAuthUrl: runtimeGatewayAuthUrl }
         : {}),
     },
