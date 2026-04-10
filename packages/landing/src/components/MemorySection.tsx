@@ -317,7 +317,7 @@ export function MemorySection() {
             class="text-4xl sm:text-5xl font-bold tracking-tight leading-[1.1] mb-5"
             style={{ color: "var(--color-page-text)" }}
           >
-            Shared memory for your AI team
+            Shared memory for your team
           </h1>
           <p
             class="text-lg sm:text-xl leading-8 max-w-[40rem] mx-auto m-0"
@@ -730,7 +730,7 @@ export function MemorySection() {
                 class="text-3xl sm:text-4xl tracking-[-0.03em] mt-0 mb-3"
                 style={{ color: "var(--color-page-text)" }}
               >
-                Shared memory for your AI team
+                Shared memory for your team
               </h2>
               <p
                 class="text-base leading-7 m-0 max-w-[42rem]"
