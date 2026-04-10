@@ -1,123 +1,110 @@
 # Releasing
 
 This repo publishes four packages to npm — `@lobu/core`, `@lobu/gateway`,
-`@lobu/worker`, and `@lobu/cli` — as a single synchronized release. All four
-are pinned to the same version via `scripts/bump-version.mjs` and published
-from CI using npm trusted publishing (OIDC), so there are no long-lived
-`NPM_TOKEN` secrets or manual OTP steps.
+`@lobu/worker`, and `@lobu/cli` — as a single synchronized release.
+`charts/lobu/Chart.yaml` is also bumped in lockstep. Versioning and
+publishing are driven by
+[release-please](https://github.com/googleapis/release-please) reading
+conventional-commit messages from `main`, and publishing uses npm
+trusted publishing (OIDC), so there are no long-lived `NPM_TOKEN`
+secrets or manual OTP steps.
 
 ## TL;DR
 
-```bash
-# 1. Make a release branch and bump the version
-git checkout -b release/<new-version>
-node scripts/bump-version.mjs patch        # or minor | major | <explicit>
-git commit -am "chore(release): bump all packages to <new-version>"
-git push -u origin release/<new-version>
+**You do not bump versions by hand.** You just ship features via PRs to
+`main` with conventional commit messages, and release-please does the
+rest.
 
-# 2. Open a PR, wait for CI green, merge
-gh pr create --title "chore(release): <new-version>" --body "Release <new-version>" --base main
-gh pr merge --squash --delete-branch
+1. **Merge feature work into `main`** via PRs using conventional commit
+   messages (`feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `test:`,
+   etc.). Use `feat:` or `fix:` to trigger a version bump.
+2. **release-please opens a release PR** titled `chore(release): <new-version>`
+   automatically on every push to `main`. The PR contains:
+   - Updated `package.json` version at the root.
+   - Updated `packages/core/package.json`, `packages/gateway/package.json`,
+     `packages/worker/package.json`, `packages/cli/package.json` — all
+     synced to the new version.
+   - Updated `charts/lobu/Chart.yaml` (`version` + `appVersion`).
+   - A `CHANGELOG.md` entry generated from conventional commits since
+     the last release tag.
+3. **Merge the release PR** once you're happy with the version and
+   changelog. release-please is configured for squash merge.
+4. On merge, the same workflow automatically:
+   - Creates a GitHub release + `v<new-version>` tag.
+   - Publishes all four packages to npm via OIDC trusted publishing.
+   - Dispatches the Docker image build via `repository_dispatch`.
 
-# 3. Trigger the publish workflow
-gh workflow run publish-packages.yml -f bump=skip
-```
+No `gh workflow run`, no manual bump, no local `npm publish`. The
+release PR merge is the "release button".
 
-That's the whole flow. One branch, one PR, one workflow run.
+## How release-please picks the version
 
-## Picking a bump type
+release-please reads the conventional commit messages between the last
+`v<version>` tag and the new HEAD and applies semver rules:
 
-| Bump | When |
+| Commit prefix | Effect |
 | --- | --- |
-| `patch` | Bug fixes, refactors, docs, tests, CI tweaks. No behavior change for consumers. |
-| `minor` | Additive features: new exports, new CLI commands, new MCP tools, new agent settings fields, new platform connections. Existing consumers keep working without changes. |
-| `major` | Breaking changes: removed exports, changed worker protocol, `lobu.toml` schema changes that invalidate existing configs, etc. |
-| `<explicit>` | Skip-bumps, hotfix branches, or anything else that needs a specific version. Pass the full `X.Y.Z` string. |
+| `feat:` | minor bump (`3.0.x` → `3.1.0`) |
+| `fix:` | patch bump (`3.0.19` → `3.0.20`) |
+| `feat!:` / `BREAKING CHANGE:` footer | major bump (`3.x.y` → `4.0.0`) |
+| `docs:`, `chore:`, `ci:`, `test:`, `style:`, `refactor:`, `perf:` | no version bump, but included in changelog under "Other" |
 
-## Step 1 — Bump locally
+If you want an explicit version (e.g. `3.2.0-beta.1`), you can edit the
+release PR title before merging — release-please will honor the version
+you write.
 
-Always bump locally, not in CI. The `publish-packages.yml` workflow can bump
-(via its `bump` input), but the bump would happen only on the runner
-filesystem and never make it back to `main`, leaving `package.json` stale.
-So we bump locally, commit the bump to a release branch, and trigger publish
-with `-f bump=skip`.
+## Commit message conventions
 
-```bash
-node scripts/bump-version.mjs patch
+Scope is optional but encouraged. Use the package or area as the scope.
+Examples:
+
+- `feat(gateway): add runtime credential resolver for embedded mode`
+- `fix(worker): strip WORKER_TOKEN from bash subprocess env`
+- `docs(landing): rename Agent Prompts guide to Agent Workspace`
+- `refactor(ci): use OIDC trusted publishing, drop NPM_TOKEN path`
+- `chore(release): bump all packages to 3.1.0` — **release-please
+  generates these itself — don't write them by hand**
+
+Breaking changes go in the footer:
+
+```
+feat(gateway): rename runtime credential resolver contract
+
+BREAKING CHANGE: RuntimeProviderCredentialResolver now returns
+`{ credential?, credentialRef?, authType }` instead of a bare string.
+Update embedded host apps accordingly.
 ```
 
-This updates `package.json` and each of `packages/{core,gateway,worker,cli}/package.json`
-to the new version in lockstep. It does **not** touch `charts/` — if you
-need to bump the chart version too, do it in the same commit.
+## What the publish workflow actually does
 
-## Step 2 — PR and merge
+The `release-please.yml` workflow runs on every push to `main`:
 
-Branch protection requires a PR into `main`. Create one on a
-`release/<version>` branch:
+1. **`release-please` step** — runs
+   `googleapis/release-please-action@v4` with
+   `release-please-config.json` + `.release-please-manifest.json`.
+   Either creates/updates the release PR or, if a release PR was just
+   merged, cuts a GitHub release and tag.
+2. **`publish` job** (conditional on `releases_created == true`) —
+   runs only after the release PR merge:
+   - Checks out `main` at the release commit.
+   - `bun install --frozen-lockfile`
+   - `node scripts/publish-packages.mjs --skip-bump` — builds the four
+     packages, rewrites `workspace:*` refs to the concrete version,
+     runs `npm publish --access public` per package with
+     `NPM_CONFIG_PROVENANCE=true`.
+   - npm's OIDC trusted publisher exchange runs automatically because
+     the workflow has `id-token: write` and each package is registered
+     on npmjs.com as a trusted publisher with:
+     - Organization: `lobu-ai`
+     - Repository: `lobu`
+     - Workflow: `release-please.yml`
+     - Environment: `production`
+   - Provenance attestation is attached to every tarball.
+3. **`dispatch-docker` job** (conditional on `releases_created == true`) —
+   fires a `repository_dispatch` event so the Docker image build
+   workflow picks up the new version.
 
-```bash
-git checkout -b release/3.1.0
-node scripts/bump-version.mjs minor
-git commit -am "chore(release): bump all packages to 3.1.0"
-git push -u origin release/3.1.0
-gh pr create --title "chore(release): 3.1.0" --body "Release 3.1.0" --base main
-```
-
-Wait for the CI job on the PR to pass, then merge:
-
-```bash
-gh pr merge --squash --delete-branch
-```
-
-Squash merge keeps `main` linear — one commit per release, matching the
-convention from the existing history.
-
-## Step 3 — Publish
-
-Trigger the publish workflow against the updated `main`:
-
-```bash
-gh workflow run publish-packages.yml -f bump=skip
-```
-
-`bump=skip` tells `scripts/publish-packages.mjs` to use the version that's
-already in `package.json` (the one you just bumped in Step 1) rather than
-bumping again.
-
-The workflow:
-
-1. Checks out `main` at the merge commit.
-2. Runs `bun install --frozen-lockfile`.
-3. Runs `node scripts/publish-packages.mjs --skip-bump`, which:
-   - Builds `core`, `gateway`, `worker`, `cli`.
-   - For each package, rewrites `workspace:*` deps to the concrete version
-     in a temporary `package.json` mutation, runs `npm publish --access public`,
-     and restores the original file.
-   - Skips any package whose current version is already on npm (so partial
-     failures are retryable without a second bump).
-4. npm's OIDC trusted publisher exchange runs automatically because the
-   workflow has `id-token: write` and each package is registered as a
-   trusted publisher on npmjs.com with:
-   - Organization: `lobu-ai`
-   - Repository: `lobu`
-   - Workflow: `publish-packages.yml`
-   - Environment: `production`
-5. npm attaches a provenance attestation tied to the workflow run.
-
-A successful run takes ~40–60s. Watch it live:
-
-```bash
-gh run watch
-```
-
-Or view afterwards:
-
-```bash
-gh run list --workflow=publish-packages.yml --limit 5
-gh run view <run-id>
-```
-
-## Step 4 — Verify
+## Verification after publish
 
 ```bash
 npm view @lobu/core version
@@ -126,85 +113,91 @@ npm view @lobu/worker version
 npm view @lobu/cli version
 ```
 
-All four should match the new version. If any lag, re-trigger the workflow
-— it's idempotent.
+All four should match the version in the merged release PR.
 
 ## Recovery playbook
 
-**Publish step fails on the first package** — Fix the underlying issue, push
-a follow-up commit to `main`, re-run `gh workflow run publish-packages.yml
--f bump=skip`. Since nothing was published yet, no cleanup is needed.
+**Release PR looks wrong (bad version, missing changelog entries)** —
+edit the PR title to the version you want, or close it and push a
+`chore: trigger release-please` commit to regenerate. release-please
+re-runs on every push and will re-open the PR.
 
-**Publish step fails after some packages already landed on npm** — Fix the
-issue, push a follow-up to `main`, re-run. The script's
-`isVersionPublished` check skips the packages that already landed. The
-remaining ones will publish. No version bump needed.
+**Publish step fails after release PR merge** — fix the underlying
+issue, push a patch to `main`, and re-run the `release-please.yml`
+workflow manually with `gh workflow run release-please.yml --ref main`.
+`publish-packages.mjs` is idempotent — it skips packages already on
+npm (via `isVersionPublished`) and retries the rest.
 
-**Wrong version or broken build made it to npm** — npm allows
-`npm unpublish` only within 72 hours of first publish and only if you are
-the sole owner. In most cases you should instead:
+**Wrong or broken build made it to npm** — npm allows `npm unpublish`
+only within 72 hours and only if you're the sole owner. Prefer:
 
 ```bash
 npm deprecate '@lobu/core@<bad-version>' "broken build, use <good-version>"
 # repeat for the other three packages
 ```
 
-Then bump and publish a fixed version normally.
+Then land a fix via a new PR and let release-please cut another patch.
 
-**`workspace:*` rewrite throws** — `publish-packages.mjs` throws when it
-finds a `workspace:*` dep outside the `@lobu/*` scope. That means a new
+**`workspace:*` rewrite throws** — `publish-packages.mjs` throws when
+it finds a `workspace:*` dep outside the `@lobu/*` scope. Means a new
 workspace was added without updating the script. Open
-`scripts/publish-packages.mjs`, either add the new package to the
-`PACKAGES` array (if it should be published) or allow the ref (if it
-shouldn't).
+`scripts/publish-packages.mjs`, add the new package to the `PACKAGES`
+array or allow the ref.
 
-## If you need to publish from your laptop
+## Adding release-please to a new package
 
-Don't. CI via trusted publishing is the default path — it's faster, has
-provenance attestations, and doesn't need you to `npm login` or type an
-OTP.
+If you add a new `packages/*` workspace that should be published, two
+files need updating:
 
-If CI is down and you absolutely need to ship, the local script still
-works. You must be logged into npm as a maintainer of the `@lobu` scope.
+1. **`release-please-config.json`** — add a new entry to
+   `extra-files[]` under the root `"."` package pointing at the new
+   `package.json`:
+   ```json
+   {
+     "type": "json",
+     "path": "packages/<new-pkg>/package.json",
+     "jsonpath": "$.version"
+   }
+   ```
+2. **`scripts/publish-packages.mjs`** — add an entry to the `PACKAGES`
+   array so the publish step knows to build and publish it, with
+   `transform: rewriteWorkspaceRefs` if it uses `workspace:*` deps.
+
+## Manual publish fallback
+
+If release-please is down, the CI workflow is broken, or you need a
+hotfix published faster than the normal flow allows, you can still
+publish locally from a maintainer account on the `@lobu` npm scope.
 
 ```bash
-npm whoami                    # verify
+npm whoami                    # verify you're logged in
 npm login --auth-type=web     # if not logged in
 
-# Then either:
+# Either bump + build + publish in one shot:
 node scripts/publish-packages.mjs patch              # auto-bump + build + publish
 node scripts/publish-packages.mjs 3.1.0              # explicit version
 node scripts/publish-packages.mjs --skip-bump        # publish current package.json version
-node scripts/publish-packages.mjs --otp=123456 patch # pre-supply OTP (avoids prompt)
+node scripts/publish-packages.mjs --otp=123456 patch # pre-supply OTP
+
+# Or set OTP via env:
+NPM_OTP=123456 node scripts/publish-packages.mjs patch
 ```
 
-You can also set the OTP via env: `NPM_OTP=123456 node scripts/publish-packages.mjs patch`.
-
-## What's NOT automated
-
-- **Changelog generation.** We removed release-please. If we reinstall it
-  later, this doc gets updated.
-- **GitHub release notes.** After a publish, optionally run
-  `gh release create v<new-version> --generate-notes` to create a GitHub
-  release from the merge commit.
-- **Docker image + chart publish.** Handled by other workflows
-  (`docker-publish.yml` etc.) triggered by separate events.
-- **Version bumping of `charts/lobu/Chart.yaml`.** If you bump an npm
-  package version and also want the Helm chart to match, edit
-  `charts/lobu/Chart.yaml` in the same release commit.
+After a local publish, you **must** still land a `chore(release)`
+commit on `main` with the new version so `.release-please-manifest.json`
+stays in sync. Otherwise release-please will propose duplicate versions
+on the next run.
 
 ## Not used anymore
 
-The following files existed in earlier iterations and have been removed.
-If you see references in old docs, git history, or commit messages, know
-that they are **gone**:
+The following exist in git history — **do not resurrect them**:
 
-- `.github/workflows/release-please.yml` — abandoned release-please flow
-  with a manifest stuck at `3.0.7`. Deleted.
-- `.github/workflows/release.yml` — copy-pasted template from
-  `anthropics/claude-code-action`; created `v*` tags and tried to sync
-  releases to an unrelated repo. Deleted.
-- `release-please-config.json`, `.release-please-manifest.json` — config
-  for the above. Deleted.
+- Direct pushes to `main` for version bumps. Use a PR.
+- `gh workflow run publish-packages.yml` as the normal release path.
+  `publish-packages.yml` still exists for manual fallback but
+  release-please drives normal releases.
 - `scripts/stage-publish-package.mjs` — replaced by
   `scripts/publish-packages.mjs`.
+- The stale `release.yml` that was copy-pasted from
+  `anthropics/claude-code-action` and tried to sync releases to an
+  unrelated repo.

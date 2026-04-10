@@ -56,13 +56,15 @@ TypeScript packages must be compiled from `src/` → `dist/`. If you modify any 
 
 ## Versioning and releasing
 
-The root `package.json` version is the single source of truth for all `@lobu/*` packages. `scripts/bump-version.mjs` copies it into every `packages/*/package.json` at bump time.
+Releases are driven by [release-please](https://github.com/googleapis/release-please). You never bump versions by hand — just land feature work on `main` via PRs with conventional commit messages (`feat:`, `fix:`, `docs:`, `chore:`, etc.) and release-please opens a release PR. Merging the release PR triggers the automated publish to npm via OIDC trusted publishing and dispatches the Docker image build. See [`docs/RELEASING.md`](docs/RELEASING.md) for the full flow, commit conventions, recovery playbook, and local-publish fallback.
+
+Implementation details for when you need to change the release system itself:
 
 - **Inter-package deps MUST use `"@lobu/<name>": "workspace:*"`**, never a hardcoded version string. `scripts/publish-packages.mjs` rewrites `workspace:*` to the current root version right before `npm publish` and restores the file afterwards.
-- Don't hand-edit versions in individual package.json files. Run `node scripts/bump-version.mjs patch|minor|major|<explicit>` instead.
-- Don't re-add `@lobu/<name>: "^x.y.z"` ranges when fixing unlisted-dependency warnings — add `workspace:*` so there's still exactly one place to change.
-- Releases go through `main` via a PR on a `release/<version>` branch, then `gh workflow run publish-packages.yml -f bump=skip`. Publishing runs on npm trusted publishing (OIDC) — no `NPM_TOKEN` secret, no OTP. See [`docs/RELEASING.md`](docs/RELEASING.md) for the full flow, recovery playbook, and local-publish fallback.
-- Do NOT bump versions inside CI via the workflow's `bump` input — the bump would happen only on the runner filesystem and never make it back to `main`. Always bump locally first.
+- Don't hand-edit versions in individual `packages/*/package.json` files and don't push `chore(release)` bumps directly. release-please writes those commits via its release PR.
+- `scripts/bump-version.mjs` still exists for manual fallback, but the normal path is release-please. If you have to run it, land the version bump via a PR, not a direct push.
+- The single source of truth for the "current version" is `.release-please-manifest.json` plus the `v<version>` git tags. Keep them in sync if you ever edit either.
+- Adding a new published workspace means updating two files: `release-please-config.json` (to add `extra-files` for the new `package.json`) and `scripts/publish-packages.mjs` (`PACKAGES` array).
 
 ## Instructions
 - You MUST only do what has been asked; nothing more, nothing less.
