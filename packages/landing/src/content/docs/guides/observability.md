@@ -7,7 +7,7 @@ Lobu includes built-in observability through OpenTelemetry tracing, structured l
 
 ## Distributed tracing
 
-Lobu uses [OpenTelemetry](https://opentelemetry.io/) to trace messages end-to-end across the gateway and worker. Traces are exported via OTLP HTTP to any compatible collector (Tempo, Jaeger, Datadog, Honeycomb, etc.).
+Lobu uses [OpenTelemetry](https://opentelemetry.io/) to trace messages end-to-end across the gateway and worker. Traces are exported via OTLP gRPC to any compatible collector. We recommend [Grafana Tempo](https://grafana.com/oss/tempo/), but any OTLP-compatible backend works (Jaeger, Datadog, Honeycomb, etc.).
 
 ### What gets traced
 
@@ -35,11 +35,11 @@ Each message gets a trace ID in the format `tr-{messageId}-{timestamp}-{random}`
 
 ### Enable tracing
 
-Point `OTEL_EXPORTER_OTLP_ENDPOINT` at any OTLP HTTP collector. Tracing is automatically disabled when this variable is unset.
+Point `OTEL_EXPORTER_OTLP_ENDPOINT` at any OTLP gRPC endpoint. Tracing is automatically disabled when this variable is unset.
 
 ```bash
-# .env — use any OTLP-compatible collector
-OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4318/v1/traces
+# .env — any OTLP gRPC endpoint (default port 4317)
+OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4317
 ```
 
 Both gateway and worker initialize tracing on startup when this is set. The gateway passes the endpoint to workers automatically. You can also set this during `lobu init`.
@@ -98,7 +98,7 @@ metrics_generator:
     path: /var/tempo/metrics
 ```
 
-Then add `OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4318/v1/traces` to your `.env` and restart.
+Then add `OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4317` to your `.env` and restart.
 
 ### Kubernetes setup
 
@@ -204,7 +204,7 @@ To disable, remove `SENTRY_DSN` from your `.env`.
 
 | Variable | Component | Description |
 |----------|-----------|-------------|
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | Gateway, Worker | OTLP HTTP endpoint for trace collector (e.g., `http://collector:4318/v1/traces`) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Gateway, Worker | OTLP gRPC endpoint for trace collector (e.g., `http://collector:4317`) |
 | `SENTRY_DSN` | Gateway, Worker | Sentry DSN for error monitoring |
 | `LOG_LEVEL` | Gateway, Worker | Minimum log level (`error`, `warn`, `info`, `debug`) |
 | `LOG_FORMAT` | Gateway, Worker | Log output format (`json` or `text`) |

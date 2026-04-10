@@ -160,9 +160,9 @@ spec:
                   optional: true
 
             {{- if .Values.tempo.enabled }}
-            # OpenTelemetry OTLP endpoint for distributed tracing
+            # OpenTelemetry OTLP gRPC endpoint for distributed tracing
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: "http://{{ .Release.Name }}-tempo:4318/v1/traces"
+              value: "http://{{ .Release.Name }}-tempo:4317"
             {{- end }}
 
             # Claude configuration

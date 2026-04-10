@@ -1,11 +1,11 @@
 /**
  * OpenTelemetry tracing setup for distributed tracing.
- * Ships traces via OTLP HTTP to any compatible collector (Tempo, Jaeger, Datadog, etc.).
+ * Ships traces via OTLP gRPC to any compatible collector (Tempo, Jaeger, Datadog, etc.).
  */
 
 import type { Span, Tracer } from "@opentelemetry/api";
 import { context, SpanKind, SpanStatusCode, trace } from "@opentelemetry/api";
-import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-grpc";
 import { Resource } from "@opentelemetry/resources";
 import {
   NodeTracerProvider,
@@ -25,7 +25,7 @@ let tracer: Tracer | null = null;
 export interface OtelConfig {
   serviceName: string;
   serviceVersion?: string;
-  otlpEndpoint?: string; // e.g., "http://collector:4318/v1/traces"
+  otlpEndpoint?: string; // e.g., "http://collector:4317"
   enabled?: boolean;
 }
 
@@ -36,7 +36,7 @@ export interface OtelConfig {
  * @example
  * initTracing({
  *   serviceName: "lobu-gateway",
- *   otlpEndpoint: "http://collector:4318/v1/traces",
+ *   otlpEndpoint: "http://collector:4317",
  * });
  */
 export function initTracing(config: OtelConfig): void {
