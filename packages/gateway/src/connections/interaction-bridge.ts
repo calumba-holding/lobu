@@ -241,7 +241,7 @@ export function registerInteractionBridge(
             text,
             [
               [
-                { text: "Allow once", callback_data: `tool:${tid}:once` },
+                { text: "Allow 1 min", callback_data: `tool:${tid}:once` },
                 { text: "Allow 1h", callback_data: `tool:${tid}:1h` },
               ],
               [
@@ -251,7 +251,7 @@ export function registerInteractionBridge(
                   callback_data: `tool:${tid}:always`,
                 },
               ],
-              [{ text: "Deny", callback_data: `tool:${tid}:deny` }],
+              [{ text: "Deny always", callback_data: `tool:${tid}:deny` }],
             ]
           );
           if (sent) return;
@@ -279,7 +279,7 @@ export function registerInteractionBridge(
           Actions([
             Button({
               id: `tool:${tid}:once`,
-              label: "Allow once",
+              label: "Allow 1 min",
               value: "once",
             }),
             Button({
@@ -302,7 +302,7 @@ export function registerInteractionBridge(
             }),
             Button({
               id: `tool:${tid}:deny`,
-              label: "Deny",
+              label: "Deny always",
               style: "danger",
               value: "deny",
             }),

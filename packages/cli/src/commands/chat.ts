@@ -327,11 +327,18 @@ async function streamResponse(
                 )
               );
               const options = ["once", "1h", "24h", "always", "deny"];
+              const optionLabels: Record<string, string> = {
+                once: "1 min",
+                "1h": "1h",
+                "24h": "24h",
+                always: "always",
+                deny: "deny always",
+              };
               console.error(
                 options
                   .map(
                     (o, i) =>
-                      `  ${chalk.bold(`${i + 1}`)}. ${o === "deny" ? chalk.red(o) : chalk.green(o)}`
+                      `  ${chalk.bold(`${i + 1}`)}. ${o === "deny" ? chalk.red(optionLabels[o]) : chalk.green(optionLabels[o])}`
                   )
                   .join("\n")
               );
