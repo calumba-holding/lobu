@@ -499,7 +499,7 @@ export class WorkerGateway {
         skillsConfig,
       });
     } catch (error) {
-      logger.error("Failed to generate session context", { error });
+      logger.error("Failed to generate session context", { err: error });
       return c.json({ error: "session_context_error" }, 500);
     }
   }

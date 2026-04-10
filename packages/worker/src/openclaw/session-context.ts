@@ -189,7 +189,7 @@ export async function getOpenClawSessionContext(): Promise<{
   }
 
   try {
-    const url = new URL("worker/session-context", ensureBaseUrl(dispatcherUrl));
+    const url = new URL(`${ensureBaseUrl(dispatcherUrl)}/worker/session-context`);
     const response = await fetch(url, {
       headers: {
         Authorization: `Bearer ${workerToken}`,
