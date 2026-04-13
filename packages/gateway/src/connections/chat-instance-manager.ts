@@ -4,14 +4,21 @@
  */
 
 import { randomUUID } from "node:crypto";
+import path from "node:path";
+import { Readable } from "node:stream";
 import { createLogger, isSecretRef } from "@lobu/core";
 import type Redis from "ioredis";
 import type { CoreServices, PlatformAdapter } from "../platform";
+import type { IFileHandler } from "../platform/file-handler";
 import {
   deleteSecretsByPrefix,
   persistSecretValue,
   resolveSecretValue,
 } from "../secrets";
+import {
+  hasConfiguredProvider,
+  resolveAgentOptions,
+} from "../services/platform-helpers";
 import { SlackConnectionCoordinator } from "./slack-connection-coordinator";
 import { registerSlackPlatformHandlers } from "./slack-platform-bridge";
 import {
@@ -934,7 +941,7 @@ export class ChatInstanceManager {
       extractRoutingInfo: (body: Record<string, unknown>) =>
         this.extractPlatformRoutingInfo(name, body),
       sendMessage: (
-        _token: string,
+        token: string,
         message: string,
         options: {
           agentId: string;
@@ -943,7 +950,8 @@ export class ChatInstanceManager {
           teamId: string;
           files?: Array<{ buffer: Buffer; filename: string }>;
         }
-      ) => this.sendPlatformMessage(name, message, options),
+      ) => this.routePlatformMessage(name, token, message, options),
+      getFileHandler: (options) => this.getPlatformFileHandler(name, options),
       getConversationHistory: (
         channelId: string,
         conversationId: string | undefined,
@@ -957,6 +965,212 @@ export class ChatInstanceManager {
           limit,
           before
         ),
+    };
+  }
+
+  private getPlatformFileHandler(
+    name: string,
+    options?: {
+      connectionId?: string;
+      channelId?: string;
+      conversationId?: string;
+      teamId?: string;
+    }
+  ): IFileHandler | undefined {
+    const instance = this.resolveFileHandlerInstance(name, options);
+    if (!instance) {
+      return undefined;
+    }
+
+    if (name === "telegram") {
+      return this.createTelegramFileHandler(instance.connection);
+    }
+
+    return undefined;
+  }
+
+  private resolveFileHandlerInstance(
+    name: string,
+    options?: {
+      connectionId?: string;
+      channelId?: string;
+      conversationId?: string;
+      teamId?: string;
+    }
+  ): ManagedInstance | undefined {
+    if (options?.connectionId) {
+      const directInstance = this.instances.get(options.connectionId);
+      if (directInstance?.connection.platform === name) {
+        return directInstance;
+      }
+    }
+
+    return Array.from(this.instances.values()).find((instance) => {
+      if (instance.connection.platform !== name) {
+        return false;
+      }
+      if (options?.teamId) {
+        const configuredTeamId =
+          typeof instance.connection.metadata.teamId === "string"
+            ? instance.connection.metadata.teamId
+            : undefined;
+        if (configuredTeamId && configuredTeamId !== options.teamId) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }
+
+  private createTelegramFileHandler(
+    connection: PlatformConnection
+  ): IFileHandler | undefined {
+    const botToken = (connection.config as any).botToken;
+    if (!botToken || typeof botToken !== "string") {
+      return undefined;
+    }
+
+    const apiBaseUrl = String(
+      (connection.config as any).apiBaseUrl || "https://api.telegram.org"
+    ).replace(/\/$/, "");
+    const botUsername =
+      typeof connection.metadata.botUsername === "string"
+        ? connection.metadata.botUsername.replace(/^@/, "")
+        : undefined;
+
+    const readStreamToBuffer = async (
+      fileStream: Readable
+    ): Promise<Buffer> => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of fileStream) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      return Buffer.concat(chunks);
+    };
+
+    const parseTelegramTarget = (
+      channelId: string,
+      conversationId?: string
+    ): { chatId: string; messageThreadId?: number } => {
+      if (conversationId?.startsWith("telegram:")) {
+        const [, chatId, rawThreadId] = conversationId.split(":");
+        const messageThreadId = Number.parseInt(rawThreadId || "", 10);
+        return {
+          chatId: chatId || channelId,
+          messageThreadId: Number.isFinite(messageThreadId)
+            ? messageThreadId
+            : undefined,
+        };
+      }
+      return { chatId: channelId };
+    };
+
+    const buildTelegramPermalink = (
+      chatId: string,
+      messageId: number
+    ): string => {
+      if (/^-100\d+$/.test(chatId)) {
+        return `https://t.me/c/${chatId.slice(4)}/${messageId}`;
+      }
+      if (botUsername) {
+        return `https://t.me/${botUsername}`;
+      }
+      return `telegram://chat/${chatId}/${messageId}`;
+    };
+
+    const telegramApiRequest = async (
+      method: string,
+      body: FormData | URLSearchParams
+    ) => {
+      const response = await fetch(`${apiBaseUrl}/bot${botToken}/${method}`, {
+        method: "POST",
+        body,
+      });
+      const text = await response.text();
+      let payload: any = null;
+      try {
+        payload = JSON.parse(text);
+      } catch {
+        payload = null;
+      }
+      if (!response.ok || payload?.ok === false || !payload?.result) {
+        throw new Error(
+          `Telegram ${method} failed: ${response.status} ${text}`
+        );
+      }
+      return payload.result;
+    };
+
+    return {
+      downloadFile: async (fileId) => {
+        const fileResult = await telegramApiRequest(
+          "getFile",
+          new URLSearchParams({ file_id: fileId })
+        );
+        const filePath = String(fileResult.file_path || "");
+        if (!filePath) {
+          throw new Error(
+            `Telegram getFile returned no file_path for ${fileId}`
+          );
+        }
+        const downloadUrl = `${apiBaseUrl}/file/bot${botToken}/${filePath}`;
+        const response = await fetch(downloadUrl);
+        if (!response.ok) {
+          throw new Error(
+            `Telegram file download failed: ${response.status} ${await response.text()}`
+          );
+        }
+        const buffer = Buffer.from(await response.arrayBuffer());
+        return {
+          stream: Readable.from(buffer),
+          metadata: {
+            id: fileId,
+            name: path.basename(filePath),
+            size: Number(fileResult.file_size || buffer.length),
+            url: downloadUrl,
+            downloadUrl,
+            permalink: downloadUrl,
+          },
+        };
+      },
+      uploadFile: async (fileStream, options) => {
+        const target = parseTelegramTarget(options.channelId, options.threadTs);
+        const buffer = await readStreamToBuffer(fileStream);
+        const form = new FormData();
+        form.set("chat_id", target.chatId);
+        if (target.messageThreadId) {
+          form.set("message_thread_id", String(target.messageThreadId));
+        }
+        if (options.initialComment) {
+          form.set("caption", options.initialComment);
+        }
+        form.set(
+          options.voiceMessage ? "voice" : "document",
+          new Blob([buffer]),
+          options.filename
+        );
+
+        const result = await telegramApiRequest(
+          options.voiceMessage ? "sendVoice" : "sendDocument",
+          form
+        );
+        const media = options.voiceMessage ? result.voice : result.document;
+        const fileId = String(media?.file_id || result.document?.file_id || "");
+        if (!fileId) {
+          throw new Error("Telegram upload did not return a file_id");
+        }
+        const messageId = Number(result.message_id || 0);
+        return {
+          fileId,
+          permalink: buildTelegramPermalink(target.chatId, messageId),
+          name: options.filename,
+          size: buffer.length,
+        };
+      },
+      generateFileToken: () => "",
+      validateFileToken: () => ({ valid: false, error: "Not supported" }),
+      getSessionFiles: () => [],
+      cleanupSession: () => undefined,
     };
   }
 
@@ -992,6 +1206,99 @@ export class ChatInstanceManager {
     return {
       channelId: whatsapp.chat,
       conversationId: whatsapp.chat,
+    };
+  }
+
+  async routePlatformMessage(
+    name: string,
+    token: string,
+    message: string,
+    options: {
+      agentId: string;
+      channelId: string;
+      conversationId?: string;
+      teamId: string;
+      files?: Array<{ buffer: Buffer; filename: string }>;
+    }
+  ): Promise<{
+    messageId: string;
+    eventsUrl?: string;
+    queued?: boolean;
+  }> {
+    if (options.files?.length) {
+      throw new Error(
+        `Platform "${name}" does not support file uploads via Chat SDK routing yet`
+      );
+    }
+
+    const connection = await this.selectConnectionForPlatform(
+      name,
+      options.channelId,
+      options.teamId
+    );
+    if (!connection) {
+      throw new Error(`No active ${name} connection is available`);
+    }
+
+    const sessionManager = this.services.getSessionManager();
+    const queueProducer = this.services.getQueueProducer();
+    const agentSettingsStore = this.services.getAgentSettingsStore();
+    const messageId = randomUUID();
+    const conversationId = options.conversationId || options.channelId;
+    const sessionId = `platform-chat:${name}:${options.channelId}:${conversationId}`;
+    const sessionUserId = `${name}-${token.slice(0, 8) || "anonymous"}`;
+
+    if (!(await hasConfiguredProvider(options.agentId, agentSettingsStore))) {
+      throw new Error(
+        "No model configured. Ask an admin to connect a provider for the base agent."
+      );
+    }
+
+    const agentOptions = await resolveAgentOptions(
+      options.agentId,
+      {},
+      agentSettingsStore
+    );
+
+    await sessionManager.setSession({
+      conversationId: sessionId,
+      channelId: sessionId,
+      userId: sessionUserId,
+      threadCreator: sessionUserId,
+      lastActivity: Date.now(),
+      createdAt: Date.now(),
+      status: "created",
+      agentId: options.agentId,
+    });
+
+    await queueProducer.enqueueMessage({
+      userId: options.channelId,
+      conversationId,
+      messageId,
+      channelId: options.channelId,
+      teamId: options.teamId,
+      agentId: options.agentId,
+      botId: `${name}-platform`,
+      platform: name,
+      messageText: message,
+      platformMetadata: {
+        connectionId: connection.id,
+        chatId: options.channelId,
+        responseThreadId: options.conversationId,
+        sessionId,
+        source: "platform-cli",
+      },
+      agentOptions,
+    });
+
+    logger.info(
+      `Queued platform message via ${name}: agentId=${options.agentId}, channelId=${options.channelId}, conversationId=${conversationId}, sessionId=${sessionId}`
+    );
+
+    return {
+      messageId,
+      eventsUrl: `/api/v1/agents/${encodeURIComponent(sessionId)}/events`,
+      queued: true,
     };
   }
 

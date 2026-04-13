@@ -20,6 +20,8 @@ export interface FileUploadResult {
   permalink: string;
   name: string;
   size: number;
+  delivery?: "platform-upload" | "artifact-url";
+  artifactId?: string;
 }
 
 export interface FileUploadOptions {

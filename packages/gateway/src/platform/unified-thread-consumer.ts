@@ -12,6 +12,7 @@ import type {
   ThreadResponsePayload,
 } from "../infrastructure/queue";
 import type { PlatformRegistry } from "../platform";
+import { broadcastToAgent } from "../routes/public/agent";
 import type { ResponseRenderer } from "./response-renderer";
 
 const logger = createLogger("unified-thread-consumer");
@@ -150,20 +151,75 @@ export class UnifiedThreadResponseConsumer {
     data: ThreadResponsePayload,
     sessionKey: string
   ): Promise<void> {
+    const cliSessionId =
+      typeof data.platformMetadata?.sessionId === "string"
+        ? (data.platformMetadata.sessionId as string)
+        : null;
+
+    if (data.customEvent) {
+      const eventPayload = {
+        ...data.customEvent.data,
+        timestamp: data.timestamp,
+        messageId: data.messageId,
+      };
+      broadcastToAgent(
+        data.conversationId,
+        data.customEvent.name,
+        eventPayload
+      );
+      if (cliSessionId) {
+        broadcastToAgent(cliSessionId, data.customEvent.name, eventPayload);
+      }
+
+      if (
+        !data.ephemeral &&
+        !data.statusUpdate &&
+        !data.delta &&
+        !data.error &&
+        !data.processedMessageIds?.length
+      ) {
+        return;
+      }
+    }
+
     // Handle ephemeral messages (OAuth/auth flows)
     if (data.ephemeral && data.content && renderer.handleEphemeral) {
+      if (cliSessionId) {
+        broadcastToAgent(cliSessionId, "ephemeral", {
+          type: "ephemeral",
+          content: data.content,
+          messageId: data.messageId,
+          timestamp: data.timestamp,
+        });
+      }
       await renderer.handleEphemeral(data);
       return;
     }
 
     // Handle status updates (heartbeat with elapsed time)
     if (data.statusUpdate && renderer.handleStatusUpdate) {
+      if (cliSessionId) {
+        broadcastToAgent(cliSessionId, "status", {
+          type: "status",
+          status: data.statusUpdate,
+          messageId: data.messageId,
+          timestamp: data.timestamp,
+        });
+      }
       await renderer.handleStatusUpdate(data);
       return;
     }
 
     // Handle streaming delta
     if (data.delta && renderer.handleDelta) {
+      if (cliSessionId) {
+        broadcastToAgent(cliSessionId, "output", {
+          type: "delta",
+          content: data.delta,
+          timestamp: data.timestamp,
+          messageId: data.messageId,
+        });
+      }
       await renderer.handleDelta(data, sessionKey);
       // Early return if no error - delta processing is complete
       if (!data.error) {
@@ -173,14 +229,38 @@ export class UnifiedThreadResponseConsumer {
 
     // Handle error
     if (data.error) {
+      if (cliSessionId) {
+        broadcastToAgent(cliSessionId, "error", {
+          type: "error",
+          error: data.error,
+          messageId: data.messageId,
+          timestamp: data.timestamp,
+        });
+      }
       await renderer.handleError(data, sessionKey);
       // Also complete session on error
+      if (cliSessionId) {
+        broadcastToAgent(cliSessionId, "complete", {
+          type: "complete",
+          messageId: data.messageId,
+          processedMessageIds: data.processedMessageIds,
+          timestamp: data.timestamp,
+        });
+      }
       await renderer.handleCompletion(data, sessionKey);
       return;
     }
 
     // Handle completion
     if (data.processedMessageIds?.length) {
+      if (cliSessionId) {
+        broadcastToAgent(cliSessionId, "complete", {
+          type: "complete",
+          messageId: data.messageId,
+          processedMessageIds: data.processedMessageIds,
+          timestamp: data.timestamp,
+        });
+      }
       await renderer.handleCompletion(data, sessionKey);
     }
   }

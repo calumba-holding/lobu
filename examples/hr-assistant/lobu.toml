@@ -12,8 +12,9 @@ dir = "./agents/hr-assistant"
 
 # LLM providers (order = priority, key = API key or $ENV_VAR)
 [[agents.hr-assistant.providers]]
-id = "z-ai"
-key = "$Z_AI_API_KEY"
+id = "openrouter"
+model = "openrouter/openai/gpt-oss-20b:free"
+key = "$OPENROUTER_API_KEY"
 
 [[agents.hr-assistant.connections]]
 type = "telegram"

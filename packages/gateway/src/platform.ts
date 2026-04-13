@@ -206,7 +206,12 @@ export interface PlatformAdapter {
    * Used by the file upload/download routes to route files
    * to the correct platform-specific handler.
    */
-  getFileHandler?(): IFileHandler | undefined;
+  getFileHandler?(options?: {
+    connectionId?: string;
+    channelId?: string;
+    conversationId?: string;
+    teamId?: string;
+  }): IFileHandler | undefined;
 
   /**
    * Get the response renderer for this platform.

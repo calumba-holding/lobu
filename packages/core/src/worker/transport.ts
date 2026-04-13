@@ -66,6 +66,12 @@ export interface WorkerTransport {
    * @param state - Current state description (e.g., "processing", "waiting for API")
    */
   sendStatusUpdate(elapsedSeconds: number, state: string): Promise<void>;
+
+  /**
+   * Send a structured event to the gateway for SSE clients.
+   * Used for testable side effects like confirmed file uploads.
+   */
+  sendCustomEvent(name: string, data: Record<string, unknown>): Promise<void>;
 }
 
 /**

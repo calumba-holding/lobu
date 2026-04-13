@@ -169,6 +169,17 @@ export class HttpWorkerTransport implements WorkerTransport {
     );
   }
 
+  async sendCustomEvent(
+    name: string,
+    data: Record<string, unknown>
+  ): Promise<void> {
+    await this.sendResponse(
+      this.buildBaseResponse({
+        customEvent: { name, data },
+      })
+    );
+  }
+
   /**
    * Build base response payload with common fields shared across all response types
    */

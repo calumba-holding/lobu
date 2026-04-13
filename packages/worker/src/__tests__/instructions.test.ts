@@ -48,6 +48,23 @@ describe("OpenClawPromptIntentInstructionProvider", () => {
     expect(instructions).toContain("Do not use manage_watchers");
   });
 
+  test("injects file delivery guidance for prompts that ask to send a file", () => {
+    const provider = new OpenClawPromptIntentInstructionProvider();
+    const instructions = provider.getInstructions({
+      userPrompt:
+        "Create a CSV report and send the file to me as an attachment",
+    } as any);
+
+    expect(instructions).toContain(
+      "## Priority Tool Guidance For This Request"
+    );
+    expect(instructions).toContain("Deliver Files To The User");
+    expect(instructions).toContain("UploadUserFile");
+    expect(instructions).toContain(
+      "create the file, call UploadUserFile, then tell the user it was sent"
+    );
+  });
+
   test("returns empty string when no intent-specific guidance matches", () => {
     const provider = new OpenClawPromptIntentInstructionProvider();
     const instructions = provider.getInstructions({

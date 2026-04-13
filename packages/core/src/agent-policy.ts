@@ -15,7 +15,7 @@ export interface ToolIntentRule {
 export const CUSTOM_TOOL_METADATA: Record<string, CustomToolMetadata> = {
   UploadUserFile: {
     description:
-      "Use this whenever you create a visualization, chart, image, document, report, or any file that helps answer the user's request. This is how you share your work with the user.",
+      "Use this whenever you create a visualization, chart, image, document, report, or any file that helps answer the user's request. When the user asks you to send, share, attach, export, or upload a file, create it and then call this tool so the user can actually receive it in-thread. Do not substitute local paths, workspace paths, or sandbox links.",
   },
   ScheduleReminder: {
     description:
@@ -67,10 +67,29 @@ export const TOOL_INTENT_RULES: ToolIntentRule[] = [
     tools: ["UploadUserFile"],
     instructionLines: [
       "If you create a file that helps answer the request, use UploadUserFile so the user can access it in-thread.",
+      "Never claim a file was sent unless UploadUserFile actually succeeded in this turn.",
+      "Never show sandbox:, workspace, or local filesystem links to the user as if they are downloadable attachments.",
     ],
     patterns: [],
     priority: 20,
     alwaysInclude: true,
+  },
+  {
+    id: "file-delivery",
+    title: "Deliver Files To The User",
+    tools: ["UploadUserFile"],
+    instructionLines: [
+      "If the user asks to receive, download, attach, upload, export, or share a file, you must use UploadUserFile after creating the file.",
+      "Creating the file locally is not enough; the user cannot access sandbox, workspace, or local filesystem paths.",
+      "For file delivery requests, use this sequence: create the file, call UploadUserFile, then tell the user it was sent only if the tool succeeds.",
+    ],
+    patterns: [
+      /\b(send|share|attach|upload|export|deliver|give)\b.*\b(file|document|csv|pdf|report|spreadsheet|image|audio)\b/i,
+      /\b(file|document|csv|pdf|report|spreadsheet|image|audio)\b.*\b(send|share|attach|upload|export|deliver|give)\b/i,
+      /\b(downloadable|download)\b.*\b(file|document|csv|pdf|report|spreadsheet)\b/i,
+      /\bsave\b.*\bas\b.*\b(file|csv|pdf|document|report|spreadsheet)\b/i,
+    ],
+    priority: 30,
   },
   {
     id: "conversation-history",
@@ -84,7 +103,7 @@ export const TOOL_INTENT_RULES: ToolIntentRule[] = [
       /\bwhat did we talk about\b/i,
       /\bchannel history\b/i,
     ],
-    priority: 30,
+    priority: 35,
     alwaysInclude: true,
   },
   {
@@ -97,7 +116,7 @@ export const TOOL_INTENT_RULES: ToolIntentRule[] = [
       "Do not use manage_watchers or a watcher's own cron field unless the user explicitly asked to change the watcher's internal schedule.",
       "Do not propose OpenClaw cron jobs, external cron jobs, or Owletto reminders for this case.",
     ],
-    priority: 35,
+    priority: 40,
     patterns: [
       /\bwatcher\b.*\b(remind|reminder|schedule|scheduled|scheduling|cron|recurring|repeat|repeating|hourly|daily|weekly|monthly)\b|\b(remind|reminder|schedule|scheduled|scheduling|cron|recurring|repeat|repeating|hourly|daily|weekly|monthly)\b.*\bwatcher\b/i,
     ],
@@ -112,7 +131,7 @@ export const TOOL_INTENT_RULES: ToolIntentRule[] = [
       "Use ListReminders to inspect existing reminders and CancelReminder to cancel one.",
       "Do not invent other scheduling systems or claim that reminders are handled by Owletto, cron jobs, or background services unless a tool result in this conversation explicitly confirms that.",
     ],
-    priority: 40,
+    priority: 45,
     patterns: [
       /\b(remind|reminder|schedule|scheduled|scheduling|cron|recurring|repeat|repeating)\b/i,
       /\b(follow[ -]?up|run again)\b/i,

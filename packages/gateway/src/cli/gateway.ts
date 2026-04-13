@@ -177,11 +177,22 @@ export function createGatewayApp(
   }
 
   // File routes (already Hono) - uses platform registry for per-platform file handling
-  if (platformRegistry) {
+  if (platformRegistry && coreServices) {
+    const { ArtifactStore } = require("../files/artifact-store");
+    const artifactStore = new ArtifactStore();
     const { createFileRoutes } = require("../routes/internal/files");
-    const fileRouter = createFileRoutes(platformRegistry);
+    const fileRouter = createFileRoutes(
+      platformRegistry,
+      artifactStore,
+      coreServices.getPublicGatewayUrl()
+    );
     app.route("/internal/files", fileRouter);
-    logger.debug("File routes enabled at :8080/internal/files/*");
+
+    const { createPublicFileRoutes } = require("../routes/public/files");
+    app.route("", createPublicFileRoutes(artifactStore));
+    logger.debug(
+      "File routes enabled at :8080/internal/files/* and /api/v1/files/*"
+    );
   }
 
   // History routes (already Hono)

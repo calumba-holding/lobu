@@ -146,6 +146,7 @@ async function sendViaPlatform(
   const result = (await res.json()) as {
     success: boolean;
     agentId?: string;
+    messageId?: string;
     eventsUrl?: string;
     queued?: boolean;
   };
@@ -157,7 +158,7 @@ async function sendViaPlatform(
       : `${gatewayUrl}${result.eventsUrl}`;
 
     const sseController = new AbortController();
-    await streamResponse(sseUrl, authToken, sseController);
+    await streamResponse(sseUrl, authToken, sseController, result.messageId);
   } else {
     console.log(
       chalk.dim(
@@ -252,10 +253,35 @@ async function resolveAgentId(cwd: string): Promise<string | undefined> {
   return ids[0];
 }
 
+async function writeStdout(text: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    process.stdout.write(text, (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+async function writeStderr(text: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    process.stderr.write(text, (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
 async function streamResponse(
   sseUrl: string,
   token: string,
-  controller: AbortController
+  controller: AbortController,
+  expectedMessageId?: string
 ): Promise<void> {
   const OVERALL_TIMEOUT_MS = 5 * 60 * 1000;
   const IDLE_TIMEOUT_MS = 60 * 1000;
@@ -283,6 +309,8 @@ async function streamResponse(
     const decoder = new TextDecoder();
     let buffer = "";
     let currentEvent = "";
+    let sawFileUploadedEvent = false;
+    let sawSandboxLink = false;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -299,15 +327,29 @@ async function streamResponse(
         } else if (line.startsWith("data: ") && currentEvent) {
           const data = parseJSON(line.slice(6));
           if (!data) continue;
+          if (
+            expectedMessageId &&
+            currentEvent !== "connected" &&
+            currentEvent !== "ping" &&
+            typeof data.messageId === "string" &&
+            data.messageId !== expectedMessageId
+          ) {
+            currentEvent = "";
+            continue;
+          }
 
           switch (currentEvent) {
             case "output":
-              if (typeof data.content === "string")
-                process.stdout.write(renderMarkdown(data.content));
+              if (typeof data.content === "string") {
+                if (data.content.includes("sandbox:/")) {
+                  sawSandboxLink = true;
+                }
+                await writeStdout(data.content);
+              }
               break;
             case "ephemeral":
               if (typeof data.content === "string") {
-                console.error(`\n${renderMarkdown(data.content)}\n`);
+                await writeStderr(`\n${renderMarkdown(data.content)}\n`);
               }
               controller.abort();
               return;
@@ -321,7 +363,7 @@ async function streamResponse(
                     )
                     .join("\n")
                 : "";
-              console.error(
+              await writeStderr(
                 chalk.yellow(
                   `\n  Tool Approval Required\n  ${data.mcpId} → ${data.toolName}\n${argsText}\n`
                 )
@@ -334,13 +376,13 @@ async function streamResponse(
                 always: "always",
                 deny: "deny always",
               };
-              console.error(
-                options
+              await writeStderr(
+                `${options
                   .map(
                     (o, i) =>
                       `  ${chalk.bold(`${i + 1}`)}. ${o === "deny" ? chalk.red(optionLabels[o]) : chalk.green(optionLabels[o])}`
                   )
-                  .join("\n")
+                  .join("\n")}\n`
               );
 
               const rl = createInterface({
@@ -373,15 +415,15 @@ async function streamResponse(
                   const text = result.result.content
                     .map((c: any) => c.text)
                     .join("\n");
-                  process.stdout.write(renderMarkdown(text));
+                  await writeStdout(renderMarkdown(text));
                 }
-                console.error(
+                await writeStderr(
                   chalk.green(
                     `\n  Tool ${decision === "deny" ? "denied" : "approved"} (${decision})\n`
                   )
                 );
               } else {
-                console.error(
+                await writeStderr(
                   chalk.red(`\n  Approval failed: ${await approveRes.text()}\n`)
                 );
               }
@@ -390,15 +432,28 @@ async function streamResponse(
             case "link-button":
             case "question":
             case "suggestion":
-              console.error(JSON.stringify({ event: currentEvent, ...data }));
+            case "file-uploaded":
+              if (currentEvent === "file-uploaded") {
+                sawFileUploadedEvent = true;
+              }
+              await writeStderr(
+                `${JSON.stringify({ event: currentEvent, ...data })}\n`
+              );
               break;
             case "complete":
-              process.stdout.write("\n");
+              await writeStdout("\n");
+              if (sawSandboxLink && !sawFileUploadedEvent) {
+                await writeStderr(
+                  chalk.red(
+                    "\n  Warning: assistant output contained a sandbox/local file link, but no file-uploaded event was emitted. Treat this as a failed file-delivery attempt.\n"
+                  )
+                );
+              }
               controller.abort();
               return;
             case "error":
-              process.stdout.write("\n");
-              console.error(
+              await writeStdout("\n");
+              await writeStderr(
                 chalk.red(`\n  Agent error: ${String(data.error)}\n`)
               );
               controller.abort();

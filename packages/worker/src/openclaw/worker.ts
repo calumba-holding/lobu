@@ -428,6 +428,8 @@ export class OpenClawWorker implements WorkerExecutor {
 
       let firstOutputLogged = false;
 
+      let sawUploadedFileEvent = false;
+
       const result = await Sentry.startSpan(
         {
           name: "worker.openclaw_execution",
@@ -462,6 +464,14 @@ export class OpenClawWorker implements WorkerExecutor {
                   update.data.elapsedSeconds,
                   update.data.state
                 );
+              } else if (update.type === "custom_event") {
+                if (update.data.name === "file-uploaded") {
+                  sawUploadedFileEvent = true;
+                }
+                await this.workerTransport.sendCustomEvent(
+                  update.data.name,
+                  update.data.payload
+                );
               }
             }
           );
@@ -490,9 +500,26 @@ export class OpenClawWorker implements WorkerExecutor {
                 hintWorkerToken
               )
             : null;
+        const leakedSandboxLink =
+          !sawUploadedFileEvent &&
+          /(sandbox:\/|\/app\/workspaces\/|\/workspace\/)/i.test(
+            outputSnapshot
+          );
+        const fileDeliveryFailureMessage = leakedSandboxLink
+          ? "I created a local file, but I did not actually upload it for you. Local sandbox/workspace links are not user-accessible, so this file-delivery attempt failed. Please ask me to try again and I must use UploadUserFile."
+          : null;
 
         const finalResult = this.progressProcessor.getFinalResult();
-        if (finalResult) {
+        if (fileDeliveryFailureMessage) {
+          logger.warn(
+            "Detected sandbox/local file link without UploadUserFile success; replacing final response"
+          );
+          await this.workerTransport.sendStreamDelta(
+            fileDeliveryFailureMessage,
+            true,
+            true
+          );
+        } else if (finalResult) {
           const finalText = audioPermissionHint
             ? `${finalResult.text}\n\n${audioPermissionHint}`
             : finalResult.text;
@@ -1035,7 +1062,16 @@ Use it when the user references past discussions or you need context.`);
       platform: this.config.platform,
     };
 
-    const customTools = createOpenClawCustomTools(gwParams);
+    const customTools = createOpenClawCustomTools({
+      ...gwParams,
+      onCustomEvent: async (name, data) => {
+        await onProgress({
+          type: "custom_event",
+          data: { name, payload: data },
+          timestamp: Date.now(),
+        });
+      },
+    });
 
     // Register MCP tools as first-class callable tools (alongside virtual memory wrappers)
     const mcpToolDefs = createMcpToolDefinitions(
@@ -1657,6 +1693,9 @@ Create and show files for any output that helps answer the user's request by usi
 - **Data files**: CSV exports, JSON data, spreadsheets
 - **Code files**: scripts, configurations, examples
 - **Images**: generated images, processed photos, screenshots.
+- If the user asked you to send, share, attach, upload, export, or make a file downloadable, this sequence is required: create the file, call \`UploadUserFile\`, then tell the user it was sent only if the tool succeeds.
+- **Never** present \`sandbox:/\`, workspace paths, or local filesystem links as if they were real user-downloadable files.
+- **Never** say a file was sent unless \`UploadUserFile\` actually succeeded.
 `;
     }
 
@@ -1691,6 +1730,9 @@ Create and show files for any output that helps answer the user's request by usi
 - **Data files**: CSV exports, JSON data, spreadsheets
 - **Code files**: scripts, configurations, examples
 - **Images**: generated images, processed photos, screenshots.
+- If the user asked you to send, share, attach, upload, export, or make a file downloadable, this sequence is required: create the file, call \`UploadUserFile\`, then tell the user it was sent only if the tool succeeds.
+- **Never** present \`sandbox:/\`, workspace paths, or local filesystem links as if they were real user-downloadable files.
+- **Never** say a file was sent unless \`UploadUserFile\` actually succeeded.
 
 ### User-Uploaded Files
 The user has uploaded ${files.length} file(s) for you to analyze:

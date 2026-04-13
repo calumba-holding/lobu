@@ -3,6 +3,7 @@
 import { Readable } from "node:stream";
 import { createLogger } from "@lobu/core";
 import { Hono } from "hono";
+import type { ArtifactStore } from "../../files/artifact-store";
 import type { PlatformRegistry } from "../../platform";
 import type { IFileHandler } from "../../platform/file-handler";
 import { authenticateWorker } from "./middleware";
@@ -15,18 +16,33 @@ const logger = createLogger("file-routes");
  */
 function resolveFileHandler(
   platformRegistry: PlatformRegistry,
-  platformName?: string
+  options: {
+    platformName?: string;
+    connectionId?: string;
+    channelId?: string;
+    conversationId?: string;
+    teamId?: string;
+  }
 ): IFileHandler | null {
-  if (!platformName) return null;
-  const platform = platformRegistry.get(platformName);
-  return platform?.getFileHandler?.() ?? null;
+  if (!options.platformName) return null;
+  const platform = platformRegistry.get(options.platformName);
+  return (
+    platform?.getFileHandler?.({
+      connectionId: options.connectionId,
+      channelId: options.channelId,
+      conversationId: options.conversationId,
+      teamId: options.teamId,
+    }) ?? null
+  );
 }
 
 /**
  * Create internal file routes (Hono)
  */
 export function createFileRoutes(
-  platformRegistry: PlatformRegistry
+  platformRegistry: PlatformRegistry,
+  artifactStore: ArtifactStore,
+  publicGatewayUrl: string
 ): Hono<WorkerContext> {
   const router = new Hono<WorkerContext>();
 
@@ -43,7 +59,13 @@ export function createFileRoutes(
         return c.json({ error: "Missing fileId parameter" }, 400);
       }
 
-      const fileHandler = resolveFileHandler(platformRegistry, worker.platform);
+      const fileHandler = resolveFileHandler(platformRegistry, {
+        platformName: worker.platform,
+        connectionId: worker.connectionId,
+        channelId: worker.channelId,
+        conversationId: worker.conversationId,
+        teamId: worker.teamId,
+      });
       if (!fileHandler) {
         return c.json(
           {
@@ -57,7 +79,6 @@ export function createFileRoutes(
         `Worker downloading file ${fileId} for conversation ${worker.conversationId}`
       );
 
-      // Each platform's file handler manages its own authentication internally
       const { stream, metadata } = await fileHandler.downloadFile(fileId);
 
       c.header("Content-Type", metadata.mimetype || "application/octet-stream");
@@ -67,7 +88,6 @@ export function createFileRoutes(
         `attachment; filename="${metadata.name}"`
       );
 
-      // Convert Node stream to web stream
       const webStream = new ReadableStream({
         start(controller) {
           stream.on("data", (chunk: Buffer) => controller.enqueue(chunk));
@@ -100,15 +120,13 @@ export function createFileRoutes(
         return c.json({ error: "Missing channel or conversation ID" }, 400);
       }
 
-      const fileHandler = resolveFileHandler(platformRegistry, worker.platform);
-      if (!fileHandler) {
-        return c.json(
-          {
-            error: `No file handler available for platform ${worker.platform || "unknown"}`,
-          },
-          501
-        );
-      }
+      const fileHandler = resolveFileHandler(platformRegistry, {
+        platformName: worker.platform,
+        connectionId: worker.connectionId,
+        channelId,
+        conversationId,
+        teamId: worker.teamId,
+      });
 
       const formData = await c.req.formData();
       const file = formData.get("file") as File | null;
@@ -124,18 +142,53 @@ export function createFileRoutes(
         `Worker uploading file ${filename} via ${worker.platform || "unknown"} for conversation ${worker.conversationId} to conversation ${conversationId}${voiceMessage ? " as voice message" : ""}`
       );
 
-      const arrayBuffer = await file.arrayBuffer();
-      const fileStream = Readable.from(Buffer.from(arrayBuffer));
+      const fileBuffer = Buffer.from(await file.arrayBuffer());
+      let result:
+        | {
+            fileId: string;
+            permalink: string;
+            name: string;
+            size: number;
+            delivery?: "platform-upload" | "artifact-url";
+            artifactId?: string;
+          }
+        | undefined;
 
-      const result = await fileHandler.uploadFile(fileStream, {
-        filename,
-        channelId,
-        threadTs: conversationId,
-        initialComment: initialComment || undefined,
-        voiceMessage,
-      });
+      if (fileHandler) {
+        try {
+          result = await fileHandler.uploadFile(Readable.from(fileBuffer), {
+            filename,
+            channelId,
+            threadTs: conversationId,
+            initialComment: initialComment || undefined,
+            voiceMessage,
+          });
+          logger.info(`File uploaded successfully: ${result.fileId}`);
+        } catch (error) {
+          logger.warn(
+            `Platform upload failed for ${filename}; falling back to artifact URL`,
+            error
+          );
+        }
+      }
 
-      logger.info(`File uploaded successfully: ${result.fileId}`);
+      if (!result) {
+        const artifact = await artifactStore.publish({
+          buffer: fileBuffer,
+          filename,
+          contentType: file.type || "application/octet-stream",
+          publicGatewayUrl,
+        });
+        result = {
+          fileId: artifact.artifactId,
+          permalink: artifact.downloadUrl,
+          name: artifact.filename,
+          size: artifact.size,
+          delivery: "artifact-url",
+          artifactId: artifact.artifactId,
+        };
+        logger.info(`Published artifact fallback: ${artifact.artifactId}`);
+      }
 
       return c.json({
         success: true,
@@ -143,6 +196,8 @@ export function createFileRoutes(
         permalink: result.permalink,
         name: result.name,
         size: result.size,
+        delivery: result.delivery || "platform-upload",
+        artifactId: result.artifactId,
       });
     } catch (error) {
       logger.error("Failed to upload file:", error);
@@ -164,15 +219,13 @@ export function createFileRoutes(
         return c.json({ error: "Missing channel or conversation ID" }, 400);
       }
 
-      const fileHandler = resolveFileHandler(platformRegistry, worker.platform);
-      if (!fileHandler) {
-        return c.json(
-          {
-            error: `No file handler available for platform ${worker.platform || "unknown"}`,
-          },
-          501
-        );
-      }
+      const fileHandler = resolveFileHandler(platformRegistry, {
+        platformName: worker.platform,
+        connectionId: worker.connectionId,
+        channelId,
+        conversationId,
+        teamId: worker.teamId,
+      });
 
       const formData = await c.req.formData();
       const fileEntries = formData.getAll("files");
@@ -191,28 +244,54 @@ export function createFileRoutes(
         }
 
         const filename = entry.name;
-        const arrayBuffer = await entry.arrayBuffer();
-        const fileStream = Readable.from(Buffer.from(arrayBuffer));
+        const fileBuffer = Buffer.from(await entry.arrayBuffer());
 
-        return fileHandler.uploadFile(fileStream, {
+        if (fileHandler) {
+          try {
+            return await fileHandler.uploadFile(Readable.from(fileBuffer), {
+              filename,
+              channelId,
+              threadTs: conversationId,
+            });
+          } catch (error) {
+            logger.warn(
+              `Platform batch upload failed for ${filename}; falling back to artifact URL`,
+              error
+            );
+          }
+        }
+
+        const artifact = await artifactStore.publish({
+          buffer: fileBuffer,
           filename,
-          channelId,
-          threadTs: conversationId,
+          contentType: entry.type || "application/octet-stream",
+          publicGatewayUrl,
         });
+        return {
+          fileId: artifact.artifactId,
+          permalink: artifact.downloadUrl,
+          name: artifact.filename,
+          size: artifact.size,
+          delivery: "artifact-url" as const,
+          artifactId: artifact.artifactId,
+        };
       });
 
       const uploadResults = await Promise.allSettled(uploadPromises);
 
       const results = uploadResults.map((result, index) => {
         if (result.status === "fulfilled") {
-          return { success: true, ...result.value };
-        } else {
-          logger.error(`Failed to upload file ${index}:`, result.reason);
           return {
-            success: false,
-            error: result.reason?.message || "Upload failed",
+            success: true,
+            delivery: result.value.delivery || "platform-upload",
+            ...result.value,
           };
         }
+        logger.error(`Failed to upload file ${index}:`, result.reason);
+        return {
+          success: false,
+          error: result.reason?.message || "Upload failed",
+        };
       });
 
       return c.json({ results });

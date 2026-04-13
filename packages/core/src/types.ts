@@ -430,6 +430,10 @@ export interface ThreadResponsePayload {
     elapsedSeconds: number;
     state: string; // e.g., "is running" or "is scheduling"
   };
+  customEvent?: {
+    name: string;
+    data: Record<string, unknown>;
+  };
 
   // Exec-specific response fields (for jobType === "exec")
   execId?: string; // Exec job ID for response routing

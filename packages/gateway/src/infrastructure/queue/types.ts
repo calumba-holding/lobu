@@ -125,6 +125,10 @@ export interface ThreadResponsePayload {
     state: string;
   };
   platformMetadata?: Record<string, unknown>; // Platform-specific metadata (e.g., sessionId for API)
+  customEvent?: {
+    name: string;
+    data: Record<string, unknown>;
+  };
 
   // Exec-specific response fields (for jobType === "exec")
   execId?: string; // Exec job ID for response routing

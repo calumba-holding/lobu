@@ -37,6 +37,25 @@ const MAX_TOTAL_CONNECTIONS = 1000;
 
 // SSE connection tracking
 const sseConnections = new Map<string, Set<any>>();
+const sseEventBacklog = new Map<
+  string,
+  Array<{ event: string; data: unknown; timestamp: number }>
+>();
+const SSE_EVENT_BACKLOG_LIMIT = 100;
+const SSE_EVENT_BACKLOG_TTL_MS = 2 * 60 * 1000;
+
+function pruneExpiredSseEventBacklog(now = Date.now()): void {
+  for (const [agentId, entries] of sseEventBacklog.entries()) {
+    const freshEntries = entries.filter(
+      (entry) => now - entry.timestamp <= SSE_EVENT_BACKLOG_TTL_MS
+    );
+    if (freshEntries.length === 0) {
+      sseEventBacklog.delete(agentId);
+      continue;
+    }
+    sseEventBacklog.set(agentId, freshEntries);
+  }
+}
 
 // =============================================================================
 // Zod Schemas
@@ -239,11 +258,31 @@ function validateMcpConfig(
 // Broadcast Functions (exported for use by other modules)
 // =============================================================================
 
+function rememberSseEvent(agentId: string, event: string, data: unknown): void {
+  const now = Date.now();
+  pruneExpiredSseEventBacklog(now);
+  const existing = sseEventBacklog.get(agentId) || [];
+  const next = existing
+    .concat({ event, data, timestamp: now })
+    .slice(-SSE_EVENT_BACKLOG_LIMIT);
+  sseEventBacklog.set(agentId, next);
+}
+
+function getRecentSseEvents(
+  agentId: string
+): Array<{ event: string; data: unknown; timestamp: number }> {
+  const now = Date.now();
+  pruneExpiredSseEventBacklog(now);
+  return sseEventBacklog.get(agentId) || [];
+}
+
 export function broadcastToAgent(
   agentId: string,
   event: string,
   data: unknown
 ): void {
+  rememberSseEvent(agentId, event, data);
+
   const connections = sseConnections.get(agentId);
   if (!connections || connections.size === 0) return;
 
@@ -789,6 +828,13 @@ export function createAgentApi(
           timestamp: Date.now(),
         }),
       });
+
+      for (const entry of getRecentSseEvents(sseKey)) {
+        await stream.writeSSE({
+          event: entry.event,
+          data: JSON.stringify(entry.data),
+        });
+      }
 
       const heartbeatInterval = setInterval(async () => {
         try {

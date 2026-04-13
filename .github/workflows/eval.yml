@@ -8,7 +8,7 @@ on:
         required: false
         type: string
       model:
-        description: "Model override (e.g. z-ai/glm-4.7)"
+        description: "Model override (e.g. openrouter/openai/gpt-oss-20b:free)"
         required: false
         type: string
   schedule:
@@ -28,7 +28,7 @@ jobs:
   eval:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # Requires Z_AI_API_KEY secret to be configured
+    # Requires OPENROUTER_API_KEY secret to be configured
     strategy:
       fail-fast: false
       matrix:
@@ -49,6 +49,39 @@ jobs:
           cd packages/core && bun run build
           cd ../cli && bun run build
 
+      - name: Build local gateway image
+        run: docker build -f docker/Dockerfile.gateway -t lobu-gateway:ci .
+
+      - name: Require OpenRouter secret
+        run: |
+          if [ -z "${{ secrets.OPENROUTER_API_KEY }}" ]; then
+            echo "OPENROUTER_API_KEY secret is not configured"
+            exit 1
+          fi
+
+      - name: Select healthy free OpenRouter model
+        run: |
+          OPENROUTER_API_KEY='${{ secrets.OPENROUTER_API_KEY }}' \
+          OPENROUTER_SELECTOR_VERBOSE=1 \
+          bun scripts/select-openrouter-model.mjs --write "$RUNNER_TEMP/openrouter.env"
+          cat "$RUNNER_TEMP/openrouter.env"
+
+      - name: Apply selected model to example config
+        working-directory: examples/${{ matrix.example }}
+        run: |
+          source "$RUNNER_TEMP/openrouter.env"
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          path = Path('lobu.toml')
+          text = path.read_text()
+          target = 'model = "openrouter/openai/gpt-oss-20b:free"'
+          replacement = f'model = "{os.environ["OPENROUTER_MODEL_REF"]}"'
+          if target not in text:
+              raise SystemExit(f"Expected model line not found in {path}")
+          path.write_text(text.replace(target, replacement, 1))
+          PY
+
       - name: Create .env for example
         working-directory: examples/${{ matrix.example }}
         run: |
@@ -56,18 +89,21 @@ jobs:
           ADMIN_PASSWORD=ci-eval-password
           ENCRYPTION_KEY=$(openssl rand -hex 32)
           GATEWAY_PORT=8081
-          Z_AI_API_KEY=${{ secrets.Z_AI_API_KEY }}
+          OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}
           EOF
 
       - name: Start stack
         working-directory: examples/${{ matrix.example }}
         run: |
           mkdir -p data && chmod 777 data
-          # Disable Redis write-stop-on-error for CI
+          # Disable Redis write-stop-on-error for CI and use the gateway image built from this checkout
           cat > docker-compose.override.yml <<'YAML'
           services:
             redis:
               command: redis-server --maxmemory 256mb --maxmemory-policy noeviction --save "" --stop-writes-on-bgsave-error no --dir /tmp
+            gateway:
+              image: lobu-gateway:ci
+              pull_policy: never
           YAML
           docker compose up -d
           echo "Waiting for gateway to be ready..."
@@ -93,7 +129,7 @@ jobs:
           if [ -n "${{ inputs.model }}" ]; then
             MODEL_FLAG="-m ${{ inputs.model }}"
           fi
-          npx @lobu/cli eval smoke --ci --output eval-results.json $MODEL_FLAG
+          node ../../packages/cli/bin/lobu.js eval smoke --ci --output eval-results.json $MODEL_FLAG
 
       - name: Gateway logs
         if: always()

@@ -180,7 +180,19 @@ async function formDataToBuffer(formData: FormData): Promise<Buffer> {
 
 export async function uploadUserFile(
   gw: GatewayParams,
-  args: { file_path: string; description?: string }
+  args: { file_path: string; description?: string },
+  hooks?: {
+    onUploaded?: (payload: {
+      tool: "UploadUserFile";
+      platform: string;
+      fileId: string;
+      name: string;
+      permalink: string;
+      size: number;
+      delivery?: "platform-upload" | "artifact-url";
+      artifactId?: string;
+    }) => Promise<void> | void;
+  }
 ): Promise<TextResult> {
   return withErrorHandling("Show file tool", async () => {
     logger.info(
@@ -241,10 +253,22 @@ export async function uploadUserFile(
       fileId: string;
       name: string;
       permalink: string;
+      delivery?: "platform-upload" | "artifact-url";
+      artifactId?: string;
     };
     logger.info(
       `Successfully showed file to user: ${result.fileId} - ${result.name}`
     );
+    await hooks?.onUploaded?.({
+      tool: "UploadUserFile",
+      platform: gw.platform || "unknown",
+      fileId: result.fileId,
+      name: result.name || fileName,
+      permalink: result.permalink,
+      size: stats.size,
+      ...(result.delivery ? { delivery: result.delivery } : {}),
+      ...(result.artifactId ? { artifactId: result.artifactId } : {}),
+    });
     return textResult(`Successfully showed ${fileName} to the user`);
   });
 }

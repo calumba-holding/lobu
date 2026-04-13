@@ -99,6 +99,14 @@ export type ProgressUpdate =
         state: string;
       };
       timestamp: number;
+    }
+  | {
+      type: "custom_event";
+      data: {
+        name: string;
+        payload: Record<string, unknown>;
+      };
+      timestamp: number;
     };
 
 /**

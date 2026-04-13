@@ -15,6 +15,7 @@ let chatCommand: typeof import("../commands/chat").chatCommand;
 
 const originalFetch = globalThis.fetch;
 const originalStdoutWrite = process.stdout.write.bind(process.stdout);
+const originalStderrWrite = process.stderr.write.bind(process.stderr);
 const originalConsoleError = console.error;
 const originalToken = process.env.LOBU_API_TOKEN;
 const exampleDir = join(import.meta.dir, "../../../../examples/hr-assistant");
@@ -43,6 +44,28 @@ function createSseResponse(
   );
 }
 
+function captureTerminal(output: { stdout: string[]; stderr: string[] }): void {
+  process.stdout.write = ((chunk: string | Uint8Array, cb?: unknown) => {
+    output.stdout.push(String(chunk));
+    if (typeof cb === "function") {
+      (cb as (error?: Error | null) => void)(null);
+    }
+    return true;
+  }) as typeof process.stdout.write;
+
+  process.stderr.write = ((chunk: string | Uint8Array, cb?: unknown) => {
+    output.stderr.push(String(chunk));
+    if (typeof cb === "function") {
+      (cb as (error?: Error | null) => void)(null);
+    }
+    return true;
+  }) as typeof process.stderr.write;
+
+  console.error = (...args: unknown[]) => {
+    output.stderr.push(args.map((arg) => String(arg)).join(" "));
+  };
+}
+
 beforeAll(async () => {
   ({ chatCommand } = await import("../commands/chat"));
 });
@@ -50,6 +73,7 @@ beforeAll(async () => {
 afterEach(() => {
   globalThis.fetch = originalFetch;
   process.stdout.write = originalStdoutWrite;
+  process.stderr.write = originalStderrWrite;
   console.error = originalConsoleError;
   if (originalToken === undefined) {
     delete process.env.LOBU_API_TOKEN;
@@ -68,13 +92,7 @@ describe("chatCommand example integration", () => {
     const createBodies: Array<Record<string, unknown>> = [];
     const approvalBodies: Array<Record<string, unknown>> = [];
 
-    process.stdout.write = ((chunk: string | Uint8Array) => {
-      stdout.push(String(chunk));
-      return true;
-    }) as typeof process.stdout.write;
-    console.error = (...args: unknown[]) => {
-      stderr.push(args.map((arg) => String(arg)).join(" "));
-    };
+    captureTerminal({ stdout, stderr });
 
     globalThis.fetch = mock(
       async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -193,6 +211,169 @@ describe("chatCommand example integration", () => {
     expect(createInterfaceMock).toHaveBeenCalledTimes(1);
   });
 
+  test("prints structured file-uploaded events in platform mode", async () => {
+    process.env.LOBU_API_TOKEN = "cli-token";
+
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+
+    captureTerminal({ stdout, stderr });
+
+    globalThis.fetch = mock(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+
+        if (
+          url === "http://gateway.test/api/v1/agents/hr-assistant/messages" &&
+          init?.method === "POST"
+        ) {
+          return Response.json({
+            success: true,
+            eventsUrl: "/api/v1/agents/hr-assistant/events?platform=telegram",
+          });
+        }
+
+        if (
+          url ===
+            "http://gateway.test/api/v1/agents/hr-assistant/events?platform=telegram" &&
+          !init?.method
+        ) {
+          return createSseResponse([
+            {
+              event: "file-uploaded",
+              data: {
+                tool: "UploadUserFile",
+                platform: "telegram",
+                fileId: "file-123",
+                name: "e2e.txt",
+                permalink: "https://files.example/e2e.txt",
+                size: 8,
+              },
+            },
+            {
+              event: "output",
+              data: {
+                content: "Uploaded e2e.txt successfully.\n",
+              },
+            },
+            { event: "complete", data: {} },
+          ]);
+        }
+
+        throw new Error(`Unexpected fetch: ${url}`);
+      }
+    ) as unknown as typeof fetch;
+
+    await chatCommand(exampleDir, "send me e2e.txt as a file", {
+      gateway: "http://gateway.test",
+      user: "telegram:chat-123",
+    });
+
+    expect(stdout.join("")).toContain("Uploaded e2e.txt successfully");
+    expect(stderr.join("")).toContain('"event":"file-uploaded"');
+    expect(stderr.join("")).toContain('"name":"e2e.txt"');
+    expect(stderr.join("")).toContain('"tool":"UploadUserFile"');
+  });
+
+  test("warns when a sandbox link is streamed without a file-uploaded event", async () => {
+    process.env.LOBU_API_TOKEN = "cli-token";
+
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+
+    captureTerminal({ stdout, stderr });
+
+    globalThis.fetch = mock(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+
+        if (
+          url === "http://gateway.test/api/v1/agents/hr-assistant/messages" &&
+          init?.method === "POST"
+        ) {
+          return Response.json({
+            success: true,
+            eventsUrl: "/api/v1/agents/hr-assistant/events?platform=telegram",
+          });
+        }
+
+        if (
+          url ===
+            "http://gateway.test/api/v1/agents/hr-assistant/events?platform=telegram" &&
+          !init?.method
+        ) {
+          return createSseResponse([
+            {
+              event: "output",
+              data: {
+                content:
+                  "[Download cli-proof.txt](sandbox:/workspace/cli-proof.txt)",
+              },
+            },
+            { event: "complete", data: {} },
+          ]);
+        }
+
+        throw new Error(`Unexpected fetch: ${url}`);
+      }
+    ) as unknown as typeof fetch;
+
+    await chatCommand(exampleDir, "send me cli-proof.txt as a file", {
+      gateway: "http://gateway.test",
+      user: "telegram:chat-123",
+    });
+
+    expect(stdout.join("")).toContain("cli-proof.txt");
+    expect(stderr.join("")).toContain("no file-uploaded event was emitted");
+  });
+
+  test("streams raw output chunks without corrupting fragmented markdown", async () => {
+    process.env.LOBU_API_TOKEN = "cli-token";
+
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+
+    captureTerminal({ stdout, stderr });
+
+    globalThis.fetch = mock(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+
+        if (
+          url === "http://gateway.test/api/v1/agents/hr-assistant/messages" &&
+          init?.method === "POST"
+        ) {
+          return Response.json({
+            success: true,
+            eventsUrl: "/api/v1/agents/hr-assistant/events?platform=telegram",
+          });
+        }
+
+        if (
+          url ===
+            "http://gateway.test/api/v1/agents/hr-assistant/events?platform=telegram" &&
+          !init?.method
+        ) {
+          return createSseResponse([
+            { event: "output", data: { content: "**Hello" } },
+            { event: "output", data: { content: " world**" } },
+            { event: "complete", data: {} },
+          ]);
+        }
+
+        throw new Error(`Unexpected fetch: ${url}`);
+      }
+    ) as unknown as typeof fetch;
+
+    await chatCommand(exampleDir, "say hello", {
+      gateway: "http://gateway.test",
+      user: "telegram:chat-123",
+    });
+
+    expect(stdout.join("")).toContain("**Hello world**");
+    expect(stderr.join("")).not.toContain("file-uploaded");
+  });
+
   test("streams platform-mode output for image and voice requests from the example agent", async () => {
     process.env.LOBU_API_TOKEN = "cli-token";
 
@@ -200,13 +381,7 @@ describe("chatCommand example integration", () => {
     const stderr: string[] = [];
     const messageBodies: Array<Record<string, unknown>> = [];
 
-    process.stdout.write = ((chunk: string | Uint8Array) => {
-      stdout.push(String(chunk));
-      return true;
-    }) as typeof process.stdout.write;
-    console.error = (...args: unknown[]) => {
-      stderr.push(args.map((arg) => String(arg)).join(" "));
-    };
+    captureTerminal({ stdout, stderr });
 
     globalThis.fetch = mock(
       async (input: RequestInfo | URL, init?: RequestInit) => {

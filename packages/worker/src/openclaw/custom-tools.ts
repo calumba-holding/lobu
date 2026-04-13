@@ -53,6 +53,10 @@ export function createOpenClawCustomTools(params: {
   channelId: string;
   conversationId: string;
   platform?: string;
+  onCustomEvent?: (
+    name: string,
+    data: Record<string, unknown>
+  ) => Promise<void> | void;
 }): ToolDefinition[] {
   const gw: GatewayParams = {
     gatewayUrl: params.gatewayUrl,
@@ -78,7 +82,10 @@ export function createOpenClawCustomTools(params: {
           })
         ),
       }),
-      run: (args) => uploadUserFile(gw, args),
+      run: (args) =>
+        uploadUserFile(gw, args, {
+          onUploaded: (data) => params.onCustomEvent?.("file-uploaded", data),
+        }),
     }),
 
     defineTool({
