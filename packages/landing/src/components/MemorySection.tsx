@@ -1,67 +1,13 @@
-const memoryPillars = [
-  {
-    title: "Multi-tenant memory",
-    body: "Memory is scoped by workspace. Each team's entities, data, and analysis stay isolated.",
-  },
-  {
-    title: "Typed entity graph",
-    body: "Memory is structured as types, entities, and relationships — not loose text or chat summaries.",
-  },
-  {
-    title: "Managed integrations",
-    body: "Connectors sync external systems into the graph. OAuth and token refresh stay out of workers.",
-  },
-];
-
-const recallSignals = [
-  "Entity name matching — customers, products, topics",
-  "BM25 full-text retrieval across facts, decisions, and observations",
-  "Semantic vector search for concept-level recall on unstructured text",
-];
-
-const connectorModes = [
-  {
-    label: "OAuth",
-    text: "Connectors declare scopes. Owletto handles login, storage, refresh, and upgrades.",
-  },
-  {
-    label: "API keys",
-    text: "Saved or environment-backed credentials, never exposed to workers.",
-  },
-  {
-    label: "Browser",
-    text: "Persist browser auth, launch a browser, or connect over CDP.",
-  },
-];
-
-const whyItFitsLobu = [
-  "Workers get memory without receiving OAuth tokens.",
-  "Gateway proxies tool calls; Owletto keeps auth scoped per organization.",
-  "Agents recall durable facts before each run — not just recent chat history.",
-];
-
-const faqItems = [
-  {
-    q: "How is this different from filesystem memory?",
-    a: "Filesystem memory lives on one machine and serves one user. Owletto scopes memory by workspace so agents share the same graph, connectors sync external data, and watchers keep it fresh.",
-  },
-  {
-    q: "How is this different from RAG?",
-    a: "RAG returns similar text chunks. Owletto stores typed entities and relationships, then combines entity matching, full-text, and semantic search to find the right context even when wording changes.",
-  },
-  {
-    q: "How is this different from chat history?",
-    a: "Chat history is per-conversation and temporary. Owletto turns conversations and external sources into durable knowledge any agent in the workspace can recall.",
-  },
-  {
-    q: "Is memory shared across agents?",
-    a: "Yes. Agents in the same workspace share a graph. A support agent can save context that a sales agent recalls later, while organizations stay isolated.",
-  },
-  {
-    q: "Can I use a different memory system?",
-    a: "Yes. Workers use MCP tools, so you can point them at any memory server with the same interface.",
-  },
-];
+import { connectorModes, faqItems } from "../memory-examples";
+import { ExampleShowcase } from "./memory/ExampleShowcase";
+import {
+  accentPink,
+  accentPurple,
+  cardBg,
+  cardBorder,
+  textColor,
+  textMuted,
+} from "./memory/styles";
 
 function SectionDivider() {
   return <div class="section-divider" />;
@@ -81,251 +27,27 @@ function GitHubIcon() {
   );
 }
 
-function Card(props: { title: string; body: string }) {
-  return (
-    <div
-      class="rounded-2xl p-5 border"
-      style={{
-        background:
-          "linear-gradient(180deg, rgba(21,24,29,0.92) 0%, rgba(13,16,20,0.82) 100%)",
-        borderColor: "rgba(62, 77, 97, 0.55)",
-        boxShadow: "0 20px 60px rgba(0, 0, 0, 0.28)",
-      }}
-    >
-      <h3
-        class="text-lg font-semibold mb-2"
-        style={{ color: "var(--color-page-text)" }}
-      >
-        {props.title}
-      </h3>
-      <p
-        class="text-sm leading-6 m-0"
-        style={{ color: "var(--color-page-text-muted)" }}
-      >
-        {props.body}
-      </p>
-    </div>
-  );
-}
-
-function DiagramPanel() {
-  return (
-    <div
-      class="rounded-[2rem] overflow-hidden border p-5 sm:p-6"
-      style={{
-        borderColor: "rgba(62, 77, 97, 0.55)",
-        boxShadow: "0 20px 60px rgba(0, 0, 0, 0.34)",
-      }}
-    >
-      <div class="grid gap-4">
-        <div class="flex justify-center">
-          <div
-            class="rounded-2xl px-5 py-4 border min-w-[14rem] text-center"
-            style={{
-              borderColor: "rgba(248, 184, 78, 0.3)",
-              backgroundColor: "rgba(248, 184, 78, 0.08)",
-            }}
-          >
-            <div
-              class="text-[11px] uppercase tracking-[0.18em] mb-1"
-              style={{ color: "#f8b84e" }}
-            >
-              Workspace
-            </div>
-            <div
-              class="text-base font-semibold"
-              style={{ color: "var(--color-page-text)" }}
-            >
-              Organization
-            </div>
-          </div>
-        </div>
-
-        <div
-          class="flex justify-center"
-          style={{ color: "rgba(255,255,255,0.3)" }}
-        >
-          ↓
-        </div>
-
-        <div class="grid sm:grid-cols-3 gap-3">
-          <div
-            class="rounded-2xl p-4 border"
-            style={{
-              borderColor: "rgba(103, 232, 249, 0.2)",
-              backgroundColor: "rgba(103, 232, 249, 0.06)",
-            }}
-          >
-            <div
-              class="text-xs uppercase tracking-[0.18em] mb-2"
-              style={{ color: "#67e8f9" }}
-            >
-              Model
-            </div>
-            <div
-              class="text-sm font-semibold mb-2"
-              style={{ color: "var(--color-page-text)" }}
-            >
-              Entity types
-            </div>
-            <div
-              class="text-sm leading-6"
-              style={{ color: "var(--color-page-text-muted)" }}
-            >
-              customer
-              <br />
-              product
-              <br />
-              campaign
-            </div>
-          </div>
-
-          <div
-            class="rounded-2xl p-4 border"
-            style={{
-              borderColor: "rgba(134, 239, 172, 0.2)",
-              backgroundColor: "rgba(134, 239, 172, 0.06)",
-            }}
-          >
-            <div
-              class="text-xs uppercase tracking-[0.18em] mb-2"
-              style={{ color: "#86efac" }}
-            >
-              Record
-            </div>
-            <div
-              class="text-sm font-semibold mb-2"
-              style={{ color: "var(--color-page-text)" }}
-            >
-              Entities
-            </div>
-            <div
-              class="text-sm leading-6"
-              style={{ color: "var(--color-page-text-muted)" }}
-            >
-              Acme Corp
-              <br />
-              Widget v2
-              <br />
-              Launch Q3
-            </div>
-          </div>
-
-          <div
-            class="rounded-2xl p-4 border"
-            style={{
-              borderColor: "rgba(251, 113, 133, 0.2)",
-              backgroundColor: "rgba(251, 113, 133, 0.06)",
-            }}
-          >
-            <div
-              class="text-xs uppercase tracking-[0.18em] mb-2"
-              style={{ color: "#fb7185" }}
-            >
-              Log
-            </div>
-            <div
-              class="text-sm font-semibold mb-2"
-              style={{ color: "var(--color-page-text)" }}
-            >
-              Content
-            </div>
-            <div
-              class="text-sm leading-6"
-              style={{ color: "var(--color-page-text-muted)" }}
-            >
-              decisions
-              <br />
-              preferences
-              <br />
-              observations
-            </div>
-          </div>
-        </div>
-
-        <div class="grid sm:grid-cols-2 gap-3">
-          <div
-            class="rounded-2xl p-4 border"
-            style={{
-              borderColor: "rgba(192, 132, 252, 0.2)",
-              backgroundColor: "rgba(192, 132, 252, 0.06)",
-            }}
-          >
-            <div class="flex flex-col items-start gap-1 mb-2">
-              <div
-                class="text-[11px] uppercase tracking-[0.18em]"
-                style={{ color: "#c084fc" }}
-              >
-                live data
-              </div>
-              <div
-                class="text-sm font-semibold"
-                style={{ color: "var(--color-page-text)" }}
-              >
-                Connectors
-              </div>
-            </div>
-            <div
-              class="text-sm leading-6"
-              style={{ color: "var(--color-page-text-muted)" }}
-            >
-              GitHub, Google, RSS, app stores, review platforms
-            </div>
-          </div>
-
-          <div
-            class="rounded-2xl p-4 border"
-            style={{
-              borderColor: "rgba(96, 165, 250, 0.2)",
-              backgroundColor: "rgba(96, 165, 250, 0.06)",
-            }}
-          >
-            <div class="flex flex-col items-start gap-1 mb-2">
-              <div
-                class="text-[11px] uppercase tracking-[0.18em]"
-                style={{ color: "#60a5fa" }}
-              >
-                live prompts
-              </div>
-              <div
-                class="text-sm font-semibold"
-                style={{ color: "var(--color-page-text)" }}
-              >
-                Watchers
-              </div>
-            </div>
-            <div
-              class="text-sm leading-6"
-              style={{ color: "var(--color-page-text-muted)" }}
-            >
-              Extract data, track changes, and keep it linked to evidence
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export function MemorySection() {
   return (
     <section class="pt-32 pb-24 px-4 sm:px-8">
-      <div class="max-w-[58rem] mx-auto">
+      <div class="max-w-[72rem] mx-auto">
         {/* Hero */}
         <div class="text-center mb-12">
           <h1
-            class="text-4xl sm:text-5xl font-bold tracking-tight leading-[1.1] mb-5"
-            style={{ color: "var(--color-page-text)" }}
+            class="text-4xl sm:text-5xl font-bold tracking-tight leading-[1.05] mb-5"
+            style={{ color: textColor }}
           >
-            Build context that lasts with{" "}
-            <span style="color:var(--color-tg-accent);">Lobu Memory</span>
+            Turn data into{" "}
+            <span style={{ color: "var(--color-tg-accent)" }}>
+              shared, structured memory
+            </span>
           </h1>
           <p
-            class="text-lg sm:text-xl leading-8 max-w-[40rem] mx-auto m-0"
-            style={{ color: "var(--color-page-text-muted)" }}
+            class="text-lg sm:text-xl leading-8 max-w-[52rem] mx-auto m-0"
+            style={{ color: textMuted }}
           >
-            Your agent remembers everything you value with a typed entity graph
-            with live connectors and scheduled analysis.
+            Connect OpenClaw, ChatGPT, Claude, any MCP client, and any messaging app. <br />
+            Bring public data, user data, and internal context together.
           </p>
           <div class="flex flex-wrap gap-3 mt-8 justify-center">
             <a
@@ -334,7 +56,7 @@ export function MemorySection() {
               rel="noopener noreferrer"
               class="inline-flex items-center rounded-xl px-4 py-2.5 text-sm font-medium border transition-transform hover:-translate-y-0.5"
               style={{
-                color: "var(--color-page-text)",
+                color: textColor,
                 backgroundColor: "rgba(255,255,255,0.04)",
                 borderColor: "var(--color-page-border-active)",
               }}
@@ -342,347 +64,82 @@ export function MemorySection() {
               Try Owletto
             </a>
             <a
-              href="https://github.com/lobu-ai/owletto"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium"
-              style={{ color: "var(--color-page-text-muted)" }}
+              href="/reference/owletto-cli/"
+              class="inline-flex items-center rounded-xl px-4 py-2.5 text-sm font-medium"
+              style={{ color: textMuted }}
             >
-              <GitHubIcon />
-              See GitHub
+              Getting started with CLI
             </a>
           </div>
         </div>
 
-        {/* Diagram */}
-        <div class="max-w-[42rem] mx-auto mb-4">
-          <DiagramPanel />
-        </div>
+        {/* Interactive example showcase */}
+        <ExampleShowcase />
 
         <SectionDivider />
 
-        <div class="grid gap-4 md:grid-cols-3">
-          {memoryPillars.map((pillar) => (
-            <Card key={pillar.title} title={pillar.title} body={pillar.body} />
-          ))}
-        </div>
-
-        <SectionDivider />
-
-        <div class="max-w-[48rem] mx-auto">
-          <div class="flex flex-col items-center text-center mb-8">
-            <div
-              class="text-xs uppercase tracking-[0.22em] mb-3"
-              style={{ color: "#f8b84e" }}
-            >
-              How it works
-            </div>
-            <h2
-              class="text-3xl sm:text-4xl tracking-[-0.03em]"
-              style={{ color: "var(--color-page-text)" }}
-            >
-              A simple graph, kept fresh
-            </h2>
-          </div>
+        {/* Connectors + auth */}
+        <div
+          class="rounded-3xl p-6 sm:p-8 border max-w-[48rem] mx-auto"
+          style={{
+            background:
+              "radial-gradient(circle at top right, rgba(244, 114, 182, 0.14), transparent 34%), linear-gradient(180deg, rgba(19, 16, 22, 0.94), rgba(13, 11, 16, 0.9))",
+            borderColor: cardBorder,
+          }}
+        >
           <div
-            class="rounded-[2rem] p-5 sm:p-6 border"
-            style={{
-              background:
-                "linear-gradient(180deg, rgba(21,24,29,0.92) 0%, rgba(13,16,20,0.82) 100%)",
-              borderColor: "rgba(62, 77, 97, 0.55)",
-              boxShadow: "0 20px 60px rgba(0, 0, 0, 0.28)",
-            }}
+            class="text-xs uppercase tracking-[0.22em] mb-3"
+            style={{ color: accentPink }}
           >
-            <div class="relative">
+            Connectors + auth
+          </div>
+          <h2
+            class="text-3xl tracking-[-0.03em] mt-0 mb-4"
+            style={{ color: textColor }}
+          >
+            Embedded data ingestion
+          </h2>
+          <div class="grid gap-3">
+            {connectorModes.map((mode) => (
               <div
-                class="absolute left-4 top-2 bottom-2 w-px"
+                key={mode.label}
+                class="rounded-2xl p-4 border"
                 style={{
-                  background:
-                    "linear-gradient(180deg, rgba(248,184,78,0.45), rgba(103,232,249,0.35) 52%, rgba(134,239,172,0.35))",
+                  borderColor: "rgba(251, 113, 133, 0.14)",
+                  backgroundColor: "rgba(18, 12, 16, 0.45)",
                 }}
-              />
-
-              <div class="relative flex items-start gap-4 pb-6">
+              >
                 <div
-                  class="relative z-[1] w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold shrink-0"
-                  style={{
-                    color: "rgb(8, 10, 14)",
-                    backgroundColor: "#f8b84e",
-                    boxShadow: "0 0 0 6px rgba(13,16,20,0.92)",
-                  }}
+                  class="text-sm leading-6"
+                  style={{ color: textMuted }}
                 >
-                  1
-                </div>
-                <div class="pt-0.5">
-                  <div
-                    class="text-[11px] uppercase tracking-[0.18em] mb-1"
-                    style={{ color: "#f8b84e" }}
+                  <span
+                    class="font-semibold"
+                    style={{ color: textColor }}
                   >
-                    Model the workspace
-                  </div>
-                  <h3
-                    class="text-lg font-semibold mb-2 mt-0"
-                    style={{ color: "var(--color-page-text)" }}
-                  >
-                    Define entity types
-                  </h3>
-                  <p
-                    class="text-sm leading-6 m-0"
-                    style={{ color: "var(--color-page-text-muted)" }}
-                  >
-                    Define workspace objects — customers, products, competitors,
-                    campaigns. JSON Schema gives each type structure so agents
-                    save typed memory instead of loose text.
-                  </p>
+                    {mode.label}.
+                  </span>{" "}
+                  {mode.text}
                 </div>
               </div>
-
-              <div class="relative flex items-start gap-4 py-6">
-                <div
-                  class="relative z-[1] w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold shrink-0"
-                  style={{
-                    color: "rgb(8, 10, 14)",
-                    backgroundColor: "#67e8f9",
-                    boxShadow: "0 0 0 6px rgba(13,16,20,0.92)",
-                  }}
-                >
-                  2
-                </div>
-                <div class="pt-0.5">
-                  <div
-                    class="text-[11px] uppercase tracking-[0.18em] mb-1"
-                    style={{ color: "#67e8f9" }}
-                  >
-                    Bring in fresh context
-                  </div>
-                  <h3
-                    class="text-lg font-semibold mb-2 mt-0"
-                    style={{ color: "var(--color-page-text)" }}
-                  >
-                    Connect external data
-                  </h3>
-                  <p
-                    class="text-sm leading-6 m-0"
-                    style={{ color: "var(--color-page-text-muted)" }}
-                  >
-                    Add connectors for GitHub, Google, RSS, review sites, or
-                    internal sources. Owletto syncs feeds into the graph so
-                    memory stays current.
-                  </p>
-                </div>
-              </div>
-
-              <div class="relative flex items-start gap-4 pt-6">
-                <div
-                  class="relative z-[1] w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold shrink-0"
-                  style={{
-                    color: "rgb(8, 10, 14)",
-                    backgroundColor: "#86efac",
-                    boxShadow: "0 0 0 6px rgba(13,16,20,0.92)",
-                  }}
-                >
-                  3
-                </div>
-                <div class="pt-0.5">
-                  <div
-                    class="text-[11px] uppercase tracking-[0.18em] mb-1"
-                    style={{ color: "#86efac" }}
-                  >
-                    Turn data into memory
-                  </div>
-                  <h3
-                    class="text-lg font-semibold mb-2 mt-0"
-                    style={{ color: "var(--color-page-text)" }}
-                  >
-                    Create watchers and live prompts
-                  </h3>
-                  <p
-                    class="text-sm leading-6 m-0"
-                    style={{ color: "var(--color-page-text-muted)" }}
-                  >
-                    Watchers run scheduled prompts over fresh data. Incoming
-                    events become summaries, classifications, and durable
-                    knowledge agents recall later.
-                  </p>
-                </div>
-              </div>
-            </div>
+            ))}
           </div>
         </div>
 
         <SectionDivider />
 
-        <div class="grid gap-8 lg:grid-cols-[1fr_0.95fr] items-start">
-          <div
-            class="rounded-3xl p-6 sm:p-8 border"
-            style={{
-              background:
-                "radial-gradient(circle at top left, rgba(56, 189, 248, 0.12), transparent 36%), linear-gradient(180deg, rgba(16, 18, 24, 0.94), rgba(11, 13, 17, 0.88))",
-              borderColor: "rgba(62, 77, 97, 0.55)",
-            }}
-          >
-            <div
-              class="text-xs uppercase tracking-[0.22em] mb-3"
-              style={{ color: "#67e8f9" }}
-            >
-              Recall
-            </div>
-            <h2
-              class="text-3xl tracking-[-0.03em] mt-0 mb-4"
-              style={{ color: "var(--color-page-text)" }}
-            >
-              Recall stays grounded
-            </h2>
-            <div class="grid gap-3">
-              {recallSignals.map((signal, index) => (
-                <div
-                  key={signal}
-                  class="rounded-2xl p-4 border flex items-start gap-4"
-                  style={{
-                    borderColor: "rgba(103, 232, 249, 0.14)",
-                    backgroundColor: "rgba(10, 13, 18, 0.52)",
-                  }}
-                >
-                  <div
-                    class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold shrink-0"
-                    style={{
-                      color: "rgb(8, 10, 14)",
-                      backgroundColor: "rgb(103, 232, 249)",
-                    }}
-                  >
-                    {index + 1}
-                  </div>
-                  <div
-                    class="text-sm leading-6"
-                    style={{ color: "var(--color-page-text-muted)" }}
-                  >
-                    {signal}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div
-            class="rounded-3xl p-6 sm:p-8 border"
-            style={{
-              background:
-                "radial-gradient(circle at top right, rgba(244, 114, 182, 0.14), transparent 34%), linear-gradient(180deg, rgba(19, 16, 22, 0.94), rgba(13, 11, 16, 0.9))",
-              borderColor: "rgba(62, 77, 97, 0.55)",
-            }}
-          >
-            <div
-              class="text-xs uppercase tracking-[0.22em] mb-3"
-              style={{ color: "#fb7185" }}
-            >
-              Connectors + auth
-            </div>
-            <h2
-              class="text-3xl tracking-[-0.03em] mt-0 mb-4"
-              style={{ color: "var(--color-page-text)" }}
-            >
-              Embedded data ingestion
-            </h2>
-            <div class="grid gap-3">
-              {connectorModes.map((mode) => (
-                <div
-                  key={mode.label}
-                  class="rounded-2xl p-4 border"
-                  style={{
-                    borderColor: "rgba(251, 113, 133, 0.14)",
-                    backgroundColor: "rgba(18, 12, 16, 0.45)",
-                  }}
-                >
-                  <div
-                    class="text-sm leading-6"
-                    style={{ color: "var(--color-page-text-muted)" }}
-                  >
-                    <span
-                      class="font-semibold"
-                      style={{ color: "var(--color-page-text)" }}
-                    >
-                      {mode.label}.
-                    </span>{" "}
-                    {mode.text}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <SectionDivider />
-
-        <div class="grid gap-8 lg:grid-cols-[1fr_1fr] items-start">
-          <div>
-            <div
-              class="text-xs uppercase tracking-[0.22em] mb-3"
-              style={{ color: "#86efac" }}
-            >
-              Watchers
-            </div>
-            <h2
-              class="text-3xl sm:text-4xl tracking-[-0.03em] mt-0 mb-4"
-              style={{ color: "var(--color-page-text)" }}
-            >
-              Scheduled analysis keeps memory current
-            </h2>
-            <p
-              class="text-base leading-7 m-0"
-              style={{ color: "var(--color-page-text-muted)" }}
-            >
-              Watchers analyze workspace data on a schedule, extract structured
-              output, and link conclusions to evidence. Memory stays current
-              even when nobody is chatting.
-            </p>
-          </div>
-
-          <div>
-            <div
-              class="text-xs uppercase tracking-[0.22em] mb-4"
-              style={{ color: "#86efac" }}
-            >
-              Why it fits Lobu
-            </div>
-            <div class="grid gap-3">
-              {whyItFitsLobu.map((item) => (
-                <div
-                  key={item}
-                  class="rounded-2xl p-4 border flex items-start gap-3"
-                  style={{
-                    backgroundColor: "rgba(255,255,255,0.03)",
-                    borderColor: "rgba(62, 77, 97, 0.42)",
-                  }}
-                >
-                  <div
-                    class="w-2.5 h-2.5 rounded-full mt-2 shrink-0"
-                    style={{ backgroundColor: "#86efac" }}
-                  />
-                  <div
-                    class="text-sm leading-6"
-                    style={{ color: "var(--color-page-text-muted)" }}
-                  >
-                    {item}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <SectionDivider />
-
+        {/* FAQ */}
         <div>
           <div class="flex flex-col items-center text-center mb-8">
             <div
               class="text-xs uppercase tracking-[0.22em] mb-3"
-              style={{ color: "#c084fc" }}
+              style={{ color: accentPurple }}
             >
               FAQ
             </div>
             <h2
               class="text-3xl sm:text-4xl tracking-[-0.03em]"
-              style={{ color: "var(--color-page-text)" }}
+              style={{ color: textColor }}
             >
               Common questions
             </h2>
@@ -693,20 +150,19 @@ export function MemorySection() {
                 key={item.q}
                 class="rounded-2xl p-5 border"
                 style={{
-                  background:
-                    "linear-gradient(180deg, rgba(21,24,29,0.92) 0%, rgba(13,16,20,0.82) 100%)",
-                  borderColor: "rgba(62, 77, 97, 0.55)",
+                  background: cardBg,
+                  borderColor: cardBorder,
                 }}
               >
                 <h3
                   class="text-base font-semibold mb-2 mt-0"
-                  style={{ color: "var(--color-page-text)" }}
+                  style={{ color: textColor }}
                 >
                   {item.q}
                 </h3>
                 <p
                   class="text-sm leading-6 m-0"
-                  style={{ color: "var(--color-page-text-muted)" }}
+                  style={{ color: textMuted }}
                 >
                   {item.a}
                 </p>
@@ -717,6 +173,7 @@ export function MemorySection() {
 
         <SectionDivider />
 
+        {/* CTA */}
         <div
           class="rounded-[2rem] p-7 sm:p-10 border"
           style={{
@@ -729,16 +186,16 @@ export function MemorySection() {
             <div>
               <h2
                 class="text-3xl sm:text-4xl tracking-[-0.03em] mt-0 mb-3"
-                style={{ color: "var(--color-page-text)" }}
+                style={{ color: textColor }}
               >
-                Shared memory for your team
+                Inspect structured memory from any prompt
               </h2>
               <p
                 class="text-base leading-7 m-0 max-w-[42rem]"
-                style={{ color: "var(--color-page-text-muted)" }}
+                style={{ color: textMuted }}
               >
-                Scoped organizational knowledge, live connectors, and managed
-                auth — Owletto is the layer that makes it work.
+                See the prompt, the extracted record, its relationships, and
+                the model log.
               </p>
             </div>
             <div class="flex flex-wrap gap-3">
@@ -748,7 +205,7 @@ export function MemorySection() {
                 rel="noopener noreferrer"
                 class="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium border"
                 style={{
-                  color: "var(--color-page-text)",
+                  color: textColor,
                   backgroundColor: "rgba(255,255,255,0.05)",
                   borderColor: "var(--color-page-border-active)",
                 }}
@@ -757,11 +214,11 @@ export function MemorySection() {
                 Owletto on GitHub
               </a>
               <a
-                href="/getting-started/"
+                href="/getting-started/memory/"
                 class="inline-flex items-center rounded-xl px-4 py-2.5 text-sm font-medium"
-                style={{ color: "var(--color-page-text-muted)" }}
+                style={{ color: textMuted }}
               >
-                Getting started →
+                Memory docs →
               </a>
             </div>
           </div>

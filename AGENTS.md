@@ -75,8 +75,12 @@ Implementation details for when you need to change the release system itself:
 - Anytime you make changes in the code, you MUST:
 
 1. Have the stack running (`make dev`).
-2. When possible, first verify MCP tool calls work by calling the gateway proxy or Owletto directly (e.g., via a temporary script or `bun -e`). This catches issues before involving the full agent loop.
-3. Test the bot using the test script:
+2. Run validations that match the surface you changed — do not skip the relevant app:
+   - `packages/landing/*`: run `cd packages/landing && bun run build`
+   - `packages/core/*`, `packages/gateway/*`, `packages/worker/*`, `packages/cli/*`: run `make build-packages`
+   - For broad TS safety across the repo, prefer `bun run typecheck` when practical
+3. When possible, first verify MCP tool calls work by calling the gateway proxy or Owletto directly (e.g., via a temporary script or `bun -e`). This catches issues before involving the full agent loop.
+4. If your change affects bot behavior, worker execution, gateway orchestration, platform integrations, MCP tools, or agent responses, test the bot using the test script:
 ```bash
 ./scripts/test-bot.sh "@me test prompt"
 ```
@@ -84,13 +88,13 @@ The script automatically handles sending the message, waiting for response, and 
 ```bash
 ./scripts/test-bot.sh "@me first message" "follow up question" "another question"
 ```
-4. If the bot gives stale/wrong responses, clear Redis chat history for the test user before retesting:
+5. If the bot gives stale/wrong responses, clear Redis chat history for the test user before retesting:
 ```bash
 docker compose -f docker/docker-compose.yml exec redis redis-cli KEYS 'chat:history:*' # find the key
 docker compose -f docker/docker-compose.yml exec redis redis-cli DEL 'chat:history:<key>'
 ```
 
-5. For automated quality checks, use the eval system:
+6. For automated quality checks, use the eval system when the change affects agent behavior or prompt quality:
 ```bash
 lobu eval                    # run all evals for default agent
 lobu eval ping               # run a specific eval

@@ -12,11 +12,14 @@ import { Nav } from "../components/Nav";
 >
   <div
     class="min-h-screen grid-lines"
-    style={{ backgroundColor: "var(--color-page-bg)" }}
+    style={{
+      backgroundColor: "var(--color-page-bg)",
+      "--grid-max-w": "72rem",
+    }}
   >
     <Nav currentPath={Astro.url.pathname} />
     <main class="relative z-[1]">
-      <MemorySection />
+      <MemorySection client:load />
     </main>
     <Footer />
   </div>

@@ -65,7 +65,7 @@ body {
   position: relative;
   height: 1px;
   background-color: var(--grid-color);
-  width: calc(min(64rem, calc(100% - 3rem)) - 4px);
+  width: calc(min(var(--grid-max-w), calc(100% - 3rem)) - 4px);
   max-width: calc(100% - 3rem - 4px);
   margin: 1rem auto;
   overflow: hidden;
