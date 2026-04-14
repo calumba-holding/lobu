@@ -17,3 +17,9 @@ enabled = ["github"]
 
 [agents.devops-control.network]
 allowed = ["github.com", ".github.com", ".githubusercontent.com", "registry.npmjs.org", ".npmjs.org"]
+
+[memory.owletto]
+enabled = true
+config = "./owletto.yaml"
+models = "./models"
+data = "./data"

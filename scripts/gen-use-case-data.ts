@@ -53,6 +53,31 @@ function readYamlDir<T = Record<string, unknown>>(dirPath: string): T[] {
     .filter(Boolean);
 }
 
+interface ExampleOwlettoLayout {
+  projectPath: string;
+  modelsPath: string;
+}
+
+function resolveOwlettoLayout(exampleDir: string): ExampleOwlettoLayout | null {
+  const rootProjectPath = join(exampleDir, "owletto.yaml");
+  if (existsSync(rootProjectPath)) {
+    return {
+      projectPath: rootProjectPath,
+      modelsPath: join(exampleDir, "models"),
+    };
+  }
+
+  const legacyProjectPath = join(exampleDir, "owletto", "project.yaml");
+  if (existsSync(legacyProjectPath)) {
+    return {
+      projectPath: legacyProjectPath,
+      modelsPath: join(exampleDir, "owletto", "models"),
+    };
+  }
+
+  return null;
+}
+
 // ── Types — imported from Owletto schema ────────────────────────────
 
 // Re-use the canonical types from the sibling owletto repo.
@@ -109,19 +134,14 @@ interface UseCaseModel {
 
 function buildModel(exampleName: string): UseCaseModel | null {
   const exampleDir = join(EXAMPLES_DIR, exampleName);
-  const owlettoDir = join(exampleDir, "owletto");
+  const layout = resolveOwlettoLayout(exampleDir);
+  if (!layout) return null;
 
-  // Must have owletto/project.yaml
-  const projectPath = join(owlettoDir, "project.yaml");
-  if (!existsSync(projectPath)) return null;
-
-  // 1. project.yaml → org
-  const project = readYamlFile<ProjectYaml>(projectPath)!;
+  const project = readYamlFile<ProjectYaml>(layout.projectPath)!;
   const owlettoOrg = project.org;
 
-  // 2. Load all models from models/ directory
   type AnyModel = EntityYaml | WatcherYaml;
-  const allModels = readYamlDir<AnyModel>(join(owlettoDir, "models"));
+  const allModels = readYamlDir<AnyModel>(layout.modelsPath);
   const entities = allModels.filter(
     (m): m is EntityYaml => (m as Record<string, unknown>).type === "entity"
   );
@@ -141,7 +161,6 @@ function buildModel(exampleName: string): UseCaseModel | null {
       }
     : undefined;
 
-  // 5. lobu.toml
   const tomlPath = join(exampleDir, "lobu.toml");
   let agentId = exampleName;
   let description = "";
@@ -180,7 +199,6 @@ function buildModel(exampleName: string): UseCaseModel | null {
     }
   }
 
-  // 6. Agent markdown files
   const agentMdDir = agentDirRel
     ? join(exampleDir, agentDirRel)
     : join(exampleDir, "agents", exampleName);
@@ -192,10 +210,7 @@ function buildModel(exampleName: string): UseCaseModel | null {
   ]);
   const user = readLines(join(agentMdDir, "USER.md"), ["# User Context"]);
 
-  // skillInstructions: lines from SOUL.md that start with "- "
   const skillInstructions = soul.filter((l) => l.trim().startsWith("- "));
-
-  // mcpServer: first skill in enabled skills, or empty
   const mcpServer = enabledSkills.length > 0 ? enabledSkills[0] : "";
 
   return {
@@ -225,9 +240,7 @@ function buildModel(exampleName: string): UseCaseModel | null {
 const exampleDirs = readdirSync(EXAMPLES_DIR, { withFileTypes: true })
   .filter((d) => d.isDirectory())
   .map((d) => d.name)
-  .filter((name) =>
-    existsSync(join(EXAMPLES_DIR, name, "owletto", "project.yaml"))
-  )
+  .filter((name) => resolveOwlettoLayout(join(EXAMPLES_DIR, name)) !== null)
   .sort();
 
 const models: Record<string, UseCaseModel> = {};
@@ -247,7 +260,6 @@ function toTs(value: unknown, indent: number): string {
 
   if (value === null || value === undefined) return "undefined";
   if (typeof value === "string") {
-    // Use template literal for multi-line strings
     if (value.includes("\n")) {
       return `\`${value.replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\$\{/g, "\\${")}\``;
     }
@@ -258,7 +270,6 @@ function toTs(value: unknown, indent: number): string {
   }
   if (Array.isArray(value)) {
     if (value.length === 0) return "[]";
-    // Check if all items are simple strings
     if (value.every((v) => typeof v === "string" && !v.includes("\n"))) {
       const items = value.map((v) => JSON.stringify(v)).join(", ");
       if (items.length < 80) return `[${items}]`;
@@ -316,7 +327,6 @@ export interface GeneratedUseCaseModel {
 export const generatedUseCaseModels: Record<string, GeneratedUseCaseModel> = ${toTs(models, 0)};
 `;
 
-// Ensure output directory exists
 const outDir = resolve(OUTPUT_PATH, "..");
 if (!existsSync(outDir)) {
   mkdirSync(outDir, { recursive: true });

@@ -17,3 +17,9 @@ enabled = ["web-monitor", "github"]
 
 [agents.market-intel.network]
 allowed = ["producthunt.com", "crunchbase.com", ".techcrunch.com", "github.com", ".github.com", ".githubusercontent.com"]
+
+[memory.owletto]
+enabled = true
+config = "./owletto.yaml"
+models = "./models"
+data = "./data"

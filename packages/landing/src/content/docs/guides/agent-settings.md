@@ -33,16 +33,24 @@ See [Tool Policy](/guides/tool-policy/) for the operator-facing config, and [`lo
 
 ## Memory Plugins
 
-Memory is pluggable. The gateway picks a default from `MEMORY_URL`; any agent can override it via `pluginsConfig`.
+Memory is pluggable. In file-first projects, the gateway first checks `[memory.owletto]` in `lobu.toml`; any agent can still override the default via `pluginsConfig`.
 
 ### Defaults
 
-| `MEMORY_URL` | Plugin used |
+| Effective config | Plugin used |
 |---|---|
-| unset | `@openclaw/native-memory` — files under `/workspace` (per-thread PVC in K8s, `./workspaces/{threadId}/` in Docker). Not shared across threads. |
-| set | `@lobu/owletto-openclaw` — the OpenClaw memory plugin for Owletto. It translates OpenClaw memory calls into Owletto MCP requests via the gateway's `/mcp/owletto` proxy. Cross-session, shareable across agents. |
+| `[memory.owletto]` disabled or unresolved, and no `MEMORY_URL` override | `@openclaw/native-memory` — files under `/workspace` (per-thread PVC in K8s, `./workspaces/{threadId}/` in Docker). Not shared across threads. |
+| `[memory.owletto]` enabled | `@lobu/owletto-openclaw` — the OpenClaw memory plugin for Owletto. It translates OpenClaw memory calls into Owletto MCP requests via the gateway's `/mcp/owletto` proxy. Cross-session, shareable across agents. |
+| `MEMORY_URL` set | Used as the base Owletto MCP endpoint before Lobu scopes it to the org from `owletto.yaml`. Useful for local or custom Owletto deployments. |
 
-`lobu init` sets `MEMORY_URL` for you: **Owletto Cloud** → `https://owletto.com/mcp`, **Owletto Local** → adds an Owletto container and points at `http://owletto:8787/mcp`, **Custom URL** → your value, **None** → leaves it unset.
+`lobu init` now scaffolds the file-first Owletto layout for memory-enabled projects:
+
+- `owletto.yaml`
+- `models/`
+- `data/`
+- `[memory.owletto]` in `lobu.toml`
+
+For **Owletto Cloud**, Lobu can use the hosted default automatically. For **Owletto Local** and **Custom URL**, `MEMORY_URL` remains the base-endpoint override.
 
 If the preferred plugin isn't installed, the gateway falls back to the other one (or to no memory if neither is installed).
 

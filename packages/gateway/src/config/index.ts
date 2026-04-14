@@ -223,8 +223,10 @@ export function getInternalGatewayUrl(): string {
 }
 
 /**
- * Build the default memory plugin list based on MEMORY_URL env var.
- * MEMORY_URL set → Owletto MCP plugin (connect to that URL) when installed
+ * Build the default memory plugin list based on the effective MEMORY_URL env var.
+ * In file-first projects, gateway startup may derive MEMORY_URL from
+ * `[memory.owletto]` in lobu.toml before this runs.
+ * MEMORY_URL set → Owletto MCP plugin when installed
  * MEMORY_URL empty → @openclaw/native-memory (filesystem-based)
  */
 function isPluginInstalled(source: string): boolean {

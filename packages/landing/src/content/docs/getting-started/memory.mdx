@@ -124,8 +124,29 @@ For example:
 
 In Lobu, memory is pluggable per agent.
 
-- If `MEMORY_URL` is not set, Lobu falls back to `@openclaw/native-memory`.
-- If `MEMORY_URL` points at an Owletto MCP endpoint, Lobu uses the `@lobu/owletto-openclaw` memory plugin.
+For file-first projects, the default setup is:
+
+```text
+project/
+├── lobu.toml
+├── owletto.yaml
+├── models/
+└── data/
+```
+
+```toml
+[memory.owletto]
+enabled = true
+config = "./owletto.yaml"
+models = "./models"
+data = "./data"
+```
+
+At runtime, Lobu resolves the memory backend like this:
+
+- If `[memory.owletto]` is enabled, Lobu derives the effective Owletto MCP endpoint from `owletto.yaml`.
+- `MEMORY_URL` is still supported as an optional base-endpoint override, mainly for local or custom Owletto deployments.
+- If no Owletto endpoint is resolved, Lobu falls back to `@openclaw/native-memory`.
 - Agents can also override plugin configuration through `pluginsConfig` in agent settings.
 
 The `@lobu/owletto-openclaw` plugin is the adapter between OpenClaw and Owletto. OpenClaw still calls normal memory operations through its plugin interface; the plugin translates those reads and writes into Owletto MCP calls through the gateway proxy, so the worker never needs raw OAuth tokens or direct Owletto credentials.

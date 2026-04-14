@@ -14,6 +14,9 @@ import {
 } from "../commands/skills/registry.js";
 import { renderTemplate } from "../utils/template.js";
 
+const DEFAULT_OWLETTO_MCP_URL = "https://owletto.com/mcp";
+const LOCAL_OWLETTO_MCP_URL = "http://owletto:8787/mcp";
+
 export async function initCommand(
   cwd: string = process.cwd(),
   projectNameArg?: string
@@ -259,15 +262,15 @@ export async function initCommand(
   ]);
 
   const envSecrets: Array<{ envVar: string; value: string }> = [];
+  const includeOwlettoMemory = memoryChoice !== "none";
   let includeOwlettoLocal = false;
   let owlettoUrl = "";
 
   if (memoryChoice === "owletto-cloud") {
-    owlettoUrl = "https://owletto.com/mcp";
-    envSecrets.push({ envVar: "MEMORY_URL", value: owlettoUrl });
+    owlettoUrl = DEFAULT_OWLETTO_MCP_URL;
   } else if (memoryChoice === "owletto-local") {
     includeOwlettoLocal = true;
-    owlettoUrl = "http://owletto:8787/mcp";
+    owlettoUrl = LOCAL_OWLETTO_MCP_URL;
     envSecrets.push({ envVar: "MEMORY_URL", value: owlettoUrl });
     envSecrets.push({
       envVar: "OWLETTO_AUTH_SECRET",
@@ -289,7 +292,7 @@ export async function initCommand(
     owlettoUrl = customOwlettoUrl;
     envSecrets.push({ envVar: "MEMORY_URL", value: owlettoUrl });
   }
-  // "none" — no env var needed, gateway defaults to filesystem memory
+  // "none" — no Owletto scaffold, gateway defaults to filesystem memory
 
   // Observability — OTEL tracing endpoint
   const { otelEndpoint } = await inquirer.prompt([
@@ -371,6 +374,13 @@ export async function initCommand(
     // Create data directory in project directory
     await mkdir(join(projectDir, "data"), { recursive: true });
 
+    if (includeOwlettoMemory) {
+      await generateOwlettoProjectLayout(projectDir, {
+        org: projectName,
+        name: humanizeSlug(projectName),
+      });
+    }
+
     // Generate lobu.toml
     await generateLobuToml(projectDir, {
       agentName: projectName,
@@ -382,6 +392,7 @@ export async function initCommand(
       connectionConfig:
         Object.keys(connectionConfig).length > 0 ? connectionConfig : undefined,
       skillIds: selectedSkillIds,
+      includeOwlettoMemory,
     });
 
     const variables = {
@@ -540,6 +551,19 @@ turns:
         "     - skills/                      (shared skills — all agents)"
       )
     );
+    if (includeOwlettoMemory) {
+      console.log(
+        chalk.dim(
+          "     - owletto.yaml                 (Owletto project config)"
+        )
+      );
+      console.log(
+        chalk.dim("     - models/                      (Owletto model files)")
+      );
+      console.log(
+        chalk.dim("     - data/                        (Owletto seed data)")
+      );
+    }
     console.log(chalk.dim("     - .env                         (secrets)"));
     console.log(chalk.dim(`     - ${composeFilename}`));
     if (answers.deploymentMode === "docker") {
@@ -590,7 +614,47 @@ turns:
   }
 }
 
-async function generateLobuToml(
+function humanizeSlug(slug: string): string {
+  return slug
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+export async function generateOwlettoProjectLayout(
+  projectDir: string,
+  options: {
+    org: string;
+    name: string;
+    description?: string;
+  }
+): Promise<void> {
+  await mkdir(join(projectDir, "models"), { recursive: true });
+  await mkdir(join(projectDir, "data", "entities"), { recursive: true });
+  await mkdir(join(projectDir, "data", "relationships"), {
+    recursive: true,
+  });
+
+  await writeFile(
+    join(projectDir, "owletto.yaml"),
+    [
+      "version: 1",
+      `org: ${options.org}`,
+      `name: ${JSON.stringify(options.name)}`,
+      ...(options.description
+        ? [`description: ${JSON.stringify(options.description)}`]
+        : []),
+      "",
+    ].join("\n")
+  );
+
+  await writeFile(join(projectDir, "models", ".gitkeep"), "");
+  await writeFile(join(projectDir, "data", "entities", ".gitkeep"), "");
+  await writeFile(join(projectDir, "data", "relationships", ".gitkeep"), "");
+}
+
+export async function generateLobuToml(
   projectDir: string,
   options: {
     agentName: string;
@@ -601,6 +665,7 @@ async function generateLobuToml(
     connectionType?: string;
     connectionConfig?: Record<string, string>;
     skillIds?: string[];
+    includeOwlettoMemory?: boolean;
   }
 ): Promise<void> {
   const id = options.agentName;
@@ -684,6 +749,18 @@ async function generateLobuToml(
     lines.push("allowed = []");
   }
 
+  if (options.includeOwlettoMemory) {
+    lines.push(
+      "",
+      "# Project-scoped Owletto memory",
+      `[memory.owletto]`,
+      "enabled = true",
+      'config = "./owletto.yaml"',
+      'models = "./models"',
+      'data = "./data"'
+    );
+  }
+
   lines.push(""); // trailing newline
   await writeFile(join(projectDir, "lobu.toml"), lines.join("\n"));
 }
@@ -695,7 +772,7 @@ async function getCliVersion(): Promise<string> {
   return pkg.version || "0.1.0";
 }
 
-function generateDockerCompose(options: {
+export function generateDockerCompose(options: {
   projectName: string;
   gatewayPort: string;
   dockerfilePath: string;
@@ -819,6 +896,8 @@ ${owlettoServices}
       ENCRYPTION_KEY: \${ENCRYPTION_KEY}
       WORKER_ALLOWED_DOMAINS: \${WORKER_ALLOWED_DOMAINS:-}
       WORKER_DISALLOWED_DOMAINS: \${WORKER_DISALLOWED_DOMAINS:-}
+      # Optional Owletto base MCP URL override. File-first projects derive scoped
+      # memory from [memory.owletto] in lobu.toml and owletto.yaml.
       MEMORY_URL: \${MEMORY_URL:-}
       LOBU_WORKSPACE_ROOT: /workspace/project
     volumes:${dockerSocketMount}

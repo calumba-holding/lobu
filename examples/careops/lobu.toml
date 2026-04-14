@@ -7,9 +7,14 @@ description = "Manage patient care, appointments, and treatment workflows for he
 dir = "./agents/careops"
 
 [[agents.careops.providers]]
-id = "anthropic"
-model = "claude/sonnet-4-5"
-key = "$ANTHROPIC_API_KEY"
+id = "z-ai"
+model = "z-ai/glm-4.7"
+key = "$Z_AI_API_KEY"
+
+# [[agents.careops.providers]]
+# id = "anthropic"
+# model = "claude/sonnet-4-5"
+# key = "$ANTHROPIC_API_KEY"
 
 [[agents.careops.connections]]
 type = "slack"
@@ -23,3 +28,9 @@ enabled = ["github"]
 
 [agents.careops.network]
 allowed = ["github.com", ".github.com", ".githubusercontent.com", "registry.npmjs.org", ".npmjs.org"]
+
+[memory.owletto]
+enabled = true
+config = "./owletto.yaml"
+models = "./models"
+data = "./data"

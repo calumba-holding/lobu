@@ -5,7 +5,7 @@ sidebar:
   order: 1
 ---
 
-`lobu.toml` is the project configuration file created by `lobu init`. It defines agents, providers, connections, skills, network access, and worker settings.
+`lobu.toml` is the project configuration file created by `lobu init`. It defines agents, providers, connections, skills, network access, worker settings, and optional file-first Owletto memory configuration.
 
 ## Minimal example
 
@@ -23,6 +23,12 @@ enabled = ["github"]
 
 [agents.my-agent.network]
 allowed = ["github.com"]
+
+[memory.owletto]
+enabled = true
+config = "./owletto.yaml"
+models = "./models"
+data = "./data"
 ```
 
 ## Full example
@@ -90,9 +96,40 @@ strict = false
 # Worker customization
 [agents.support.worker]
 nix_packages = ["imagemagick", "ffmpeg"]
+
+# File-first Owletto memory
+[memory.owletto]
+enabled = true
+config = "./owletto.yaml"
+models = "./models"
+data = "./data"
 ```
 
 ## Schema reference
+
+### `[memory.owletto]`
+
+Optional project-level Owletto memory configuration for file-first projects.
+
+Typical companion layout:
+
+```text
+project/
+├── lobu.toml
+├── owletto.yaml
+├── models/
+└── data/
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `enabled` | boolean | no | Enables file-first Owletto memory resolution for the project |
+| `config` | string | no | Path to the Owletto project config file, usually `./owletto.yaml` |
+| `models` | string | no | Path to Owletto model files, usually `./models` |
+| `data` | string | no | Path to Owletto seed data, usually `./data` |
+
+When `[memory.owletto]` is enabled, Lobu reads `owletto.yaml`, extracts the project org, and derives the effective Owletto MCP endpoint. `MEMORY_URL` remains available as an optional base-endpoint override for local or custom Owletto deployments.
+
 
 ### `[agents.<id>]`
 

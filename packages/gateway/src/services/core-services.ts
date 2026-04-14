@@ -33,9 +33,11 @@ import { registerBuiltInCommands } from "../commands/built-in-commands";
 import type { AgentConfig, GatewayConfig } from "../config";
 import type { RuntimeProviderCredentialResolver } from "../embedded";
 import {
+  applyOwlettoMemoryEnvFromProject,
   type FileLoadedAgent,
   loadAgentConfigFromFiles,
 } from "../config/file-loader";
+import { ArtifactStore } from "../files/artifact-store";
 import { WorkerGateway } from "../gateway";
 import type { IMessageQueue } from "../infrastructure/queue";
 import {
@@ -132,6 +134,7 @@ export class CoreServices {
   private transcriptionService?: TranscriptionService;
   private imageGenerationService?: ImageGenerationService;
   private bedrockOpenAIService?: BedrockOpenAIService;
+  private artifactStore?: ArtifactStore;
   private userAgentsStore?: UserAgentsStore;
   private agentMetadataStore?: AgentMetadataStore;
 
@@ -402,6 +405,7 @@ export class CoreServices {
 
           // File-first dev mode: use InMemoryAgentStore populated from files
           this.projectPath = resolve(tomlPath, "..");
+          await applyOwlettoMemoryEnvFromProject(this.projectPath);
 
           // Load agents from files and populate store
           this.fileLoadedAgents = await loadAgentConfigFromFiles(
@@ -514,6 +518,7 @@ export class CoreServices {
     this.imageGenerationService = new ImageGenerationService(
       this.authProfilesManager
     );
+    this.artifactStore = new ArtifactStore();
     this.modelPreferenceStore = new ModelPreferenceStore(redisClient, "claude");
 
     // Seed provider credentials from file-loaded agents
@@ -972,6 +977,8 @@ export class CoreServices {
       return { reloaded: false, agents: [] };
     }
 
+    await applyOwlettoMemoryEnvFromProject(this.projectPath);
+
     // Re-load from disk
     this.fileLoadedAgents = await loadAgentConfigFromFiles(this.projectPath);
 
@@ -1136,6 +1143,11 @@ export class CoreServices {
 
   getPublicGatewayUrl(): string {
     return this.config.mcp.publicGatewayUrl;
+  }
+
+  getArtifactStore(): ArtifactStore {
+    if (!this.artifactStore) throw new Error("Artifact store not initialized");
+    return this.artifactStore;
   }
 
   getSessionManager(): SessionManager {

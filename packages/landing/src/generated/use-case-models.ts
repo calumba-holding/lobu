@@ -132,9 +132,9 @@ export const generatedUseCaseModels: Record<string, GeneratedUseCaseModel> = {
         ".npmjs.org",
       ],
       mcpServer: "github",
-      providerId: "anthropic",
-      model: "claude/sonnet-4-5",
-      apiKeyEnv: "ANTHROPIC_API_KEY",
+      providerId: "z-ai",
+      model: "z-ai/glm-4.7",
+      apiKeyEnv: "Z_AI_API_KEY",
       skillInstructions: [
         "- Protect patient privacy and confidentiality.",
         "- Preserve treatment history and provider assignments.",
@@ -441,7 +441,7 @@ export const generatedUseCaseModels: Record<string, GeneratedUseCaseModel> = {
   },
   legal: {
     id: "legal",
-    owlettoOrg: "legal",
+    owlettoOrg: "legal-review",
     agent: {
       identity: [
         "You are a legal review agent that reviews contracts, summarizes risk, and surfaces missing protections.",

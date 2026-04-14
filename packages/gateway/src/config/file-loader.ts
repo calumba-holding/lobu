@@ -18,6 +18,7 @@ import { parse as parseToml } from "smol-toml";
 import { parse as parseYaml } from "yaml";
 
 const logger = createLogger("file-loader");
+const DEFAULT_OWLETTO_MCP_URL = "https://owletto.com/mcp";
 
 // ── Public Types ──────────────────────────────────────────────────────────
 
@@ -109,6 +110,108 @@ async function loadAndValidateToml(
   }
 
   return result.data;
+}
+
+interface OwlettoProjectConfig {
+  org?: string;
+}
+
+function normalizeOwlettoMcpBaseUrl(input: string): string | null {
+  try {
+    const url = new URL(input);
+    url.hash = "";
+    url.search = "";
+    url.pathname = "/mcp";
+    return url.toString().replace(/\/+$/, "");
+  } catch {
+    return null;
+  }
+}
+
+function buildOwlettoScopedMcpUrl(baseMcpUrl: string, org: string): string {
+  const url = new URL(baseMcpUrl);
+  url.pathname = `/mcp/${org}`;
+  url.hash = "";
+  url.search = "";
+  return url.toString().replace(/\/+$/, "");
+}
+
+async function readOwlettoOrgFromConfig(
+  projectPath: string,
+  configPath: string | undefined
+): Promise<string | null> {
+  if (!configPath?.trim()) {
+    return null;
+  }
+
+  const resolvedConfigPath = resolve(projectPath, configPath);
+
+  try {
+    const raw = await readFile(resolvedConfigPath, "utf-8");
+    const parsed = parseYaml(raw) as OwlettoProjectConfig;
+    const org = parsed?.org?.trim();
+    if (org) {
+      return org;
+    }
+
+    logger.warn(`Owletto config at ${resolvedConfigPath} does not declare org`);
+    return null;
+  } catch (error) {
+    logger.warn(`Failed to read Owletto config at ${resolvedConfigPath}`, {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
+async function resolveOwlettoMemoryUrl(
+  projectPath: string,
+  config: LobuTomlConfig
+): Promise<string | null> {
+  const owlettoMemory = config.memory?.owletto;
+  if (!owlettoMemory || owlettoMemory.enabled === false) {
+    return null;
+  }
+
+  const configuredMemoryUrl = process.env.MEMORY_URL?.trim();
+  const owlettoOrg = await readOwlettoOrgFromConfig(
+    projectPath,
+    owlettoMemory.config
+  );
+
+  if (owlettoOrg) {
+    const baseMcpUrl = configuredMemoryUrl
+      ? normalizeOwlettoMcpBaseUrl(configuredMemoryUrl) ||
+        DEFAULT_OWLETTO_MCP_URL
+      : DEFAULT_OWLETTO_MCP_URL;
+    return buildOwlettoScopedMcpUrl(baseMcpUrl, owlettoOrg);
+  }
+
+  return configuredMemoryUrl || null;
+}
+
+export async function applyOwlettoMemoryEnvFromProject(
+  projectPath: string
+): Promise<string | null> {
+  const config = await loadAndValidateToml(projectPath);
+  if (!config) {
+    return null;
+  }
+
+  const resolvedMemoryUrl = await resolveOwlettoMemoryUrl(projectPath, config);
+  if (!resolvedMemoryUrl) {
+    return null;
+  }
+
+  if (process.env.MEMORY_URL !== resolvedMemoryUrl) {
+    process.env.MEMORY_URL = resolvedMemoryUrl;
+    logger.info(
+      { memoryUrl: resolvedMemoryUrl },
+      "Configured MEMORY_URL from [memory.owletto]"
+    );
+  }
+
+  return resolvedMemoryUrl;
 }
 
 // ── Agent Config Builder ──────────────────────────────────────────────────

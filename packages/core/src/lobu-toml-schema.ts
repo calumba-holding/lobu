@@ -125,10 +125,24 @@ const agentEntrySchema = z.object({
   worker: workerSchema.optional(),
 });
 
+// ── Memory ─────────────────────────────────────────────────────────────────
+
+const owlettoMemorySchema = z.object({
+  enabled: z.boolean().optional(),
+  config: z.string().optional(),
+  models: z.string().optional(),
+  data: z.string().optional(),
+});
+
+const memorySchema = z.object({
+  owletto: owlettoMemorySchema.optional(),
+});
+
 // ── Top Level ───────────────────────────────────────────────────────────────
 
 export const lobuConfigSchema = z.object({
   agents: z.record(z.string().regex(/^[a-z0-9][a-z0-9-]*$/), agentEntrySchema),
+  memory: memorySchema.optional(),
 });
 
 // ── Inferred Types ──────────────────────────────────────────────────────────
@@ -142,3 +156,5 @@ export type SkillsEntry = z.infer<typeof skillsSchema>;
 export type NetworkEntry = z.infer<typeof networkSchema>;
 export type ToolsEntry = z.infer<typeof toolsSchema>;
 export type WorkerEntry = z.infer<typeof workerSchema>;
+export type OwlettoMemoryEntry = z.infer<typeof owlettoMemorySchema>;
+export type MemoryEntry = z.infer<typeof memorySchema>;
