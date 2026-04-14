@@ -53,27 +53,14 @@ function readYamlDir<T = Record<string, unknown>>(dirPath: string): T[] {
     .filter(Boolean);
 }
 
-// ── Types for parsed data ────────────────────────────────────────────
+// ── Types — imported from Owletto schema ────────────────────────────
 
-interface EntityYaml {
-  slug: string;
-  name: string;
-  description?: string;
-}
-
-interface WatcherYaml {
-  slug: string;
-  name: string;
-  schedule: string;
-  prompt: string;
-  extraction_schema?: unknown;
-}
-
-interface ProjectYaml {
-  org: string;
-  name: string;
-  description?: string;
-}
+// Re-use the canonical types from the sibling owletto repo.
+// If the owletto package is not available (e.g. CI), these minimal
+// aliases cover the fields we actually read.
+type EntityYaml = import("../../owletto/packages/cli/src/lib/schema.ts").EntitySchema;
+type WatcherYaml = import("../../owletto/packages/cli/src/lib/schema.ts").WatcherSchema;
+type ProjectYaml = import("../../owletto/packages/cli/src/lib/schema.ts").ProjectSchema;
 
 // ── TOML types ───────────────────────────────────────────────────────
 
