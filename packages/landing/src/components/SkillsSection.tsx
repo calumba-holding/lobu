@@ -468,6 +468,7 @@ function EditorPreview({
 
   return (
     <div
+      class="text-left"
       style={{
         backgroundColor: "var(--color-page-bg-elevated)",
         overflow: "hidden",
@@ -631,7 +632,7 @@ function EditorPreview({
 }
 
 const codeBlockClass =
-  "px-4 py-3 text-[10px] leading-5 font-mono whitespace-pre-wrap break-words overflow-hidden m-0 max-w-full";
+  "px-4 py-3 text-left text-[10px] leading-5 font-mono whitespace-pre-wrap break-words overflow-hidden m-0 max-w-full";
 const codeBlockStyle = {
   backgroundColor: "rgba(0,0,0,0.3)",
   color: "#9aa5ce",
