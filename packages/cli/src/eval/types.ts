@@ -17,7 +17,10 @@ const turnSchema = z.object({
   assert: z.array(assertionSchema).optional(),
 });
 
+export const CURRENT_EVAL_VERSION = 1;
+
 export const evalDefinitionSchema = z.object({
+  version: z.number().default(CURRENT_EVAL_VERSION),
   name: z.string(),
   description: z.string().optional(),
   trials: z.number().default(3),

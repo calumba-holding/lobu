@@ -460,7 +460,8 @@ export async function initCommand(
     await mkdir(join(agentDir, "evals"), { recursive: true });
     await writeFile(
       join(agentDir, "evals", "ping.yaml"),
-      `name: ping
+      `version: 1
+name: ping
 description: Agent responds to a simple greeting
 trials: 3
 timeout: 30

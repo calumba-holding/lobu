@@ -29,7 +29,7 @@ export function LandingPage(props: {
       />
       <div class="hidden md:block">
         <div class="section-divider" />
-        <ArchitectureSection />
+        <ArchitectureSection activeUseCaseId={activeUseCaseId} />
         <div class="section-divider" />
       </div>
       <CTA activeUseCaseId={activeUseCaseId} />

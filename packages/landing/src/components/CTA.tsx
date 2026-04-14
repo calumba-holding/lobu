@@ -4,6 +4,9 @@ import { ScheduleCallButton, ScheduleCallIcon } from "./ScheduleDialog";
 
 export function CTA(props: { activeUseCaseId?: LandingUseCaseId }) {
   const owlettoUrl = getOwlettoUrl(props.activeUseCaseId);
+  const skillsHref = props.activeUseCaseId
+    ? `/skills/for/${props.activeUseCaseId}`
+    : "/skills";
 
   return (
     <section class="py-14 px-8 text-center">
@@ -50,7 +53,7 @@ export function CTA(props: { activeUseCaseId?: LandingUseCaseId }) {
           style={{ color: "var(--color-page-text-muted)" }}
         >
           <a
-            href="/skills"
+            href={skillsHref}
             class="hover:underline underline-offset-2"
             style={{ color: "var(--color-tg-accent)" }}
           >

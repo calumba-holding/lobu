@@ -61,7 +61,6 @@ interface EntityYaml {
   description?: string;
 }
 
-
 interface WatcherYaml {
   slug: string;
   name: string;

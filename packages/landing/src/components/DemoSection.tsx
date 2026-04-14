@@ -226,6 +226,7 @@ export function DemoSection(props: {
     [resolvedUseCaseId]
   );
   const memoryHref = `/memory/for/${activeUseCase.id}`;
+  const skillsHref = `/skills/for/${activeUseCase.id}`;
 
   return (
     <section id="how-it-works" class="pt-4 pb-14 px-8">
@@ -267,7 +268,7 @@ export function DemoSection(props: {
           <Card
             title="Skills"
             description={activeUseCase.skills.description}
-            href="/skills"
+            href={skillsHref}
             hrefLabel="Skills page"
           >
             <div class="grid gap-4 md:grid-cols-3">
@@ -379,7 +380,7 @@ export function DemoSection(props: {
               Need another service or workflow? Add your own MCP servers, Nix
               packages, and custom skills. See the{" "}
               <a
-                href="/skills"
+                href={skillsHref}
                 class="hover:underline"
                 style={{ color: "var(--color-tg-accent)" }}
               >

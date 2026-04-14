@@ -1,23 +1,29 @@
+import type { LandingUseCaseId } from "../use-case-definitions";
 import { ArchitectureDiagram } from "./ArchitectureDiagram";
 
-const relatedPages = [
-  {
-    title: "Memory",
-    description:
-      "Turn conversations into shared, structured memory with typed entities and managed auth.",
-    href: "/memory",
-    linkLabel: "Explore Memory",
-  },
-  {
-    title: "Skills",
-    description:
-      "Bundle prompts, MCP servers, network policy, and system packages into installable skills.",
-    href: "/skills",
-    linkLabel: "Explore Skills",
-  },
-];
+function getRelatedPages(useCaseId?: LandingUseCaseId) {
+  const suffix = useCaseId ? `/for/${useCaseId}` : "";
+  return [
+    {
+      title: "Memory",
+      description:
+        "Turn conversations into shared, structured memory with typed entities and managed auth.",
+      href: `/memory${suffix}`,
+      linkLabel: "Explore Memory",
+    },
+    {
+      title: "Skills",
+      description:
+        "Bundle prompts, MCP servers, network policy, and system packages into installable skills.",
+      href: `/skills${suffix}`,
+      linkLabel: "Explore Skills",
+    },
+  ];
+}
 
-export function ArchitectureSection() {
+export function ArchitectureSection(props: {
+  activeUseCaseId?: LandingUseCaseId;
+}) {
   return (
     <section id="architecture" class="py-12 px-8 relative">
       <div class="max-w-[72rem] mx-auto">
@@ -36,7 +42,7 @@ export function ArchitectureSection() {
         </p>
 
         <div class="hidden xl:grid xl:grid-cols-2 xl:gap-4 xl:mb-8 max-w-4xl mx-auto">
-          {relatedPages.map((page) => (
+          {getRelatedPages(props.activeUseCaseId).map((page) => (
             <a
               key={page.href}
               href={page.href}

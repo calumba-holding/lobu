@@ -1,3 +1,4 @@
+version: 1
 name: smoke
 description: Basic smoke test — agent responds and doesn't error
 trials: 1

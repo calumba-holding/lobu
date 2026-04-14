@@ -20,8 +20,6 @@ type TermLine = {
 };
 
 type UseCaseInitConfig = {
-  agentName: string;
-  skills: { label: string; selected: boolean }[];
   selectedPlatform:
     | "slack"
     | "whatsapp"
@@ -32,111 +30,33 @@ type UseCaseInitConfig = {
   memory: "filesystem" | "owletto";
 };
 
-const useCaseInitConfigs: Record<LandingUseCaseId, UseCaseInitConfig> = {
-  devops: {
-    agentName: "devops-incident-bot",
-    skills: [
-      { label: "GitHub", selected: true },
-      { label: "Linear", selected: true },
-      { label: "PagerDuty", selected: false },
-    ],
-    selectedPlatform: "slack",
-    memory: "filesystem",
-  },
-  support: {
-    agentName: "support-assistant",
-    skills: [
-      { label: "Zendesk", selected: true },
-      { label: "HubSpot", selected: false },
-      { label: "Notion", selected: false },
-    ],
-    selectedPlatform: "slack",
-    memory: "filesystem",
-  },
-  sales: {
-    agentName: "sales-ops-bot",
-    skills: [
-      { label: "Salesforce", selected: true },
-      { label: "Gong", selected: false },
-      { label: "HubSpot", selected: false },
-    ],
-    selectedPlatform: "slack",
-    memory: "owletto",
-  },
-  legal: {
-    agentName: "legal-review-agent",
-    skills: [
-      { label: "Notion", selected: true },
-      { label: "Google Drive", selected: false },
-      { label: "Custom research", selected: false },
-    ],
-    selectedPlatform: "slack",
-    memory: "filesystem",
-  },
-  delivery: {
-    agentName: "delivery-planner",
-    skills: [
-      { label: "Linear", selected: true },
-      { label: "GitHub", selected: true },
-      { label: "Notion", selected: false },
-    ],
-    selectedPlatform: "slack",
-    memory: "filesystem",
-  },
-  finance: {
-    agentName: "finance-ops-agent",
-    skills: [
-      { label: "QuickBooks", selected: true },
-      { label: "Stripe", selected: true },
-      { label: "Google Sheets", selected: false },
-    ],
-    selectedPlatform: "slack",
-    memory: "filesystem",
-  },
-  leadership: {
-    agentName: "executive-assistant",
-    skills: [
-      { label: "Google Drive", selected: true },
-      { label: "Notion", selected: false },
-      { label: "Calendar", selected: false },
-    ],
-    selectedPlatform: "slack",
-    memory: "filesystem",
-  },
-  careops: {
-    agentName: "care-coordinator",
-    skills: [
-      { label: "Google Calendar", selected: true },
-      { label: "Notion", selected: false },
-      { label: "Custom EHR", selected: false },
-    ],
-    selectedPlatform: "slack",
-    memory: "filesystem",
-  },
-  "venture-capital": {
-    agentName: "vc-deal-bot",
-    skills: [
-      { label: "Crunchbase", selected: true },
-      { label: "LinkedIn", selected: false },
-      { label: "Notion", selected: false },
-    ],
-    selectedPlatform: "slack",
-    memory: "filesystem",
-  },
-  "market-intelligence": {
-    agentName: "market-monitor",
-    skills: [
-      { label: "Web scraping", selected: true },
-      { label: "Crunchbase", selected: false },
-      { label: "Product Hunt", selected: false },
-    ],
-    selectedPlatform: "slack",
-    memory: "filesystem",
-  },
+const useCaseInitOverrides: Partial<
+  Record<LandingUseCaseId, Partial<UseCaseInitConfig>>
+> = {
+  sales: { memory: "owletto" },
+  "agent-community": { memory: "owletto" },
+  ecommerce: { memory: "owletto" },
 };
 
+const defaultInitConfig: UseCaseInitConfig = {
+  selectedPlatform: "slack",
+  memory: "filesystem",
+};
+
+function getInitConfig(
+  useCase: LandingUseCaseShowcase
+): UseCaseInitConfig & { agentName: string; skills: string[] } {
+  const overrides = useCaseInitOverrides[useCase.id] ?? {};
+  return {
+    agentName: useCase.skills.agentId,
+    skills: useCase.skills.skills,
+    ...defaultInitConfig,
+    ...overrides,
+  };
+}
+
 function getInitLinesForUseCase(useCase: LandingUseCaseShowcase): TermLine[] {
-  const config = useCaseInitConfigs[useCase.id];
+  const config = getInitConfig(useCase);
   return [
     {
       text: `$ npx @lobu/cli@latest init ${config.agentName}`,
@@ -175,10 +95,10 @@ function getInitLinesForUseCase(useCase: LandingUseCaseShowcase): TermLine[] {
     {
       text: "? Skills / MCPs?",
       color: "#c9cdd4",
-      links: config.skills.map((skill) => ({
-        label: skill.label,
+      links: config.skills.map((label, i) => ({
+        label,
         href: "/getting-started/skills/",
-        selected: skill.selected,
+        selected: i === 0,
       })),
     },
     {
@@ -201,7 +121,7 @@ function getInitLinesForUseCase(useCase: LandingUseCaseShowcase): TermLine[] {
         },
         {
           label: "Owletto",
-          href: "/memory",
+          href: `/memory/for/${useCase.id}`,
           selected: config.memory === "owletto",
         },
       ],
@@ -558,7 +478,7 @@ export function SkillsWorkflowSection({
                 />
               </div>
               <TerminalWindow
-                label={`npx @lobu/cli@latest init ${useCaseInitConfigs[activeUseCase.id].agentName}`}
+                label={`npx @lobu/cli@latest init ${activeUseCase.skills.agentId}`}
                 lines={initLines}
               />
             </div>

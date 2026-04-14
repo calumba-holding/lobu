@@ -289,7 +289,10 @@ export const landingUseCases = {
         { label: "Contract", value: "Redwood NDA" },
         { label: "Counterparty", value: "Redwood Capital" },
         { label: "Risk", value: "No cap on confidentiality term" },
-        { label: "Negotiation point", value: "Broad residuals + Delaware venue" },
+        {
+          label: "Negotiation point",
+          value: "Broad residuals + Delaware venue",
+        },
       ],
       nodeHighlights: {
         "legal-root": [
@@ -812,7 +815,10 @@ export const landingUseCases = {
         { label: "Account", value: "4100" },
         { label: "Variance", value: "$42k" },
         { label: "Likely cause", value: "Delayed refunds" },
-        { label: "Reporting task", value: "Month-end deck reconciliation note" },
+        {
+          label: "Reporting task",
+          value: "Month-end deck reconciliation note",
+        },
       ],
       nodeHighlights: {
         "finance-root": [

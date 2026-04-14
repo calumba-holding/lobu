@@ -4,7 +4,7 @@ import chalk from "chalk";
 import { parse as parseYaml } from "yaml";
 import { getToken } from "../api/credentials.js";
 import { isLoadError, loadConfig } from "../config/loader.js";
-import { evalDefinitionSchema } from "../eval/types.js";
+import { CURRENT_EVAL_VERSION, evalDefinitionSchema } from "../eval/types.js";
 import type { EvalDefinition, EvalReport, EvalResult } from "../eval/types.js";
 import { runEval } from "../eval/runner.js";
 import {
@@ -133,6 +133,15 @@ export async function evalCommand(
         .map((i) => `  ${i.path.join(".")}: ${i.message}`)
         .join("\n");
       console.error(chalk.red(`\n  Invalid eval: ${filePath}\n${issues}\n`));
+      process.exit(1);
+    }
+
+    if (result.data.version > CURRENT_EVAL_VERSION) {
+      console.error(
+        chalk.red(
+          `\n  ${filePath} uses eval version ${result.data.version}, but this CLI only supports version ${CURRENT_EVAL_VERSION}.\n  Upgrade @lobu/cli to run this eval.\n`
+        )
+      );
       process.exit(1);
     }
 

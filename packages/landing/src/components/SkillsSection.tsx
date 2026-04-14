@@ -677,9 +677,13 @@ function RegistryGroup({ title, items }: { title: string; items: string[] }) {
   );
 }
 
-export function SkillsSection(props: { linkTabsToCampaigns?: boolean }) {
+export function SkillsSection(props: {
+  defaultUseCaseId?: LandingUseCaseId;
+  linkTabsToCampaigns?: boolean;
+  linkTabsToPages?: boolean;
+}) {
   const [activeUseCaseId, setActiveUseCaseId] = useState<LandingUseCaseId>(
-    DEFAULT_LANDING_USE_CASE_ID
+    props.defaultUseCaseId ?? DEFAULT_LANDING_USE_CASE_ID
   );
   const activeUseCase = useMemo(
     () => getLandingUseCaseShowcase(activeUseCaseId),
@@ -711,12 +715,16 @@ export function SkillsSection(props: { linkTabsToCampaigns?: boolean }) {
             activeId={activeUseCaseId}
             label="Pick a use case"
             onSelect={
-              props.linkTabsToCampaigns
+              props.linkTabsToCampaigns || props.linkTabsToPages
                 ? undefined
                 : (id) => setActiveUseCaseId(id as LandingUseCaseId)
             }
             hrefForId={
-              props.linkTabsToCampaigns ? (id) => `/for/${id}` : undefined
+              props.linkTabsToPages
+                ? (id) => `/skills/for/${id}`
+                : props.linkTabsToCampaigns
+                  ? (id) => `/for/${id}`
+                  : undefined
             }
             className="mb-5"
           />
@@ -803,7 +811,7 @@ export function SkillsSection(props: { linkTabsToCampaigns?: boolean }) {
               See skills and MCP docs →
             </a>
             <a
-              href="/for/devops"
+              href={`/for/${activeUseCaseId}`}
               class="text-xs font-medium hover:underline"
               style={{ color: "var(--color-tg-accent)" }}
             >

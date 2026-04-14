@@ -14,7 +14,10 @@ function getLeftLinks(currentPath: string) {
       label: "Memory",
       href: useCaseId ? `/memory/for/${useCaseId}` : "/memory",
     },
-    { label: "Skills", href: "/skills" },
+    {
+      label: "Skills",
+      href: useCaseId ? `/skills/for/${useCaseId}` : "/skills",
+    },
     { label: "Pricing", href: "/pricing" },
   ];
 }

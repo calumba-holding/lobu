@@ -11,6 +11,12 @@ id = "anthropic"
 model = "claude/sonnet-4-5"
 key = "$ANTHROPIC_API_KEY"
 
+[[agents.careops.connections]]
+type = "slack"
+[agents.careops.connections.config]
+botToken = "$SLACK_BOT_TOKEN"
+signingSecret = "$SLACK_SIGNING_SECRET"
+
 # Skills from the registry
 [agents.careops.skills]
 enabled = ["github"]

@@ -1,3 +1,4 @@
+version: 1
 name: follows-instructions
 description: Agent follows instructions without adding unrequested content
 trials: 3

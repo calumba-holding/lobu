@@ -23,7 +23,10 @@ type RuntimeJourney = {
   outcome: string[];
 };
 
-type RuntimeJourneyInput = Omit<RuntimeJourney, "requestLabel" | "outcomeLabel">;
+type RuntimeJourneyInput = Omit<
+  RuntimeJourney,
+  "requestLabel" | "outcomeLabel"
+>;
 
 type CampaignMeta = {
   title: string;
@@ -56,7 +59,6 @@ export type LandingUseCaseShowcase = {
 
 const docsLinks = {
   owlettoDocs: { label: "What is Owletto?", href: "/getting-started/memory/" },
-  skillsPage: { label: "How skills work →", href: "/skills" },
   ...technicalLinks,
 };
 
@@ -1556,7 +1558,13 @@ function enrichMemory(
         step.id === "model"
           ? [...(step.links ?? []), docsLinks.owlettoDocs]
           : step.id === "reuse"
-            ? [...(step.links ?? []), docsLinks.skillsPage]
+            ? [
+                ...(step.links ?? []),
+                {
+                  label: "How skills work →",
+                  href: `/skills/for/${useCaseId}`,
+                },
+              ]
             : step.links,
       panel:
         step.panel ??
