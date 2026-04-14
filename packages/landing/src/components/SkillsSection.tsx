@@ -705,10 +705,11 @@ export function SkillsSection(props: { linkTabsToCampaigns?: boolean }) {
           startTitle="Start a new agent in seconds"
         />
 
-        <div class="mb-16">
+        <div class="mb-16 text-center">
           <UseCaseTabs
             tabs={landingUseCaseOptions}
             activeId={activeUseCaseId}
+            label="Pick a use case"
             onSelect={
               props.linkTabsToCampaigns
                 ? undefined

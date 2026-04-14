@@ -150,6 +150,95 @@ const memoryStepPanels: Record<
       ],
     },
   },
+  "agent-community": {
+    connect: {
+      title: "Community source inputs",
+      description:
+        "Member context comes from the places people already publish work, identity, and intent.",
+      items: [
+        {
+          meta: "GitHub",
+          label: "Code and repo activity",
+          detail:
+            "Track maintained repositories, contribution patterns, and technical areas of focus from connected GitHub accounts.",
+        },
+        {
+          meta: "LinkedIn",
+          label: "Role and company context",
+          detail:
+            "Pull current title, company, and professional background to keep the member graph aligned with real-world changes.",
+        },
+        {
+          meta: "Newsletter / blog",
+          label: "Public writing and interests",
+          detail:
+            "Use Substack, RSS, and personal blogs to capture what members are actively thinking and writing about.",
+        },
+        {
+          meta: "Profile import",
+          label: "Member-provided context",
+          detail:
+            "Collect explicit goals, interests, and who the member wants to meet through forms or manual imports.",
+        },
+      ],
+    },
+    auth: {
+      title: "How members connect accounts",
+      description:
+        "Members connect accounts through MCP auth flows and operators can supplement that with public feeds or imports.",
+      items: [
+        {
+          meta: "MCP login",
+          label: "Connected accounts",
+          detail:
+            "Use MCP/OAuth login for sources like GitHub and LinkedIn without exposing raw credentials to agents.",
+        },
+        {
+          meta: "Public feeds",
+          label: "Websites and newsletters",
+          detail:
+            "Pull RSS, Substack, and public website content directly when a source does not require a private login.",
+        },
+        {
+          meta: "Manual import",
+          label: "Profile setup",
+          detail:
+            "Let members or operators fill in a profile form or upload a structured import for goals, tags, and intro preferences.",
+        },
+        {
+          meta: "Agent boundary",
+          label: "Scoped access",
+          detail:
+            "The community agent works with structured member context and approved workflows, not raw account credentials.",
+        },
+      ],
+    },
+    reuse: {
+      title: "Community agents and workflows",
+      description:
+        "The same member graph can power discovery, concierge, and intro workflows wherever the community already operates.",
+      items: [
+        {
+          label: "Community concierge",
+          detail:
+            "Answers questions like who should meet this week and why.",
+          platform: { id: "slack", label: "Slack" },
+        },
+        {
+          label: "Member search agent",
+          detail:
+            "Finds members by topic, project, or recent activity using the shared graph.",
+          platform: { id: "openclaw", label: "OpenClaw" },
+        },
+        {
+          label: "Intro drafting workflow",
+          detail:
+            "Prepares warm intro drafts for Slack or email and waits for approval before sending.",
+          platform: { id: "claude", label: "Claude" },
+        },
+      ],
+    },
+  },
   careops: {
     connect: {
       title: "Care operations source inputs",
@@ -1803,6 +1892,39 @@ const runtimeContent: Record<LandingUseCaseId, RuntimeJourney> = {
       "Action-oriented board summaries grounded in source material",
       "Durable decision history across review cycles",
       "Clear owners and blockers for follow-up work",
+    ],
+  },
+  "agent-community": {
+    requestLabel: "Incoming request",
+    request:
+      "Who in the community should Sarah meet this week, and draft intro messages for the best two matches.",
+    summary:
+      "Build a private member graph from connected professional profiles, then use watcher-driven opportunity matching to turn launches, posts, and project updates into warm introductions.",
+    steps: [
+      {
+        title: "Runtime handles member matching safely",
+        detail:
+          "Lobu runs the community workflow in a sandbox, answers matching questions in chat, and asks for approval before any outreach is sent.",
+        chips: ["Slack", "email", "approval flow"],
+      },
+      {
+        title: "Skills package member connectors",
+        detail:
+          "The community bundle connects GitHub, LinkedIn, newsletters, websites, and manual profile imports through one installable workflow.",
+        chips: ["GitHub", "LinkedIn", "Substack", "profile imports"],
+      },
+      {
+        title: "Memory keeps the member graph current",
+        detail:
+          "Owletto stores members, companies, projects, topics, and match history so new launches, posts, and project updates can trigger relevant intros instead of manual research.",
+        chips: ["member graph", "connected profiles", "intro history"],
+      },
+    ],
+    outcomeLabel: "What the team gets",
+    outcome: [
+      "Higher-quality member discovery and introductions",
+      "Fresh profile context without manual curation",
+      "Approved outreach with durable match history",
     ],
   },
   "market-intelligence": {

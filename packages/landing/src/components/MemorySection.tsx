@@ -90,15 +90,17 @@ export function MemorySection(props: {
           }
         />
 
-        <UseCaseTabs
-          tabs={landingUseCaseOptions}
-          activeId={activeUseCaseId}
-          onSelect={props.linkTabsToPages ? undefined : setActiveUseCaseId}
-          hrefForId={
-            props.linkTabsToPages ? (id) => `/memory/for/${id}` : undefined
-          }
-          className="mb-10"
-        />
+        <div class="mb-10 text-center">
+          <UseCaseTabs
+            tabs={landingUseCaseOptions}
+            activeId={activeUseCaseId}
+            label="Pick a use case"
+            onSelect={props.linkTabsToPages ? undefined : setActiveUseCaseId}
+            hrefForId={
+              props.linkTabsToPages ? (id) => `/memory/for/${id}` : undefined
+            }
+          />
+        </div>
 
         <ExampleShowcase
           activeUseCaseId={activeUseCaseId}

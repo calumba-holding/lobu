@@ -1293,6 +1293,360 @@ export const landingUseCases = {
       ],
     },
   },
+  "agent-community": {
+    id: "agent-community",
+    label: "Agent Community",
+    examplePath: "agent-community",
+    agent: {
+      identity: [
+        "You help private communities discover aligned members, explain why they should meet, and draft warm introductions.",
+        "Turn connected public profiles and member-provided context into a live community graph that stays useful over time.",
+      ],
+      soul: [
+        "- Prefer high-signal, opt-in matching over broad outreach.",
+        "- Explain why two members should meet before drafting any introduction.",
+        "- Never send introductions without approval.",
+      ],
+      user: [
+        "- Team: Community operations",
+        "- Priority: High-quality member introductions without manual profile research",
+        "- Preference: Slack and email drafts with clear rationale",
+      ],
+    },
+    model: {
+      entities: [
+        "Member",
+        "Company",
+        "Project",
+        "Repository",
+        "Post",
+        "Topic",
+        "Match",
+      ],
+      relationships: [
+        {
+          label: "works_at",
+          note: "Keep member context tied to the company or organization they currently represent.",
+        },
+        {
+          label: "building_project",
+          note: "Track the products, startups, or initiatives members are actively working on.",
+        },
+        {
+          label: "maintains_repo",
+          note: "Link members to repositories so technical interests and recent activity stay queryable.",
+        },
+        {
+          label: "writes_about",
+          note: "Capture blog posts, newsletters, and public writing so matching includes current thinking, not just static bios.",
+        },
+        {
+          label: "interested_in",
+          note: "Store durable interests and goals that can be reused across matching and introductions.",
+        },
+        {
+          label: "matches_with",
+          note: "Represent suggested introductions with reasons and confidence so outreach history is auditable.",
+        },
+        {
+          label: "introduced_to",
+          note: "Track completed introductions so the system avoids duplicate outreach and preserves relationship history.",
+        },
+      ],
+    },
+    skills: {
+      description:
+        "Keep member profiles fresh, surface good matches, and draft approved introductions",
+      agentId: "agent-community",
+      skillId: "agent-community",
+      skills: [
+        "github-mcp",
+        "linkedin-mcp",
+        "newsletter-monitor",
+        "web-profile-sync",
+        "profile-import",
+      ],
+      nixPackages: ["playwright", "jq"],
+      allowedDomains: [
+        "api.github.com",
+        "linkedin.com",
+        ".substack.com",
+      ],
+      mcpServer: "web-profile-sync",
+      providerId: "anthropic",
+      model: "claude/sonnet-4-5",
+      apiKeyEnv: "ANTHROPIC_API_KEY",
+      skillInstructions: [
+        "Prioritize opt-in matching and explain the reason for every suggested introduction.",
+        "Draft outreach for Slack or email, but only send after approval.",
+      ],
+    },
+    memory: {
+      id: "member",
+      description:
+        "Build a private member graph from connected profiles, projects, posts, and stated interests so introductions get better over time.",
+      sourceLabel: "Example member profile",
+      sourceText:
+        "Remember that Sarah Chen is the founder of Relay Labs, is building agent infrastructure for orchestration and long-term memory, maintains active GitHub repositories for eval tooling, writes a Substack about agent memory and developer workflows, and wants to meet founders and engineers working on agent infrastructure, MCP tools, and developer tooling.",
+      entitySelections: {
+        Member: "community-member",
+        Company: "community-company",
+        Project: "community-project",
+        Repository: "community-repo",
+        Post: "community-post",
+        Topic: "community-topic",
+        Match: "community-match",
+      },
+      howItWorks: [
+        {
+          id: "model",
+          label: "1",
+          title: "Model the member graph",
+          detail:
+            "Represent members, companies, projects, repos, posts, topics, and introductions as linked objects so the community can remember who is building what and why they should meet.",
+          chips: [
+            "Member",
+            "Project",
+            "Repository",
+            "Post",
+            "Topic",
+            "Match",
+          ],
+        },
+        {
+          id: "connect",
+          label: "2",
+          title: "Connect sources",
+          detail:
+            "Ingest GitHub, LinkedIn, newsletters, personal websites, and manual profile forms through MCP proxying, public feeds, and Connector SDK integrations.",
+          chips: [
+            "GitHub",
+            "LinkedIn",
+            "Substack",
+            "Personal website",
+            "Manual profile import",
+            "Custom SDK",
+          ],
+          links: [technicalLinks.mcpProxy, technicalLinks.connectorSdk],
+        },
+        {
+          id: "auth",
+          label: "3",
+          title: "Let members connect their data",
+          detail:
+            "Use MCP login and OAuth for connected accounts, support RSS and public-site ingestion for newsletters and blogs, and allow manual profile imports without exposing credentials to agents.",
+          chips: [
+            "MCP login",
+            "OAuth",
+            "RSS feeds",
+            "Manual profile form",
+            "CSV import",
+          ],
+          links: [technicalLinks.memoryDocs, technicalLinks.mcpAuthFlow],
+        },
+        {
+          id: "reuse",
+          label: "4",
+          title: "Reuse context everywhere",
+          detail:
+            "The same member graph powers community concierge agents in Slack, internal dashboards, and MCP clients like OpenClaw, ChatGPT, and Claude.",
+          chips: ["Slack", "Dashboard", "OpenClaw", "ChatGPT", "Claude"],
+        },
+        {
+          id: "fresh",
+          label: "5",
+          title: "Keep it fresh",
+          detail:
+            "A scheduled watcher turns new launches, posts, project updates, and hiring signals into suggestions about which members might care and which warm introductions to draft next.",
+        },
+      ],
+      watcher: {
+        name: "Opportunity matcher",
+        schedule: "Every 12 hours",
+        prompt:
+          "Monitor connected profiles, newsletters, websites, and member updates for new launches, posts, hiring signals, funding news, and project changes. Identify which members are likely to care, explain why, and queue approved intro or outreach drafts.",
+        extractionSchema:
+          "{ signals:[{ type, source, related_topics[], interested_members[], reason, suggested_action }] }",
+        schemaEvolution:
+          "Started with profile refresh and topic extraction. After repeated runs, added interested_members and suggested_action so the watcher could recommend who should see a launch, who should meet, and which outreach draft to prepare.",
+      },
+      highlights: [
+        { label: "Member", value: "Sarah Chen" },
+        { label: "Company", value: "Relay Labs" },
+        { label: "Focus", value: "Agent memory, evals, orchestration" },
+        {
+          label: "Connected sources",
+          value: "GitHub, LinkedIn, Substack, website",
+        },
+        {
+          label: "Intro goal",
+          value: "Meet founders and engineers building agent infrastructure",
+        },
+      ],
+      nodeHighlights: {
+        "community-root": [
+          { label: "Member", value: "Sarah Chen" },
+          { label: "Company", value: "Relay Labs" },
+          { label: "Topics", value: "Agent memory, evals, orchestration" },
+          { label: "Sources", value: "GitHub, LinkedIn, Substack, website" },
+        ],
+        "community-member": [
+          { label: "Type", value: "Member" },
+          { label: "Name", value: "Sarah Chen" },
+          { label: "Role", value: "Founder" },
+          { label: "Company", value: "Relay Labs" },
+        ],
+        "community-company": [
+          { label: "Type", value: "Company" },
+          { label: "Name", value: "Relay Labs" },
+          { label: "Category", value: "Agent infrastructure" },
+          { label: "Stage", value: "Early-stage startup" },
+        ],
+        "community-project": [
+          { label: "Type", value: "Project" },
+          { label: "Name", value: "Relay Labs platform" },
+          { label: "Focus", value: "Orchestration and long-term memory" },
+          { label: "Status", value: "Actively building" },
+        ],
+        "community-repo": [
+          { label: "Type", value: "Repository" },
+          { label: "Name", value: "eval-orchestrator" },
+          { label: "Activity", value: "Recently updated" },
+          { label: "Theme", value: "Agent eval tooling" },
+        ],
+        "community-post": [
+          { label: "Type", value: "Post" },
+          { label: "Title", value: "Why agent memory needs structure" },
+          { label: "Source", value: "Substack" },
+          { label: "Topics", value: "Agent memory, developer workflows" },
+        ],
+        "community-topic": [
+          { label: "Type", value: "Topic" },
+          { label: "Name", value: "Agent memory" },
+          { label: "Evidence", value: "Newsletter + repos" },
+          { label: "Why it matters", value: "High-signal matching input" },
+        ],
+        "community-match": [
+          { label: "Type", value: "Match" },
+          { label: "Suggested match", value: "Priya Natarajan" },
+          {
+            label: "Reason",
+            value: "Shared agent infra focus, complementary MCP tooling work",
+          },
+          { label: "Status", value: "Draft intro pending approval" },
+        ],
+      },
+      recordTree: {
+        id: "community-root",
+        label: "Record: Sarah Chen member graph",
+        kind: "Model record",
+        summary:
+          "Member record combines connected profiles, projects, topics, and intro goals into a reusable community graph.",
+        chips: ["community", "member-graph", "timelined"],
+        children: [
+          {
+            id: "community-member",
+            label: "Entity: Sarah Chen",
+            kind: "Member",
+            summary:
+              "Primary member node stores role, company, connected sources, and who this member wants to meet.",
+            chips: ["primary", "member"],
+          },
+          {
+            id: "community-company",
+            label: "Company: Relay Labs",
+            kind: "Company",
+            summary:
+              "Company node holds current organization context so the community graph stays grounded in what the member is building now.",
+            chips: ["company", "context"],
+          },
+          {
+            id: "community-project",
+            label: "Project: Relay Labs platform",
+            kind: "Project",
+            summary:
+              "Project node captures the member's active work so matching can use current build context rather than stale bios.",
+            chips: ["project", "active"],
+          },
+          {
+            id: "community-repo",
+            label: "Repository: eval-orchestrator",
+            kind: "Repository",
+            summary:
+              "Repository activity provides concrete technical evidence for skills, interests, and recency.",
+            chips: ["repo", "signal"],
+          },
+          {
+            id: "community-post",
+            label: "Post: Why agent memory needs structure",
+            kind: "Post",
+            summary:
+              "Newsletter and blog posts reveal what a member is actively thinking about, making topic extraction and matching more current.",
+            chips: ["post", "content"],
+          },
+          {
+            id: "community-match",
+            label: "Match: Priya Natarajan",
+            kind: "Match",
+            summary:
+              "Derived match node stores why two members should meet and whether an introduction has been approved or sent.",
+            chips: ["derived", "intro"],
+          },
+        ],
+      },
+      relations: [
+        {
+          source: "Sarah Chen",
+          sourceType: "member",
+          label: "works_at",
+          target: "Relay Labs",
+          targetType: "company",
+          note: "Current company context helps explain what the member is building and who is relevant to meet.",
+        },
+        {
+          source: "Sarah Chen",
+          sourceType: "member",
+          label: "building_project",
+          target: "Relay Labs platform",
+          targetType: "project",
+          note: "Project relationships make intros grounded in current work instead of static bios.",
+        },
+        {
+          source: "Sarah Chen",
+          sourceType: "member",
+          label: "maintains_repo",
+          target: "eval-orchestrator",
+          targetType: "repository",
+          note: "Recent code activity acts as high-signal evidence for technical interests and expertise.",
+        },
+        {
+          source: "Sarah Chen",
+          sourceType: "member",
+          label: "writes_about",
+          target: "Why agent memory needs structure",
+          targetType: "post",
+          note: "Public writing reveals current thinking and makes topic extraction richer than static bios.",
+        },
+        {
+          source: "Sarah Chen",
+          sourceType: "member",
+          label: "interested_in",
+          target: "Agent memory",
+          targetType: "topic",
+          note: "Explicit interests improve matching and let intro drafts explain the overlap clearly.",
+        },
+        {
+          source: "Sarah Chen",
+          sourceType: "member",
+          label: "matches_with",
+          target: "Priya Natarajan",
+          targetType: "member",
+          note: "Match relationships preserve why an introduction was suggested and avoid duplicate outreach later.",
+        },
+      ],
+    },
+    owlettoOrg: "agent-community",
+  },
   "market-intelligence": {
     id: "market-intelligence",
     label: "Market Intelligence",

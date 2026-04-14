@@ -114,15 +114,10 @@ export function HeroSection(props: {
         </div>
 
         <div class="mt-8 mb-6">
-          <div
-            class="text-[11px] font-semibold uppercase tracking-[0.22em] mb-3"
-            style={{ color: "var(--color-page-text-muted)" }}
-          >
-            Pick a use case
-          </div>
           <UseCaseTabs
             tabs={landingUseCaseOptions}
             activeId={activeUseCase.id}
+            label="Pick a use case"
             onSelect={
               props.linkTabsToCampaigns
                 ? undefined
