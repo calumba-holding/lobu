@@ -6,6 +6,7 @@ import {
   type DeliverySurface,
 } from "./platforms";
 import { ContentRail } from "./ContentRail";
+import type { LandingUseCaseId, LandingUseCaseShowcase } from "../use-case-showcases";
 
 type TermLink = { label: string; href: string; selected?: boolean };
 
@@ -15,75 +16,193 @@ type TermLine = {
   links?: TermLink[];
 };
 
-const initLines: TermLine[] = [
-  { text: "$ npx @lobu/cli@latest init landing-demo-agent", color: "#4ade80" },
-  { text: "", color: "" },
-  { text: "🤖 Welcome to Lobu!", color: "#facc15" },
-  { text: "", color: "" },
-  {
-    text: "? Deployment type?",
-    color: "#c9cdd4",
-    links: [
-      { label: "Embedded", href: "/deployment/embedding/", selected: true },
-      { label: "Docker", href: "/deployment/docker/" },
-      { label: "Kubernetes", href: "/deployment/kubernetes/" },
+type UseCaseInitConfig = {
+  agentName: string;
+  skills: { label: string; selected: boolean }[];
+  selectedPlatform: "slack" | "whatsapp" | "telegram" | "discord" | "teams" | "google-chat";
+  memory: "filesystem" | "owletto";
+};
+
+const useCaseInitConfigs: Record<LandingUseCaseId, UseCaseInitConfig> = {
+  devops: {
+    agentName: "devops-incident-bot",
+    skills: [
+      { label: "GitHub", selected: true },
+      { label: "Linear", selected: true },
+      { label: "PagerDuty", selected: false },
     ],
+    selectedPlatform: "slack",
+    memory: "filesystem",
   },
-  {
-    text: "? Worker network access?",
-    color: "#c9cdd4",
-    links: [{ label: "Restricted", href: "/guides/security/", selected: true }],
-  },
-  {
-    text: "? AI provider?",
-    color: "#c9cdd4",
-    links: [
-      {
-        label: "Claude Sonnet 4 via OpenRouter",
-        href: "/reference/providers/",
-        selected: true,
-      },
+  support: {
+    agentName: "support-assistant",
+    skills: [
+      { label: "Zendesk", selected: true },
+      { label: "HubSpot", selected: false },
+      { label: "Notion", selected: false },
     ],
+    selectedPlatform: "slack",
+    memory: "filesystem",
   },
-  {
-    text: "? Skills / MCPs?",
-    color: "#c9cdd4",
-    links: [
-      { label: "GitHub", href: "/getting-started/skills/", selected: true },
-      { label: "my-custom-mcp", href: "/getting-started/skills/" },
+  sales: {
+    agentName: "sales-ops-bot",
+    skills: [
+      { label: "Salesforce", selected: true },
+      { label: "Gong", selected: false },
+      { label: "HubSpot", selected: false },
     ],
+    selectedPlatform: "slack",
+    memory: "owletto",
   },
-  {
-    text: "? Connect a messaging platform?",
-    color: "#c9cdd4",
-    links: messagingChannels.map((channel) => ({
-      label: channel.label,
-      href: channel.href,
-      selected: channel.id === "whatsapp",
-    })),
-  },
-  {
-    text: "? Memory?",
-    color: "#c9cdd4",
-    links: [
-      {
-        label: "Filesystem",
-        href: "/guides/agent-settings/#filesystem-memory-openclawnative-memory",
-        selected: true,
-      },
-      { label: "Owletto", href: "/memory", selected: false },
+  legal: {
+    agentName: "legal-review-agent",
+    skills: [
+      { label: "Notion", selected: true },
+      { label: "Google Drive", selected: false },
+      { label: "Custom research", selected: false },
     ],
+    selectedPlatform: "slack",
+    memory: "filesystem",
   },
-  { text: "", color: "" },
-  { text: "- Creating Lobu project...", color: "#8f96a3" },
-  { text: "✔ Project created successfully!", color: "#4ade80" },
-  { text: "", color: "" },
-  { text: "✓ Lobu initialized!", color: "#4ade80" },
-  { text: "", color: "" },
-  { text: "Next steps:", color: "#facc15" },
-  { text: "  cd landing-demo-agent", color: "#67e8f9" },
-  { text: "  npx @lobu/cli@latest run -d", color: "#67e8f9" },
-];
+  delivery: {
+    agentName: "delivery-planner",
+    skills: [
+      { label: "Linear", selected: true },
+      { label: "GitHub", selected: true },
+      { label: "Notion", selected: false },
+    ],
+    selectedPlatform: "slack",
+    memory: "filesystem",
+  },
+  finance: {
+    agentName: "finance-ops-agent",
+    skills: [
+      { label: "QuickBooks", selected: true },
+      { label: "Stripe", selected: true },
+      { label: "Google Sheets", selected: false },
+    ],
+    selectedPlatform: "slack",
+    memory: "filesystem",
+  },
+  leadership: {
+    agentName: "executive-assistant",
+    skills: [
+      { label: "Google Drive", selected: true },
+      { label: "Notion", selected: false },
+      { label: "Calendar", selected: false },
+    ],
+    selectedPlatform: "slack",
+    memory: "filesystem",
+  },
+  careops: {
+    agentName: "care-coordinator",
+    skills: [
+      { label: "Google Calendar", selected: true },
+      { label: "Notion", selected: false },
+      { label: "Custom EHR", selected: false },
+    ],
+    selectedPlatform: "slack",
+    memory: "filesystem",
+  },
+  "venture-capital": {
+    agentName: "vc-deal-bot",
+    skills: [
+      { label: "Crunchbase", selected: true },
+      { label: "LinkedIn", selected: false },
+      { label: "Notion", selected: false },
+    ],
+    selectedPlatform: "slack",
+    memory: "filesystem",
+  },
+  "market-intelligence": {
+    agentName: "market-monitor",
+    skills: [
+      { label: "Web scraping", selected: true },
+      { label: "Crunchbase", selected: false },
+      { label: "Product Hunt", selected: false },
+    ],
+    selectedPlatform: "slack",
+    memory: "filesystem",
+  },
+};
+
+function getInitLinesForUseCase(useCase: LandingUseCaseShowcase): TermLine[] {
+  const config = useCaseInitConfigs[useCase.id];
+  return [
+    { text: `$ npx @lobu/cli@latest init ${config.agentName}`, color: "#4ade80" },
+    { text: "", color: "" },
+    { text: "🤖 Welcome to Lobu!", color: "#facc15" },
+    { text: "", color: "" },
+    {
+      text: "? Deployment type?",
+      color: "#c9cdd4",
+      links: [
+        { label: "Embedded", href: "/deployment/embedding/", selected: true },
+        { label: "Docker", href: "/deployment/docker/" },
+        { label: "Kubernetes", href: "/deployment/kubernetes/" },
+      ],
+    },
+    {
+      text: "? Worker network access?",
+      color: "#c9cdd4",
+      links: [{ label: "Restricted", href: "/guides/security/", selected: true }],
+    },
+    {
+      text: "? AI provider?",
+      color: "#c9cdd4",
+      links: [
+        {
+          label: "Claude Sonnet 4 via OpenRouter",
+          href: "/reference/providers/",
+          selected: true,
+        },
+      ],
+    },
+    {
+      text: "? Skills / MCPs?",
+      color: "#c9cdd4",
+      links: config.skills.map((skill) => ({
+        label: skill.label,
+        href: "/getting-started/skills/",
+        selected: skill.selected,
+      })),
+    },
+    {
+      text: "? Connect a messaging platform?",
+      color: "#c9cdd4",
+      links: messagingChannels.map((channel) => ({
+        label: channel.label,
+        href: channel.href,
+        selected: channel.id === config.selectedPlatform,
+      })),
+    },
+    {
+      text: "? Memory?",
+      color: "#c9cdd4",
+      links: [
+        {
+          label: "Filesystem",
+          href: "/guides/agent-settings/#filesystem-memory-openclawnative-memory",
+          selected: config.memory === "filesystem",
+        },
+        {
+          label: "Owletto",
+          href: "/memory",
+          selected: config.memory === "owletto",
+        },
+      ],
+    },
+    { text: "", color: "" },
+    { text: "- Creating Lobu project...", color: "#8f96a3" },
+    { text: "✔ Project created successfully!", color: "#4ade80" },
+    { text: "", color: "" },
+    { text: "✓ Lobu initialized!", color: "#4ade80" },
+    { text: "", color: "" },
+    { text: "Next steps:", color: "#facc15" },
+    { text: `  cd ${config.agentName}`, color: "#67e8f9" },
+    { text: "  npx @lobu/cli@latest run -d", color: "#67e8f9" },
+  ];
+}
 
 const agentPrompt = [
   "I am building a Lobu agent in this repository.",
@@ -152,9 +271,18 @@ function WindowChrome({ label }: { label: string }) {
       style={{ backgroundColor: "#0b0c0f" }}
     >
       <div class="flex items-center gap-1.5 mr-3">
-        <span class="w-3 h-3 rounded-full" style={{ backgroundColor: "#ff5f57" }} />
-        <span class="w-3 h-3 rounded-full" style={{ backgroundColor: "#febc2e" }} />
-        <span class="w-3 h-3 rounded-full" style={{ backgroundColor: "#28c840" }} />
+        <span
+          class="w-3 h-3 rounded-full"
+          style={{ backgroundColor: "#ff5f57" }}
+        />
+        <span
+          class="w-3 h-3 rounded-full"
+          style={{ backgroundColor: "#febc2e" }}
+        />
+        <span
+          class="w-3 h-3 rounded-full"
+          style={{ backgroundColor: "#28c840" }}
+        />
       </div>
       <span
         class="px-2.5 py-1 rounded-md text-[11px] min-w-0 max-w-full truncate"
@@ -192,7 +320,13 @@ function TermLinkPill({ link }: { link: TermLink }) {
   );
 }
 
-function TerminalWindow({ label, lines }: { label: string; lines: TermLine[] }) {
+function TerminalWindow({
+  label,
+  lines,
+}: {
+  label: string;
+  lines: TermLine[];
+}) {
   return (
     <div
       class="rounded-[18px] overflow-hidden min-w-0"
@@ -346,7 +480,10 @@ function ShipCard({
         border: "1px solid var(--color-page-border)",
       }}
     >
-      <h4 class="text-lg font-semibold mb-2" style={{ color: "var(--color-page-text)" }}>
+      <h4
+        class="text-lg font-semibold mb-2"
+        style={{ color: "var(--color-page-text)" }}
+      >
         {title}
       </h4>
       <p
@@ -380,7 +517,13 @@ function ShipCard({
   );
 }
 
-export function SkillsWorkflowSection() {
+export function SkillsWorkflowSection({
+  activeUseCase,
+}: {
+  activeUseCase: LandingUseCaseShowcase;
+}) {
+  const initLines = getInitLinesForUseCase(activeUseCase);
+
   return (
     <section class="py-14">
       <ContentRail>
@@ -392,104 +535,107 @@ export function SkillsWorkflowSection() {
           />
 
           <div class="space-y-10">
-          <div class="grid grid-cols-1 lg:grid-cols-[minmax(16rem,0.78fr)_minmax(24rem,1fr)] gap-6 items-start">
-            <div class="min-w-0">
-              <SectionIntro
-                step="01"
-                title="Initialize the project"
-                body="Start with the CLI and make the key choices once: runtime, network policy, provider, messaging channel, and memory. Embedded is the default local path, but the same project can move to Docker or Kubernetes later."
+            <div class="grid grid-cols-1 lg:grid-cols-[minmax(16rem,0.78fr)_minmax(24rem,1fr)] gap-6 items-start">
+              <div class="min-w-0">
+                <SectionIntro
+                  step="01"
+                  title="Initialize the project"
+                  body="Start with the CLI and make the key choices once: runtime, network policy, provider, messaging channel, and memory. Embedded is the default local path, but the same project can move to Docker or Kubernetes later."
+                />
+              </div>
+              <TerminalWindow
+                label={`npx @lobu/cli@latest init ${useCaseInitConfigs[activeUseCase.id].agentName}`}
+                lines={initLines}
               />
             </div>
-            <TerminalWindow
-              label="npx @lobu/cli@latest init landing-demo-agent"
-              lines={initLines}
-            />
-          </div>
 
-          <div class="grid grid-cols-1 lg:grid-cols-[minmax(16rem,0.78fr)_minmax(24rem,1fr)] gap-6 items-start">
-            <div class="min-w-0">
-              <SectionIntro
-                step="02"
-                title="Add capabilities to your agent"
-                body="Open Claude Code, Codex, OpenCode, or any coding agent, point it at the generated Lobu project, and paste a Lobu-specific prompt. That gives the agent the right files and workflow to iterate on."
-              />
-              <p
-                class="text-sm leading-relaxed"
-                style={{ color: "var(--color-page-text-muted)" }}
-              >
-                Start with the{" "}
-                <a
-                  href="/getting-started/skills/"
-                  class="underline decoration-dotted underline-offset-2 hover:opacity-80"
-                  style={{ color: "var(--color-tg-accent)" }}
+            <div class="grid grid-cols-1 lg:grid-cols-[minmax(16rem,0.78fr)_minmax(24rem,1fr)] gap-6 items-start">
+              <div class="min-w-0">
+                <SectionIntro
+                  step="02"
+                  title="Add capabilities to your agent"
+                  body="Open Claude Code, Codex, OpenCode, or any coding agent, point it at the generated Lobu project, and paste a Lobu-specific prompt. That gives the agent the right files and workflow to iterate on."
+                />
+                <p
+                  class="text-sm leading-relaxed"
+                  style={{ color: "var(--color-page-text-muted)" }}
                 >
-                  Lobu skills docs
-                </a>{" "}
-                and paste the prompt on the right into your agent.
-              </p>
+                  Start with the{" "}
+                  <a
+                    href="/getting-started/skills/"
+                    class="underline decoration-dotted underline-offset-2 hover:opacity-80"
+                    style={{ color: "var(--color-tg-accent)" }}
+                  >
+                    Lobu skills docs
+                  </a>{" "}
+                  and paste the prompt on the right into your agent.
+                </p>
+              </div>
+              <PromptWindow
+                label="paste into your agent"
+                prompt={agentPrompt}
+              />
             </div>
-            <PromptWindow label="paste into your agent" prompt={agentPrompt} />
-          </div>
 
-          <div class="grid grid-cols-1 lg:grid-cols-[minmax(16rem,0.78fr)_minmax(24rem,1fr)] gap-6 items-start">
-            <div class="min-w-0">
-              <SectionIntro
-                step="03"
-                title="Test and evaluate"
-                body="Chat with your agent from the terminal, route test messages through supported chat platforms, and run automated evals to measure quality across models."
-              />
-              <p
-                class="text-sm leading-relaxed"
-                style={{ color: "var(--color-page-text-muted)" }}
-              >
-                See the{" "}
-                <a
-                  href="/guides/testing/"
-                  class="underline decoration-dotted underline-offset-2 hover:opacity-80"
-                  style={{ color: "var(--color-tg-accent)" }}
+            <div class="grid grid-cols-1 lg:grid-cols-[minmax(16rem,0.78fr)_minmax(24rem,1fr)] gap-6 items-start">
+              <div class="min-w-0">
+                <SectionIntro
+                  step="03"
+                  title="Test and evaluate"
+                  body="Chat with your agent from the terminal, route test messages through supported chat platforms, and run automated evals to measure quality across models."
+                />
+                <p
+                  class="text-sm leading-relaxed"
+                  style={{ color: "var(--color-page-text-muted)" }}
                 >
-                  Testing guide
-                </a>{" "}
-                and{" "}
-                <a
-                  href="/guides/evals/"
-                  class="underline decoration-dotted underline-offset-2 hover:opacity-80"
-                  style={{ color: "var(--color-tg-accent)" }}
-                >
-                  Evaluations guide
-                </a>
-                .
-              </p>
+                  See the{" "}
+                  <a
+                    href="/guides/testing/"
+                    class="underline decoration-dotted underline-offset-2 hover:opacity-80"
+                    style={{ color: "var(--color-tg-accent)" }}
+                  >
+                    Testing guide
+                  </a>{" "}
+                  and{" "}
+                  <a
+                    href="/guides/evals/"
+                    class="underline decoration-dotted underline-offset-2 hover:opacity-80"
+                    style={{ color: "var(--color-tg-accent)" }}
+                  >
+                    Evaluations guide
+                  </a>
+                  .
+                </p>
+              </div>
+              <TerminalWindow label="test and evaluate" lines={testEvalLines} />
             </div>
-            <TerminalWindow label="test and evaluate" lines={testEvalLines} />
-          </div>
 
-          <div>
-            <SectionIntro
-              step="04"
-              title="Ship it the way you want"
-              body="When the agent is ready, keep the same Lobu project, choose the runtime model that fits your product, and deliver it over the channel your users already use."
-            />
-            <div class="flex flex-wrap gap-2 mb-5">
-              {deliverySurfaces.map((surface) => (
-                <DeliverySurfacePill key={surface.label} surface={surface} />
-              ))}
-            </div>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <ShipCard
-                title="Embed in your app"
-                description="Mount Lobu inside Next.js, Express, Hono, Fastify, or any Node.js framework. Works anywhere that speaks Web Standard Request/Response."
-                code={embedSnippet}
-                href="/deployment/embedding/"
+            <div>
+              <SectionIntro
+                step="04"
+                title="Ship it the way you want"
+                body="When the agent is ready, keep the same Lobu project, choose the runtime model that fits your product, and deliver it over the channel your users already use."
               />
-              <ShipCard
-                title="Run it on your infra"
-                description="Use the same project and run the stack on Docker or Kubernetes when Lobu should ship as its own app or service."
-                code={selfHostSnippet}
-                href="/deployment/docker/"
-              />
+              <div class="flex flex-wrap gap-2 mb-5">
+                {deliverySurfaces.map((surface) => (
+                  <DeliverySurfacePill key={surface.label} surface={surface} />
+                ))}
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <ShipCard
+                  title="Embed in your app"
+                  description="Mount Lobu inside Next.js, Express, Hono, Fastify, or any Node.js framework. Works anywhere that speaks Web Standard Request/Response."
+                  code={embedSnippet}
+                  href="/deployment/embedding/"
+                />
+                <ShipCard
+                  title="Run it on your infra"
+                  description="Use the same project and run the stack on Docker or Kubernetes when Lobu should ship as its own app or service."
+                  code={selfHostSnippet}
+                  href="/deployment/docker/"
+                />
+              </div>
             </div>
-          </div>
           </div>
         </CompactContentRail>
       </ContentRail>
