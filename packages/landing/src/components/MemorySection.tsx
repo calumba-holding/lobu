@@ -37,8 +37,6 @@ function GitHubIcon() {
   );
 }
 
-const INIT_COMMAND = "npx owletto@latest init";
-
 export function MemorySection(props: {
   defaultUseCaseId?: LandingUseCaseId;
   linkTabsToPages?: boolean;
@@ -74,7 +72,6 @@ export function MemorySection(props: {
             props.heroCopy?.description ??
             "Owletto gives every Lobu use case the same durable graph: connectors, recall, and managed auth without leaking credentials to the runtime."
           }
-          command={INIT_COMMAND}
           prompt={getMemoryPrompt(activeUseCase)}
           startTitle={props.heroCopy?.startTitle ?? "Start Owletto in seconds"}
           actions={

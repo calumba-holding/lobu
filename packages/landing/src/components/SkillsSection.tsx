@@ -16,7 +16,6 @@ import { ScheduleCallButton, ScheduleCallIcon } from "./ScheduleDialog";
 import { UseCaseTabs } from "./UseCaseTabs";
 
 const GITHUB_URL = "https://github.com/lobu-ai/lobu";
-const INIT_COMMAND = "npx @lobu/cli@latest init";
 
 const chipIcons: Record<string, JSX.Element> = {
   "GitHub MCP": (
@@ -710,9 +709,10 @@ export function SkillsSection(props: {
             props.heroCopy?.description ??
             "A skill isn't a prompt template, it's a full sandboxed computer. All capabilities bundled into one installable unit."
           }
-          command={INIT_COMMAND}
           prompt={getSkillsPrompt(activeUseCase)}
-          startTitle={props.heroCopy?.startTitle ?? "Start a new agent in seconds"}
+          startTitle={
+            props.heroCopy?.startTitle ?? "Start a new agent in seconds"
+          }
         />
 
         <div class="mb-16 text-center">

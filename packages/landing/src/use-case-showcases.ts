@@ -4,6 +4,7 @@ import {
   type HowItWorksPanel,
   type LandingUseCaseDefinition,
   type LandingUseCaseId,
+  type MemoryEventLog,
   type MemoryExample,
   type SkillWorkspacePreviewData,
 } from "./use-case-definitions";
@@ -35,6 +36,20 @@ type CampaignMeta = {
   seoDescription: string;
   ctaHref: string;
   ctaLabel: string;
+};
+
+export type SurfaceId = "landing" | "skills" | "memory";
+
+export type SurfaceHeroCopy = {
+  title: string;
+  highlight?: string;
+  description: string;
+  startTitle?: string;
+};
+
+type SurfaceHeroCopyConfig = {
+  default: SurfaceHeroCopy;
+  byUseCase?: Partial<Record<LandingUseCaseId, SurfaceHeroCopy>>;
 };
 
 export type ShowcaseSkillWorkspacePreview = SkillWorkspacePreviewData & {
@@ -1560,12 +1575,23 @@ function enrichMemory(
           : step.id === "reuse"
             ? [
                 ...(step.links ?? []),
+                docsLinks.slackInstall,
                 {
-                  label: "How skills work →",
-                  href: `/skills/for/${useCaseId}`,
+                  label: "Connect from ChatGPT",
+                  href: `/connect-from/chatgpt/for/${useCaseId}`,
+                },
+                {
+                  label: "Connect from Claude",
+                  href: `/connect-from/claude/for/${useCaseId}`,
+                },
+                {
+                  label: "Install to OpenClaw",
+                  href: `/connect-from/openclaw/for/${useCaseId}`,
                 },
               ]
-            : step.links,
+            : step.id === "fresh"
+              ? [...(step.links ?? []), docsLinks.watcherDocs]
+              : step.links,
       panel:
         step.panel ??
         (step.id === "connect" || step.id === "auth" || step.id === "reuse"
@@ -1602,6 +1628,50 @@ function toSkillPreview(
   };
 }
 
+function buildMemoryEventLog(
+  useCase: LandingUseCaseDefinition
+): MemoryEventLog {
+  const primaryHighlight = useCase.memory.highlights[0]?.value ?? useCase.label;
+  const relation = useCase.memory.relations[0];
+  const entityPreview = useCase.model.entities.slice(0, 3).join(", ");
+
+  return {
+    title: "Evidence trail",
+    description:
+      "Each memory update is recorded as a timestamped event so operators can inspect how a prompt became durable system context.",
+    columns: ["Time", "Event kind", "Source", "What changed"],
+    highlightedRows: [0, 1],
+    rows: [
+      [
+        "10:14:02.100",
+        "source_ingested",
+        useCase.memory.sourceLabel,
+        `Captured source evidence for ${primaryHighlight}`,
+      ],
+      [
+        "10:14:04.850",
+        "extraction_completed",
+        "memory pipeline",
+        `Identified ${entityPreview}`,
+      ],
+      [
+        "10:14:05.120",
+        "relation_linked",
+        "record builder",
+        relation
+          ? `${relation.source} ${relation.label} ${relation.target}`
+          : `Updated ${useCase.memory.id} record relationships`,
+      ],
+      [
+        "10:14:05.400",
+        "watcher_scheduled",
+        useCase.memory.watcher.name,
+        `Scheduled ${useCase.memory.watcher.schedule.toLowerCase()}`,
+      ],
+    ],
+  };
+}
+
 function toMemoryExample(
   useCaseId: LandingUseCaseId,
   useCase: LandingUseCaseDefinition
@@ -1620,6 +1690,7 @@ function toMemoryExample(
     entityTypes: useCase.model.entities,
     entitySelections: memory.entitySelections,
     howItWorks: memory.howItWorks,
+    eventLog: memory.eventLog ?? buildMemoryEventLog(useCase),
     highlights: memory.highlights,
     nodeHighlights: memory.nodeHighlights,
     watcher: memory.watcher,
@@ -1668,6 +1739,141 @@ export const landingUseCaseShowcases: LandingUseCaseShowcase[] = (
 
 export const DEFAULT_LANDING_USE_CASE_ID: LandingUseCaseId = "devops";
 
+const surfaceHeroCopy: Record<SurfaceId, SurfaceHeroCopyConfig> = {
+  landing: {
+    default: {
+      title: "Your AI team, running in your infrastructure",
+      highlight: "AI team",
+      description:
+        "Sandboxed persistent agents powered by the OpenClaw harness, long-term memory, and installable skills.",
+    },
+    byUseCase: {
+      legal: {
+        title: "Trusted AI agents for contract review",
+        highlight: "contract review",
+        description:
+          "Sandboxed legal agents with durable contract memory, secure tool access, and full control in your infrastructure.",
+      },
+      devops: {
+        title: "AI agents for incident response",
+        highlight: "incident response",
+        description:
+          "Give on-call teams agents that inspect deploys, correlate alerts, and keep incident context across every handoff.",
+      },
+      support: {
+        title: "Support agents with customer memory",
+        highlight: "customer memory",
+        description:
+          "Persistent support agents with customer context, follow-up memory, and safe access to the systems your team already uses.",
+      },
+      finance: {
+        title: "Finance agents for close and reconciliation",
+        highlight: "close and reconciliation",
+        description:
+          "Run finance workflows with agents that preserve account context, track exceptions, and operate safely inside your environment.",
+      },
+      sales: {
+        title: "Revenue agents for every account",
+        highlight: "every account",
+        description:
+          "Track pilots, buying signals, renewal risk, and account history with agents that keep shared deal context over time.",
+      },
+      delivery: {
+        title: "Delivery agents for project execution",
+        highlight: "project execution",
+        description:
+          "Give teams agents that track milestones, blockers, ownership, and reporting context across the full rollout lifecycle.",
+      },
+      leadership: {
+        title: "Leadership agents for decision support",
+        highlight: "decision support",
+        description:
+          "Turn documents, decisions, blockers, and assignments into reusable context for faster executive follow-through.",
+      },
+      "agent-community": {
+        title: "Community agents for member matching",
+        highlight: "member matching",
+        description:
+          "Build agents that understand member identity, interests, relationships, and intent across your community's real activity.",
+      },
+      "market-intelligence": {
+        title: "Market intelligence agents",
+        highlight: "Market intelligence",
+        description:
+          "Track companies, launches, competitors, and market signals with agents that keep research structured and continuously fresh.",
+      },
+      careops: {
+        title: "Care coordination agents",
+        highlight: "Care coordination",
+        description:
+          "Help care teams track people, follow-ups, and operational state with agents that preserve structured context across workflows.",
+      },
+      ecommerce: {
+        title: "Ecommerce agents for customer operations",
+        highlight: "customer operations",
+        description:
+          "Run ecommerce workflows with agents that connect store systems, preserve customer context, and act with current operational state.",
+      },
+      "venture-capital": {
+        title: "Investment agents for deal flow",
+        highlight: "deal flow",
+        description:
+          "Track firms, partners, deals, and diligence signals with agents that keep investment context structured and reusable.",
+      },
+    },
+  },
+  skills: {
+    default: {
+      title: "Build reliable agents with CLI-like skills",
+      highlight: "CLI-like skills",
+      description:
+        "A skill isn't a prompt template, it's a full sandboxed computer. All capabilities bundled into one installable unit.",
+      startTitle: "Start a new agent in seconds",
+    },
+    byUseCase: {
+      legal: { title: "Skills for secure legal workflows" },
+      devops: { title: "Skills for incident response agents" },
+      support: { title: "Skills for customer operations agents" },
+      finance: { title: "Skills for finance workflows" },
+      sales: { title: "Skills for account and pipeline agents" },
+      delivery: { title: "Skills for rollout and status workflows" },
+      leadership: { title: "Skills for executive workflows" },
+      "agent-community": { title: "Skills for community workflows" },
+      "market-intelligence": {
+        title: "Skills for research and monitoring agents",
+      },
+      careops: { title: "Skills for care coordination workflows" },
+      ecommerce: { title: "Skills for ecommerce workflows" },
+      "venture-capital": { title: "Skills for sourcing and diligence agents" },
+    },
+  },
+  memory: {
+    default: {
+      title: "Turn data into shared, structured memory",
+      highlight: "structured memory",
+      description:
+        "Owletto gives every Lobu use case the same durable graph: connectors, recall, and managed auth without leaking credentials to the runtime.",
+      startTitle: "Start Owletto in seconds",
+    },
+    byUseCase: {
+      legal: { title: "Contract memory for legal agents" },
+      devops: { title: "Incident memory for ops teams" },
+      support: { title: "Shared customer memory for support agents" },
+      finance: { title: "Structured finance memory for every close" },
+      sales: { title: "Account memory for revenue teams" },
+      delivery: { title: "Project memory for delivery teams" },
+      leadership: { title: "Decision memory for leadership agents" },
+      "agent-community": { title: "Member memory for community agents" },
+      "market-intelligence": {
+        title: "Shared market memory for research agents",
+      },
+      careops: { title: "Care memory for coordination agents" },
+      ecommerce: { title: "Customer memory for store agents" },
+      "venture-capital": { title: "Deal memory for venture teams" },
+    },
+  },
+};
+
 export const landingUseCaseOptions = landingUseCaseShowcases.map((useCase) => ({
   id: useCase.id,
   label: useCase.label,
@@ -1685,6 +1891,19 @@ export function getLandingUseCaseShowcase(
   );
 }
 
+export function getSurfaceHeroCopy(
+  surface: SurfaceId,
+  useCaseId?: LandingUseCaseId
+): SurfaceHeroCopy {
+  const config = surfaceHeroCopy[surface];
+  const useCaseCopy = useCaseId ? config.byUseCase?.[useCaseId] : undefined;
+
+  return {
+    ...config.default,
+    ...useCaseCopy,
+  };
+}
+
 export const showcaseSkillWorkspacePreviews = landingUseCaseShowcases.map(
   (useCase) => useCase.skills
 );
@@ -1696,22 +1915,34 @@ export const showcaseMemoryExamples = landingUseCaseShowcases.map(
 export function getSkillsPrompt(showcase: LandingUseCaseShowcase) {
   const workspace = showcase.skills;
 
-  return `Set up a new Lobu agent for ${showcase.label}. Create lobu.toml with [agents.${workspace.agentId}] pointing at ./agents/${workspace.agentId}, add IDENTITY.md, SOUL.md, and USER.md under agents/${workspace.agentId}/, and add a shared skill in skills/${workspace.skillId}/SKILL.md with nix packages, a network allowlist, and MCP servers for ${workspace.skills.join(", ")}. Keep tool policy in lobu.toml. Keep the workflow aligned with this request: ${showcase.runtime.request}`;
+  return `Run \`npx @lobu/cli@latest init\` to set up a new Lobu agent for ${showcase.label}. Create lobu.toml with [agents.${workspace.agentId}] pointing at ./agents/${workspace.agentId}, add IDENTITY.md, SOUL.md, and USER.md under agents/${workspace.agentId}/, and add a shared skill in skills/${workspace.skillId}/SKILL.md with nix packages, a network allowlist, and MCP servers for ${workspace.skills.join(", ")}. Keep tool policy in lobu.toml. Keep the workflow aligned with this request: ${showcase.runtime.request}`;
 }
 
 export function getMemoryPrompt(showcase: LandingUseCaseShowcase) {
   const memory = showcase.memory;
 
-  return `Initialize Owletto memory for ${showcase.label}. Model these entities: ${memory.entityTypes.join(", ")}. Use this source text as the first example: "${memory.sourceText}". Keep the extracted memory durable, typed, and linked so the runtime can reuse it across future tasks.`;
+  return `Run \`npx owletto@latest init\` to initialize Owletto memory for ${showcase.label}. Model these entities: ${memory.entityTypes.join(", ")}. Use this source text as the first example: "${memory.sourceText}". Keep the extracted memory durable, typed, and linked so the runtime can reuse it across future tasks.`;
 }
 
 const OWLETTO_URL = "https://owletto.com";
+const OWLETTO_MCP_URL = `${OWLETTO_URL}/mcp`;
+
+export function getOwlettoOrgSlug(useCaseId?: LandingUseCaseId) {
+  if (!useCaseId) return undefined;
+  const def = landingUseCases[useCaseId];
+  return "owlettoOrg" in def ? def.owlettoOrg : undefined;
+}
 
 export function getOwlettoUrl(useCaseId?: LandingUseCaseId) {
-  if (!useCaseId) return OWLETTO_URL;
-  const def = landingUseCases[useCaseId];
-  if ("owlettoOrg" in def && def.owlettoOrg) {
-    return `${OWLETTO_URL}/${def.owlettoOrg}`;
-  }
-  return OWLETTO_URL;
+  const orgSlug = getOwlettoOrgSlug(useCaseId);
+  return orgSlug ? `${OWLETTO_URL}/${orgSlug}` : OWLETTO_URL;
+}
+
+export function getOwlettoMcpUrl() {
+  return OWLETTO_MCP_URL;
+}
+
+export function getOwlettoScopedMcpUrl(useCaseId?: LandingUseCaseId) {
+  const orgSlug = getOwlettoOrgSlug(useCaseId);
+  return orgSlug ? `${OWLETTO_MCP_URL}/${orgSlug}` : OWLETTO_MCP_URL;
 }

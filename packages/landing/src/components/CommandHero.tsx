@@ -4,10 +4,7 @@ import { useState } from "preact/hooks";
 type CommandHeroProps = {
   title: ComponentChildren;
   description: string;
-  command: string;
   prompt?: string;
-  commandPrefix?: string;
-  commandLabel?: string;
   promptLabel?: string;
   startTitle?: string;
   actions?: ComponentChildren;
@@ -129,11 +126,8 @@ function CopyPromptButton({
 export function CommandHero({
   title,
   description,
-  command,
   prompt,
-  commandPrefix = "$",
-  commandLabel = "Copy",
-  promptLabel = "Copy prompt",
+  promptLabel = "Copy prompt to your agent",
   startTitle = "Start in seconds",
   actions,
   footer,
@@ -163,22 +157,6 @@ export function CommandHero({
 
         <div class="flex flex-wrap items-center justify-center gap-3 mb-4">
           {actions}
-          <div
-            class="inline-flex items-center gap-3 rounded-xl px-4 py-2"
-            style={{
-              border: "1px solid var(--color-page-border-active)",
-              backgroundColor: "rgba(0,0,0,0.3)",
-            }}
-          >
-            <code
-              class="text-[13px] font-mono"
-              style={{ color: "var(--color-page-text)" }}
-            >
-              <span style={{ color: "#7aa2f7" }}>{commandPrefix} </span>
-              {command}
-            </code>
-            <CopyButton value={command} label={commandLabel} />
-          </div>
           <CopyPromptButton prompt={prompt} label={promptLabel} />
         </div>
       </div>
