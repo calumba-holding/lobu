@@ -38,8 +38,7 @@ type NavProps = {
 };
 
 export function Nav({ currentPath = "/" }: NavProps) {
-  const useCaseId = getUseCaseFromPath(currentPath);
-  const homeHref = useCaseId ? `/for/${useCaseId}` : "/";
+  const homeHref = "/";
   const leftLinks = getLeftLinks(currentPath);
 
   return (

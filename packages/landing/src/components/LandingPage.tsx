@@ -17,6 +17,7 @@ export function LandingPage(props: {
   const [activeUseCaseId, setActiveUseCaseId] = useState<LandingUseCaseId>(
     props.defaultUseCaseId ?? DEFAULT_LANDING_USE_CASE_ID
   );
+  const useScopedOwlettoUrl = Boolean(props.heroCopy);
 
   return (
     <>
@@ -25,6 +26,7 @@ export function LandingPage(props: {
         onActiveUseCaseChange={setActiveUseCaseId}
         linkTabsToCampaigns={props.linkTabsToCampaigns}
         heroCopy={props.heroCopy}
+        useScopedOwlettoUrl={useScopedOwlettoUrl}
       />
       <DemoSection
         activeUseCaseId={activeUseCaseId}
@@ -37,7 +39,10 @@ export function LandingPage(props: {
         <ArchitectureSection activeUseCaseId={activeUseCaseId} />
         <div class="section-divider" />
       </div>
-      <CTA activeUseCaseId={activeUseCaseId} />
+      <CTA
+        activeUseCaseId={activeUseCaseId}
+        useScopedOwlettoUrl={useScopedOwlettoUrl}
+      />
     </>
   );
 }

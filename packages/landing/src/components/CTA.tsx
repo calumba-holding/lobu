@@ -2,8 +2,13 @@ import type { LandingUseCaseId } from "../use-case-definitions";
 import { getOwlettoUrl } from "../use-case-showcases";
 import { ScheduleCallButton, ScheduleCallIcon } from "./ScheduleDialog";
 
-export function CTA(props: { activeUseCaseId?: LandingUseCaseId }) {
-  const owlettoUrl = getOwlettoUrl(props.activeUseCaseId);
+export function CTA(props: {
+  activeUseCaseId?: LandingUseCaseId;
+  useScopedOwlettoUrl?: boolean;
+}) {
+  const owlettoUrl = getOwlettoUrl(
+    props.useScopedOwlettoUrl ? props.activeUseCaseId : undefined
+  );
   const skillsHref = props.activeUseCaseId
     ? `/skills/for/${props.activeUseCaseId}`
     : "/skills";

@@ -44,11 +44,14 @@ export function HeroSection(props: {
   onActiveUseCaseChange?: (id: LandingUseCaseId) => void;
   linkTabsToCampaigns?: boolean;
   heroCopy?: SurfaceHeroCopy;
+  useScopedOwlettoUrl?: boolean;
 }) {
   const activeUseCase = getLandingUseCaseShowcase(props.activeUseCaseId);
   const memoryHref = `/memory/for/${activeUseCase.id}`;
   const skillsHref = `/skills/for/${activeUseCase.id}`;
-  const owlettoUrl = getOwlettoUrl(activeUseCase.id);
+  const owlettoUrl = getOwlettoUrl(
+    props.useScopedOwlettoUrl ? activeUseCase.id : undefined
+  );
   const primaryCtaLabel = props.heroCopy
     ? `See ${activeUseCase.label} demo`
     : "See live demo";
