@@ -254,7 +254,10 @@ export function DemoSection(props: {
         )}
 
         <div class="mb-6">
-          <Card title="Runtime" description={activeUseCase.runtime.summary}>
+          <Card
+            title={activeUseCase.label || " Agent"}
+            description={activeUseCase.runtime.summary}
+          >
             <RequestBlock
               label={activeUseCase.runtime.requestLabel}
               text={activeUseCase.runtime.request}
@@ -269,7 +272,7 @@ export function DemoSection(props: {
             title="Skills"
             description={activeUseCase.skills.description}
             href={skillsHref}
-            hrefLabel="Skills page"
+            hrefLabel="Learn more about Skills"
           >
             <div class="grid gap-4 md:grid-cols-3">
               <div>
@@ -394,7 +397,7 @@ export function DemoSection(props: {
             title="Memory"
             description={activeUseCase.memory.description}
             href={memoryHref}
-            hrefLabel="Memory page"
+            hrefLabel="Learn more about Memory"
           >
             <RequestBlock
               label={activeUseCase.memory.sourceLabel}

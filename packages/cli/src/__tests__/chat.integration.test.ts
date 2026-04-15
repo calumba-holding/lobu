@@ -18,7 +18,7 @@ const originalStdoutWrite = process.stdout.write.bind(process.stdout);
 const originalStderrWrite = process.stderr.write.bind(process.stderr);
 const originalConsoleError = console.error;
 const originalToken = process.env.LOBU_API_TOKEN;
-const exampleDir = join(import.meta.dir, "../../../../examples/hr-assistant");
+const exampleDir = join(import.meta.dir, "../../../../examples/careops");
 
 function createSseResponse(
   events: Array<{ event: string; data: Record<string, unknown> }>
@@ -186,14 +186,14 @@ describe("chatCommand example integration", () => {
 
     expect(createBodies).toEqual([
       {
-        agentId: "hr-assistant",
+        agentId: "careops",
         forceNew: true,
       },
     ]);
     expect(approvalBodies).toEqual([
       {
         requestId: "approval-1",
-        decision: "once",
+        decision: "1h",
       },
     ]);
 
@@ -224,18 +224,18 @@ describe("chatCommand example integration", () => {
         const url = String(input);
 
         if (
-          url === "http://gateway.test/api/v1/agents/hr-assistant/messages" &&
+          url === "http://gateway.test/api/v1/agents/careops/messages" &&
           init?.method === "POST"
         ) {
           return Response.json({
             success: true,
-            eventsUrl: "/api/v1/agents/hr-assistant/events?platform=telegram",
+            eventsUrl: "/api/v1/agents/careops/events?platform=telegram",
           });
         }
 
         if (
           url ===
-            "http://gateway.test/api/v1/agents/hr-assistant/events?platform=telegram" &&
+            "http://gateway.test/api/v1/agents/careops/events?platform=telegram" &&
           !init?.method
         ) {
           return createSseResponse([
@@ -288,18 +288,18 @@ describe("chatCommand example integration", () => {
         const url = String(input);
 
         if (
-          url === "http://gateway.test/api/v1/agents/hr-assistant/messages" &&
+          url === "http://gateway.test/api/v1/agents/careops/messages" &&
           init?.method === "POST"
         ) {
           return Response.json({
             success: true,
-            eventsUrl: "/api/v1/agents/hr-assistant/events?platform=telegram",
+            eventsUrl: "/api/v1/agents/careops/events?platform=telegram",
           });
         }
 
         if (
           url ===
-            "http://gateway.test/api/v1/agents/hr-assistant/events?platform=telegram" &&
+            "http://gateway.test/api/v1/agents/careops/events?platform=telegram" &&
           !init?.method
         ) {
           return createSseResponse([
@@ -340,18 +340,18 @@ describe("chatCommand example integration", () => {
         const url = String(input);
 
         if (
-          url === "http://gateway.test/api/v1/agents/hr-assistant/messages" &&
+          url === "http://gateway.test/api/v1/agents/careops/messages" &&
           init?.method === "POST"
         ) {
           return Response.json({
             success: true,
-            eventsUrl: "/api/v1/agents/hr-assistant/events?platform=telegram",
+            eventsUrl: "/api/v1/agents/careops/events?platform=telegram",
           });
         }
 
         if (
           url ===
-            "http://gateway.test/api/v1/agents/hr-assistant/events?platform=telegram" &&
+            "http://gateway.test/api/v1/agents/careops/events?platform=telegram" &&
           !init?.method
         ) {
           return createSseResponse([
@@ -388,20 +388,20 @@ describe("chatCommand example integration", () => {
         const url = String(input);
 
         if (
-          url === "http://gateway.test/api/v1/agents/hr-assistant/messages" &&
+          url === "http://gateway.test/api/v1/agents/careops/messages" &&
           init?.method === "POST"
         ) {
           const body = JSON.parse(String(init.body)) as Record<string, unknown>;
           messageBodies.push(body);
           return Response.json({
             success: true,
-            eventsUrl: "/api/v1/agents/hr-assistant/events?platform=telegram",
+            eventsUrl: "/api/v1/agents/careops/events?platform=telegram",
           });
         }
 
         if (
           url ===
-            "http://gateway.test/api/v1/agents/hr-assistant/events?platform=telegram" &&
+            "http://gateway.test/api/v1/agents/careops/events?platform=telegram" &&
           !init?.method
         ) {
           return createSseResponse([

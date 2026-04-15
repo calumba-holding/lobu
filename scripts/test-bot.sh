@@ -11,7 +11,8 @@ set -e
 #   TEST_TIMEOUT    - Timeout in seconds (default: 120)
 #
 # Platform-specific:
-#   Slack: QA_SLACK_CHANNEL, optional SLACK_BOT_TOKEN for reply polling
+#   Slack: QA_SLACK_CHANNEL, QA_SLACK_USER_TOKEN (xoxp-) to send as real user,
+#          optional SLACK_BOT_TOKEN for reply polling when user token absent
 #   WhatsApp: WHATSAPP_SELF_PHONE (defaults to bot's own number for self-chat)
 #   Telegram: TELEGRAM_TEST_CHAT_ID, TG_API_ID, TG_API_HASH (uses tguser to send as real user)
 
@@ -296,13 +297,23 @@ raise SystemExit(asyncio.run(main()))
 PY
 }
 
+# Fetch gateway's active test targets once; used for both platform auto-detect
+# and agent-id fallback so explicit TEST_PLATFORM runs still resolve the owning
+# agent (otherwise the default `test-<platform>` placeholder has no provider).
+TEST_TARGETS=$(curl -sf "$GATEWAY_URL/internal/connections/test-targets" 2>/dev/null || \
+    curl -sf "$GATEWAY_URL/api/internal/connections/test-targets" 2>/dev/null || \
+    echo "")
+
+if [ -n "$TEST_TARGETS" ] && [ -z "$TEST_AGENT_ID" ]; then
+    if [ -n "$TEST_PLATFORM" ]; then
+        TEST_AGENT_ID=$(echo "$TEST_TARGETS" | jq -r --arg p "$TEST_PLATFORM" '.[]? | select(.platform == $p) | .agentId // empty' 2>/dev/null | head -n 1)
+    else
+        TEST_AGENT_ID=$(echo "$TEST_TARGETS" | jq -r '.[0].agentId // empty' 2>/dev/null || echo "")
+    fi
+fi
+
 # Auto-detect platform from active messaging connections, fall back to env vars
 if [ -z "$TEST_PLATFORM" ]; then
-    # Try querying gateway for active local test targets
-    TEST_TARGETS=$(curl -sf "$GATEWAY_URL/internal/connections/test-targets" 2>/dev/null || \
-        curl -sf "$GATEWAY_URL/api/internal/connections/test-targets" 2>/dev/null || \
-        echo "")
-
     if [ -n "$TEST_TARGETS" ]; then
         TEST_PLATFORM=$(echo "$TEST_TARGETS" | jq -r '.[0].platform // empty' 2>/dev/null || echo "")
         if [ -z "$TEST_CHANNEL" ]; then
@@ -440,6 +451,65 @@ for i in "${!MESSAGES[@]}"; do
         continue
     elif [ "$TEST_PLATFORM" = "telegram" ]; then
         echo "   ℹ️  TG_API_ID/TG_API_HASH not configured; falling back to gateway-side Telegram send"
+    fi
+
+    # Slack QA-sender path: QA_SLACK_USER_TOKEN (xoxp-) posts as a real user via
+    # chat.postMessage so the target bot sees a genuine Slack event instead of
+    # a gateway-forged enqueue. A secondary *bot* token doesn't work here —
+    # Slack filters bot_message events cross-app to avoid loops.
+    if [ "$TEST_PLATFORM" = "slack" ] && [ -z "$QA_SLACK_USER_TOKEN" ]; then
+        echo "   ⚠️  QA_SLACK_USER_TOKEN not set — using gateway-forged send."
+        echo "       The message is queued directly to the worker; nothing"
+        echo "       appears in Slack as an inbound message."
+        echo "       To exercise the real webhook flow, install the QA app"
+        echo "       (config/slack-app-manifest.qa-user.json) to mint a xoxp-"
+        echo "       token, then export QA_SLACK_USER_TOKEN=<xoxp-...>."
+    fi
+    if [ "$TEST_PLATFORM" = "slack" ] && [ -n "$QA_SLACK_USER_TOKEN" ]; then
+        echo "   ✅ Sending via Slack user token to $CHANNEL"
+        POST_BODY="channel=$CHANNEL&text=$(printf '%s' "$MESSAGE" | jq -sRr @uri)"
+        if [ -n "$LAST_THREAD_ID" ]; then
+            POST_BODY="$POST_BODY&thread_ts=$LAST_THREAD_ID"
+        fi
+        POST_RESP=$(curl -s -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer $QA_SLACK_USER_TOKEN" \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            -d "$POST_BODY")
+        if ! echo "$POST_RESP" | jq -e '.ok' > /dev/null 2>&1; then
+            echo "   ❌ Slack chat.postMessage failed:"
+            echo "$POST_RESP" | jq 2>/dev/null || echo "$POST_RESP"
+            exit 1
+        fi
+        MESSAGE_ID=$(echo "$POST_RESP" | jq -r '.ts')
+        echo "   ✅ Sent: ts=$MESSAGE_ID"
+        if [ -z "$LAST_THREAD_ID" ]; then
+            LAST_THREAD_ID="$MESSAGE_ID"
+        fi
+
+        POLL_TOKEN="${SLACK_BOT_TOKEN:-$QA_SLACK_USER_TOKEN}"
+        echo "   ⏳ Waiting for bot response..."
+        START_TIME=$(date +%s)
+        while true; do
+            CURRENT_TIME=$(date +%s)
+            ELAPSED=$((CURRENT_TIME - START_TIME))
+            if [ $ELAPSED -ge $TIMEOUT ]; then
+                echo "   ❌ Timeout: No bot response within ${TIMEOUT}s"
+                exit 1
+            fi
+            REPLIES=$(curl -s -X POST https://slack.com/api/conversations.replies \
+                -H "Authorization: Bearer $POLL_TOKEN" \
+                -H "Content-Type: application/x-www-form-urlencoded" \
+                -d "channel=$CHANNEL&ts=$LAST_THREAD_ID&limit=20")
+            BOT_RESPONSE=$(echo "$REPLIES" | jq -r '.messages[]? | select(.bot_id != null) | select(.ts > "'"$MESSAGE_ID"'") | .text' | head -1)
+            if [ -n "$BOT_RESPONSE" ]; then
+                echo "   ✅ Bot responded:"
+                echo "      $(echo "$BOT_RESPONSE" | head -c 200)..."
+                break
+            fi
+            sleep 2
+        done
+        echo ""
+        continue
     fi
 
     # Escape message for JSON (handle newlines, quotes, backslashes)

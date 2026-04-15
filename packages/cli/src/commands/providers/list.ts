@@ -5,7 +5,9 @@ export async function providersListCommand(): Promise<void> {
   const providers = loadProviderRegistry();
 
   if (providers.length === 0) {
-    console.log(chalk.yellow("\n  No providers found in the bundled registry.\n"));
+    console.log(
+      chalk.yellow("\n  No providers found in the bundled registry.\n")
+    );
     return;
   }
 

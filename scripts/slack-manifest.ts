@@ -97,23 +97,27 @@ function normalizeBaseUrl(url: string): string {
 
 function patchManifestGatewayUrls(
   manifest: Record<string, unknown>,
-  publicGatewayUrl: string
+  publicGatewayUrl: string,
+  connectionId?: string
 ): void {
   const base = normalizeBaseUrl(publicGatewayUrl);
-  const eventsUrl = `${base}/slack/events`;
-  const oauthCallbackUrl = `${base}/slack/oauth_callback`;
+  // Per-connection self-install uses the webhook endpoint; multi-tenant
+  // community install uses the generic /slack/events entry point.
+  const requestUrl = connectionId
+    ? `${base}/api/v1/webhooks/${connectionId}`
+    : `${base}/slack/events`;
 
   const settings = manifest.settings as Record<string, unknown> | undefined;
   if (settings) {
     const eventSubs = settings.event_subscriptions as
       | Record<string, unknown>
       | undefined;
-    if (eventSubs) eventSubs.request_url = eventsUrl;
+    if (eventSubs) eventSubs.request_url = requestUrl;
 
     const interactivity = settings.interactivity as
       | Record<string, unknown>
       | undefined;
-    if (interactivity) interactivity.request_url = eventsUrl;
+    if (interactivity) interactivity.request_url = requestUrl;
   }
 
   const features = manifest.features as Record<string, unknown> | undefined;
@@ -122,18 +126,24 @@ function patchManifestGatewayUrls(
     if (Array.isArray(slashCommands)) {
       for (const cmd of slashCommands) {
         if (cmd && typeof cmd === "object") {
-          (cmd as Record<string, unknown>).url = eventsUrl;
+          (cmd as Record<string, unknown>).url = requestUrl;
         }
       }
     }
   }
 
-  // Patch OAuth redirect URLs
+  // OAuth redirect URL is only needed for public-install apps that do the
+  // full OAuth flow. Self-install manifests (SLACK_CONNECTION_ID set) should
+  // not advertise a redirect URL.
   const oauthConfig = manifest.oauth_config as
     | Record<string, unknown>
     | undefined;
   if (oauthConfig) {
-    oauthConfig.redirect_urls = [oauthCallbackUrl];
+    if (connectionId) {
+      delete oauthConfig.redirect_urls;
+    } else {
+      oauthConfig.redirect_urls = [`${base}/slack/oauth_callback`];
+    }
   }
 }
 
@@ -165,8 +175,9 @@ async function main(): Promise<void> {
   const manifest = JSON.parse(raw) as Record<string, unknown>;
 
   const publicGatewayUrl = process.env.PUBLIC_GATEWAY_URL;
+  const connectionId = process.env.SLACK_CONNECTION_ID;
   if (publicGatewayUrl) {
-    patchManifestGatewayUrls(manifest, publicGatewayUrl);
+    patchManifestGatewayUrls(manifest, publicGatewayUrl, connectionId);
   }
 
   if (cmd === "print") {
@@ -218,7 +229,7 @@ main().catch((err) => {
     "Env: SLACK_CONFIG_TOKEN or SLACK_CONFIG_REFRESH_TOKEN; SLACK_APP_ID (for update)\n"
   );
   process.stderr.write(
-    "Optional env: SLACK_MANIFEST_PATH, PUBLIC_GATEWAY_URL, DOTENV_PATH\n"
+    "Optional env: SLACK_MANIFEST_PATH, PUBLIC_GATEWAY_URL, SLACK_CONNECTION_ID, DOTENV_PATH\n"
   );
   process.exit(1);
 });

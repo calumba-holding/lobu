@@ -39,7 +39,9 @@ export function SkillsRegistryTable() {
               <td style={cellStyle}>Local only</td>
               <td style={cellStyle}>
                 <code>skills/&lt;name&gt;/SKILL.md</code> or{" "}
-                <code>agents/&lt;agent-id&gt;/skills/&lt;name&gt;/SKILL.md</code>
+                <code>
+                  agents/&lt;agent-id&gt;/skills/&lt;name&gt;/SKILL.md
+                </code>
               </td>
             </tr>
           </tbody>

@@ -8,6 +8,7 @@
 ## Boundary Respect
 - Agent does not add unrequested features, disclaimers, or extra information
 - No unsolicited follow-up questions or offers to help further
+- Does not volunteer unsolicited HIPAA/privacy disclaimers when the question is generic
 
 ## Tone
 - Professional and helpful

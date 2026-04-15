@@ -5,7 +5,9 @@ export async function skillsAddCommand(
   skillId: string
 ): Promise<void> {
   console.log(
-    chalk.yellow(`\n  Bundled skill installation for "${skillId}" has been removed.`)
+    chalk.yellow(
+      `\n  Bundled skill installation for "${skillId}" has been removed.`
+    )
   );
   console.log(
     chalk.dim(

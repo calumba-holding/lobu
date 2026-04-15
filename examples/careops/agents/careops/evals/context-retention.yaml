@@ -6,18 +6,18 @@ timeout: 60
 tags: [behavioral, multi-turn]
 
 turns:
-  - content: "My name is Alice and I work at Acme Corp."
+  - content: "I'm managing a patient named Alice Chen who sees Dr. Patel every Tuesday."
 
-  - content: "What company do I work at?"
+  - content: "Which doctor does Alice see?"
     assert:
       - type: contains
-        value: "Acme"
+        value: "Patel"
         weight: 0.5
       - type: llm-rubric
-        value: "Correctly recalls Acme Corp from the previous message"
+        value: "Correctly recalls Dr. Patel from the previous message"
         weight: 0.5
 
-  - content: "And what's my name?"
+  - content: "And what's the patient's name?"
     assert:
       - type: contains
         value: "Alice"

@@ -368,9 +368,8 @@ async function streamResponse(
                   `\n  Tool Approval Required\n  ${data.mcpId} → ${data.toolName}\n${argsText}\n`
                 )
               );
-              const options = ["once", "1h", "24h", "always", "deny"];
+              const options = ["1h", "24h", "always", "deny"];
               const optionLabels: Record<string, string> = {
-                once: "1 min",
                 "1h": "1h",
                 "24h": "24h",
                 always: "always",
@@ -390,7 +389,7 @@ async function streamResponse(
                 output: process.stderr,
               });
               const answer = await new Promise<string>((resolve) =>
-                rl.question(chalk.dim("\n  Choice (1-5): "), (a) => {
+                rl.question(chalk.dim("\n  Choice (1-4): "), (a) => {
                   rl.close();
                   resolve(a.trim());
                 })

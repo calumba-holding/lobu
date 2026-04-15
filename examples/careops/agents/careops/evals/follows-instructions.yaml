@@ -7,11 +7,11 @@ tags: [behavioral]
 rubric: follows-instructions.rubric.md
 
 turns:
-  - content: "List exactly 3 benefits of remote work. Use bullet points."
+  - content: "List exactly 3 common appointment types in a healthcare clinic. Use bullet points."
     assert:
       - type: regex
         value: "^[\\s\\S]*[-•].*[-•].*[-•]"
         weight: 0.5
       - type: llm-rubric
-        value: "Lists exactly 3 benefits (not 2, not 4+), uses bullet points"
+        value: "Lists exactly 3 appointment types (not 2, not 4+), uses bullet points"
         weight: 0.5
