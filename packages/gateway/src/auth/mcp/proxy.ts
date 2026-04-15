@@ -12,11 +12,39 @@ import {
   tryCompletePendingDeviceAuth,
 } from "../../routes/internal/device-auth";
 import type { WritableSecretStore } from "../../secrets";
+import { startAuthCodeFlow } from "./oauth-flow";
 import type { CachedMcpServer, McpTool, McpToolCache } from "./tool-cache";
 
 const logger = createLogger("mcp-proxy");
 
 const MAX_BODY_SIZE = 1024 * 1024; // 1MB
+
+/**
+ * Parse a JSON-RPC response body that may be either a plain JSON object
+ * (Content-Type: application/json) or a single-event SSE stream
+ * (Content-Type: text/event-stream). Streamable-HTTP MCP servers may return
+ * either form per the MCP spec.
+ */
+async function parseJsonRpcResponse(response: Response): Promise<any> {
+  const contentType = response.headers.get("content-type") || "";
+  if (contentType.includes("text/event-stream")) {
+    const text = await response.text();
+    // SSE frames: sequence of `event:`/`data:` lines separated by blank lines.
+    // For request/response JSON-RPC we expect the last `data:` payload to be
+    // the JSON-RPC response object.
+    let payload = "";
+    for (const line of text.split(/\r?\n/)) {
+      if (line.startsWith("data:")) {
+        payload = line.slice(5).trimStart();
+      }
+    }
+    if (!payload) {
+      throw new Error("SSE response contained no data payload");
+    }
+    return JSON.parse(payload);
+  }
+  return response.json();
+}
 
 /**
  * Check whether a resolved IP address belongs to a reserved/internal range.
@@ -90,6 +118,8 @@ interface HttpMcpServerConfig {
   oauth?: import("@lobu/core").McpOAuthConfig;
   inputs?: unknown[];
   headers?: Record<string, string>;
+  /** Credential scoping strategy: "user" (default) or "channel" (shared in a Slack channel). */
+  authScope?: "user" | "channel";
 }
 
 interface McpConfigSource {
@@ -131,6 +161,7 @@ export class McpProxy {
   private readonly toolCache?: McpToolCache;
   private readonly secretStore: WritableSecretStore;
   private readonly grantStore?: GrantStore;
+  private readonly publicGatewayUrl?: string;
 
   /** Callback invoked when a tool call is blocked for approval. */
   public onToolBlocked?: (
@@ -172,12 +203,15 @@ export class McpProxy {
       secretStore: WritableSecretStore;
       toolCache?: McpToolCache;
       grantStore?: GrantStore;
+      /** Absolute gateway URL for OAuth redirect_uri construction. */
+      publicGatewayUrl?: string;
     }
   ) {
     this.redisClient = queue.getRedisClient();
     this.secretStore = options.secretStore;
     this.toolCache = options.toolCache;
     this.grantStore = options.grantStore;
+    this.publicGatewayUrl = options.publicGatewayUrl;
     this.app = new Hono();
     this.setupRoutes();
     logger.debug("MCP proxy initialized");
@@ -209,6 +243,12 @@ export class McpProxy {
       };
     }
 
+    // executeToolDirect is called from the interaction bridge after user
+    // approval, where no channelId is carried — so we can only honor
+    // authScope="user" here. For channel-scoped servers, fall back to
+    // userId (still correct for the requesting user's personal credential).
+    const scopeKey = this.computeScopeKey(httpServer, userId, undefined);
+
     const jsonRpcBody = JSON.stringify({
       jsonrpc: "2.0",
       method: "tools/call",
@@ -223,7 +263,7 @@ export class McpProxy {
         mcpId,
         "POST",
         jsonRpcBody,
-        userId
+        scopeKey
       );
 
       if (!response.ok) {
@@ -239,7 +279,7 @@ export class McpProxy {
         };
       }
 
-      const json = (await response.json()) as any;
+      const json = (await parseJsonRpcResponse(response)) as any;
       const result = json.result || json;
       return {
         content: result.content || [
@@ -289,10 +329,12 @@ export class McpProxy {
     }
 
     const userId = tokenData?.userId;
+    const channelId = tokenData?.channelId || "";
+    const scopeKey = this.computeScopeKey(httpServer, userId, channelId);
 
     try {
       // Clear any stale session before fresh tool discovery
-      const sessionKey = `mcp:session:${agentId}:${mcpId}`;
+      const sessionKey = this.buildSessionKey(agentId, mcpId, scopeKey);
       await this.redisClient.del(sessionKey).catch(() => {
         /* noop */
       });
@@ -317,10 +359,29 @@ export class McpProxy {
           mcpId,
           "POST",
           initBody,
-          userId
+          scopeKey
         );
 
-        const initData = (await initResponse.json()) as {
+        // Tool discovery runs before the agent has a chance to call anything.
+        // If the server demands OAuth, kick off the auth-code flow here so the
+        // "Connect X" link reaches the user up-front.
+        if (initResponse.status === 401) {
+          const wwwAuth = initResponse.headers.get("www-authenticate");
+          await initResponse.body?.cancel().catch(() => {
+            /* noop */
+          });
+          await this.fireAuthCodeFlowFromDiscovery({
+            mcpId,
+            agentId,
+            httpServer,
+            wwwAuthenticate: wwwAuth,
+            scopeKey,
+            tokenData,
+          });
+          return { tools: [] };
+        }
+
+        const initData = (await parseJsonRpcResponse(initResponse)) as {
           result?: { instructions?: string };
           error?: { code: number; message: string };
         };
@@ -344,7 +405,7 @@ export class McpProxy {
           mcpId,
           "POST",
           notifyBody,
-          userId
+          scopeKey
         ).catch(() => {
           /* noop */
         });
@@ -370,10 +431,26 @@ export class McpProxy {
         mcpId,
         "POST",
         jsonRpcBody,
-        userId
+        scopeKey
       );
 
-      const data = (await response.json()) as JsonRpcResponse;
+      if (response.status === 401) {
+        const wwwAuth = response.headers.get("www-authenticate");
+        await response.body?.cancel().catch(() => {
+          /* noop */
+        });
+        await this.fireAuthCodeFlowFromDiscovery({
+          mcpId,
+          agentId,
+          httpServer,
+          wwwAuthenticate: wwwAuth,
+          scopeKey,
+          tokenData,
+        });
+        return { tools: [] };
+      }
+
+      const data = (await parseJsonRpcResponse(response)) as JsonRpcResponse;
       const tools: McpTool[] = data?.result?.tools || [];
 
       const serverInfo: CachedMcpServer = { tools, instructions };
@@ -403,9 +480,11 @@ export class McpProxy {
           mcpId,
           "POST",
           retryBody,
-          userId
+          scopeKey
         );
-        const retryData = (await retryResponse.json()) as JsonRpcResponse;
+        const retryData = (await parseJsonRpcResponse(
+          retryResponse
+        )) as JsonRpcResponse;
         const retryTools: McpTool[] = retryData?.result?.tools || [];
         if (retryTools.length > 0) {
           const serverInfo: CachedMcpServer = { tools: retryTools };
@@ -461,6 +540,11 @@ export class McpProxy {
     if (!httpServer) {
       return c.json({ error: `MCP server '${mcpId}' not found` }, 404);
     }
+    const scopeKey = this.computeScopeKey(
+      httpServer,
+      requesterUserId,
+      auth.tokenData.channelId || ""
+    );
 
     // Check cache
     if (this.toolCache) {
@@ -482,10 +566,10 @@ export class McpProxy {
         mcpId,
         "POST",
         jsonRpcBody,
-        requesterUserId
+        scopeKey
       );
 
-      const data = (await response.json()) as JsonRpcResponse;
+      const data = (await parseJsonRpcResponse(response)) as JsonRpcResponse;
       if (data?.error) {
         logger.error("Upstream returned JSON-RPC error", {
           mcpId,
@@ -531,6 +615,12 @@ export class McpProxy {
     if (!httpServer) {
       return c.json({ error: `MCP server '${mcpId}' not found` }, 404);
     }
+    const channelId = auth.tokenData.channelId || "";
+    const scopeKey = this.computeScopeKey(
+      httpServer,
+      requesterUserId,
+      channelId
+    );
 
     // Parse body early so tool arguments are available for the approval message.
     let toolArguments: Record<string, unknown> = {};
@@ -650,23 +740,127 @@ export class McpProxy {
         mcpId,
         "POST",
         jsonRpcBody,
-        requesterUserId
+        scopeKey
       );
 
-      let data = (await response.json()) as JsonRpcResponse;
+      // Detect HTTP 401 + WWW-Authenticate → start MCP OAuth 2.1 auth-code flow.
+      // This path runs before JSON-RPC parsing because most compliant MCP
+      // servers (Sentry, etc.) return 401 at the transport layer, not a
+      // JSON-RPC error body.
+      if (response.status === 401) {
+        const wwwAuth = response.headers.get("www-authenticate");
+        // Drain body so the connection can be reused.
+        await response.body?.cancel().catch(() => {
+          /* noop */
+        });
+        const authCodeResult = await this.tryAutoAuthCodeFlow({
+          mcpId,
+          agentId,
+          userId: requesterUserId,
+          scopeKey,
+          httpServer,
+          wwwAuthenticate: wwwAuth,
+          platform: auth.tokenData.platform,
+          channelId,
+          conversationId: auth.tokenData.conversationId || "",
+          teamId: auth.tokenData.teamId,
+          connectionId: auth.tokenData.connectionId,
+        });
+        if (authCodeResult) {
+          if (this.onAuthRequired) {
+            await this.onAuthRequired(
+              agentId,
+              requesterUserId,
+              mcpId,
+              authCodeResult,
+              channelId,
+              auth.tokenData.conversationId || "",
+              auth.tokenData.teamId,
+              auth.tokenData.connectionId,
+              auth.tokenData.platform
+            ).catch((err) =>
+              logger.error(
+                { mcpId, error: String(err) },
+                "onAuthRequired callback failed"
+              )
+            );
+          }
+          return c.json(
+            {
+              content: [{ type: "text", text: JSON.stringify(authCodeResult) }],
+              isError: true,
+            },
+            200
+          );
+        }
+        // Fall through to device-auth legacy fallback if auth-code flow failed.
+        const legacyAuth = await this.tryAutoDeviceAuth(
+          mcpId,
+          agentId,
+          requesterUserId
+        );
+        if (legacyAuth) {
+          if (this.onAuthRequired) {
+            await this.onAuthRequired(
+              agentId,
+              requesterUserId,
+              mcpId,
+              legacyAuth,
+              channelId,
+              auth.tokenData.conversationId || "",
+              auth.tokenData.teamId,
+              auth.tokenData.connectionId,
+              auth.tokenData.platform
+            ).catch((err) =>
+              logger.error(
+                { mcpId, error: String(err) },
+                "onAuthRequired callback failed"
+              )
+            );
+          }
+          return c.json(
+            {
+              content: [{ type: "text", text: JSON.stringify(legacyAuth) }],
+              isError: true,
+            },
+            200
+          );
+        }
+        return c.json(
+          {
+            content: [
+              {
+                type: "text",
+                text: `Authentication required for ${mcpId} but OAuth discovery failed.`,
+              },
+            ],
+            isError: true,
+          },
+          200
+        );
+      }
 
-      // Re-initialize session and retry on "Server not initialized"
-      if (data?.error && /not initialized/i.test(data.error.message || "")) {
+      let data = (await parseJsonRpcResponse(response)) as JsonRpcResponse;
+
+      // Re-initialize session and retry on stale-session errors.
+      //
+      // Primary signal: MCP streamable-HTTP transport mandates HTTP 404 when
+      // the `Mcp-Session-Id` header names a session the server no longer
+      // knows (e.g. upstream restarted while we cached the id in Redis).
+      //
+      // Fallback signal: some MCP servers return 200 with a JSON-RPC error
+      // whose message is "Server not initialized" or "Session not found…".
+      // We match both wordings rather than chase specific upstream phrasing.
+      if (
+        response.status === 404 ||
+        (data?.error &&
+          /not initialized|session not found/i.test(data.error.message || ""))
+      ) {
         logger.info("MCP session expired, re-initializing before retry", {
           mcpId,
           toolName,
         });
-        await this.reinitializeSession(
-          httpServer,
-          agentId,
-          mcpId,
-          requesterUserId
-        );
+        await this.reinitializeSession(httpServer, agentId, mcpId, scopeKey);
 
         response = await this.sendUpstreamRequest(
           httpServer,
@@ -674,9 +868,9 @@ export class McpProxy {
           mcpId,
           "POST",
           jsonRpcBody,
-          requesterUserId
+          scopeKey
         );
-        data = (await response.json()) as JsonRpcResponse;
+        data = (await parseJsonRpcResponse(response)) as JsonRpcResponse;
       }
 
       if (data?.error) {
@@ -694,7 +888,7 @@ export class McpProxy {
           const autoAuthResult = await this.tryAutoDeviceAuth(
             mcpId,
             agentId,
-            requesterUserId
+            scopeKey
           );
           if (autoAuthResult) {
             if (this.onAuthRequired) {
@@ -929,13 +1123,28 @@ export class McpProxy {
       }
     }
 
+    const channelId = tokenData.channelId || "";
+    const scopeKey = this.computeScopeKey(
+      httpServer,
+      tokenData.userId,
+      channelId
+    );
+
     try {
       return await this.forwardRequest(
         c,
         httpServer,
         agentId,
         mcpId!,
-        tokenData.userId
+        scopeKey,
+        {
+          userId: tokenData.userId,
+          platform: tokenData.platform,
+          channelId,
+          conversationId: tokenData.conversationId || "",
+          teamId: tokenData.teamId,
+          connectionId: tokenData.connectionId,
+        }
       );
     } catch (error) {
       logger.error("Failed to proxy MCP request", { error, mcpId });
@@ -978,7 +1187,9 @@ export class McpProxy {
   ): Record<string, string> {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
-      Accept: "application/json",
+      // MCP streamable-HTTP spec requires both — servers like DeepWiki reject
+      // plain `application/json` with 406 Not Acceptable.
+      Accept: "application/json, text/event-stream",
     };
 
     // Merge custom headers from server config (e.g. static auth tokens)
@@ -1046,15 +1257,15 @@ export class McpProxy {
     mcpId: string,
     method: string,
     body?: string,
-    userId?: string
+    scopeKey?: string
   ): Promise<Response> {
-    const sessionKey = `mcp:session:${agentId}:${mcpId}`;
+    const sessionKey = this.buildSessionKey(agentId, mcpId, scopeKey);
     const sessionId = await this.getSession(sessionKey);
 
-    // Look up per-user credential for this MCP
+    // Look up scope-specific credential for this MCP
     let credentialToken: string | undefined;
-    if (userId) {
-      const token = await this.resolveCredentialToken(agentId, userId, mcpId);
+    if (scopeKey) {
+      const token = await this.resolveCredentialToken(agentId, scopeKey, mcpId);
       if (token) credentialToken = token;
     }
 
@@ -1104,7 +1315,15 @@ export class McpProxy {
     httpServer: HttpMcpServerConfig,
     agentId: string,
     mcpId: string,
-    userId?: string
+    scopeKey?: string,
+    authContext?: {
+      userId: string;
+      platform?: string;
+      channelId: string;
+      conversationId: string;
+      teamId?: string;
+      connectionId?: string;
+    }
   ): Promise<Response> {
     // SSRF protection: block requests to internal networks
     if (await isInternalUrl(httpServer.upstreamUrl)) {
@@ -1120,7 +1339,7 @@ export class McpProxy {
       );
     }
 
-    const sessionKey = `mcp:session:${agentId}:${mcpId}`;
+    const sessionKey = this.buildSessionKey(agentId, mcpId, scopeKey);
     let sessionId = await this.getSession(sessionKey);
 
     const bodyText = await this.getRequestBodyAsText(c);
@@ -1138,7 +1357,7 @@ export class McpProxy {
     // If no active session exists, re-initialize before forwarding
     if (!sessionId && c.req.method === "POST") {
       try {
-        await this.reinitializeSession(httpServer, agentId, mcpId, userId);
+        await this.reinitializeSession(httpServer, agentId, mcpId, scopeKey);
         sessionId = await this.getSession(sessionKey);
       } catch (error) {
         logger.warn("Pre-emptive MCP re-initialization failed", {
@@ -1156,10 +1375,10 @@ export class McpProxy {
       bodyLength: bodyText.length,
     });
 
-    // Look up per-user credential for this MCP
+    // Look up per-user/per-channel credential for this MCP
     let credentialToken: string | undefined;
-    if (userId) {
-      const token = await this.resolveCredentialToken(agentId, userId, mcpId);
+    if (scopeKey) {
+      const token = await this.resolveCredentialToken(agentId, scopeKey, mcpId);
       if (token) credentialToken = token;
     }
 
@@ -1169,11 +1388,100 @@ export class McpProxy {
       credentialToken
     );
 
-    const response = await fetch(httpServer.upstreamUrl, {
+    let response = await fetch(httpServer.upstreamUrl, {
       method: c.req.method,
       headers,
       body: bodyText || undefined,
     });
+
+    // Detect HTTP 401 + WWW-Authenticate → start MCP OAuth 2.1 auth-code flow.
+    if (response.status === 401 && authContext) {
+      const wwwAuth = response.headers.get("www-authenticate");
+      await response.body?.cancel().catch(() => {
+        /* noop */
+      });
+      const authCodeResult = await this.tryAutoAuthCodeFlow({
+        mcpId,
+        agentId,
+        userId: authContext.userId,
+        scopeKey: scopeKey ?? authContext.userId,
+        httpServer,
+        wwwAuthenticate: wwwAuth,
+        platform: authContext.platform ?? "",
+        channelId: authContext.channelId,
+        conversationId: authContext.conversationId,
+        teamId: authContext.teamId,
+        connectionId: authContext.connectionId,
+      });
+      if (authCodeResult && this.onAuthRequired) {
+        await this.onAuthRequired(
+          agentId,
+          authContext.userId,
+          mcpId,
+          authCodeResult,
+          authContext.channelId,
+          authContext.conversationId,
+          authContext.teamId,
+          authContext.connectionId,
+          authContext.platform
+        ).catch((err) =>
+          logger.error(
+            { mcpId, error: String(err) },
+            "onAuthRequired callback failed (forward)"
+          )
+        );
+      }
+      const payload = authCodeResult ?? {
+        status: "login_required" as const,
+        message: `Authentication required for ${mcpId}.`,
+      };
+      return c.json(
+        {
+          jsonrpc: "2.0",
+          id: null,
+          result: {
+            content: [{ type: "text", text: JSON.stringify(payload) }],
+            isError: true,
+          },
+        },
+        200
+      );
+    }
+
+    // Stale-session recovery: if upstream returns 404 we sent a session id
+    // it no longer recognizes (e.g. server restart). Drop the cached id,
+    // re-init, and retry once with the same payload. Only meaningful for
+    // POST — GET/DELETE on an unknown session should surface the 404 as-is.
+    if (
+      response.status === 404 &&
+      sessionId &&
+      c.req.method === "POST" &&
+      bodyText
+    ) {
+      logger.info(
+        "Upstream 404 on cached session id — re-initializing and retrying",
+        { mcpId, agentId }
+      );
+      try {
+        await this.reinitializeSession(httpServer, agentId, mcpId, scopeKey);
+        sessionId = await this.getSession(sessionKey);
+        const retryHeaders = this.buildUpstreamHeaders(
+          sessionId,
+          httpServer.headers,
+          credentialToken
+        );
+        response = await fetch(httpServer.upstreamUrl, {
+          method: c.req.method,
+          headers: retryHeaders,
+          body: bodyText,
+        });
+      } catch (error) {
+        logger.warn("Stale-session recovery failed on forward", {
+          mcpId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
 
     const newSessionId = response.headers.get("Mcp-Session-Id");
     if (newSessionId) {
@@ -1220,10 +1528,10 @@ export class McpProxy {
     httpServer: HttpMcpServerConfig,
     agentId: string,
     mcpId: string,
-    userId?: string
+    scopeKey?: string
   ): Promise<void> {
     // Clear stale session
-    const sessionKey = `mcp:session:${agentId}:${mcpId}`;
+    const sessionKey = this.buildSessionKey(agentId, mcpId, scopeKey);
     await this.redisClient.del(sessionKey).catch(() => {
       /* noop */
     });
@@ -1246,10 +1554,10 @@ export class McpProxy {
       mcpId,
       "POST",
       initBody,
-      userId
+      scopeKey
     );
 
-    await initResponse.json(); // consume response
+    await initResponse.text(); // consume response (may be JSON or SSE-framed)
 
     // Send notifications/initialized
     const notifyBody = JSON.stringify({
@@ -1262,12 +1570,160 @@ export class McpProxy {
       mcpId,
       "POST",
       notifyBody,
-      userId
+      scopeKey
     ).catch(() => {
       /* noop */
     });
 
     logger.info("Re-initialized MCP session", { mcpId, agentId });
+  }
+
+  /**
+   * Shared helper: on 401 during tool discovery, start the OAuth auth-code
+   * flow and surface the "Connect X" link to the user via onAuthRequired.
+   * Silently noops on failure — caller already degrades to `{ tools: [] }`.
+   */
+  private async fireAuthCodeFlowFromDiscovery(params: {
+    mcpId: string;
+    agentId: string;
+    httpServer: HttpMcpServerConfig;
+    wwwAuthenticate: string | null;
+    scopeKey: string;
+    tokenData: any;
+  }): Promise<void> {
+    const { mcpId, agentId, httpServer, wwwAuthenticate, scopeKey, tokenData } =
+      params;
+    const userId = tokenData?.userId || scopeKey;
+    const channelId = tokenData?.channelId || "";
+    const conversationId = tokenData?.conversationId || "";
+    const platform = tokenData?.platform;
+
+    const result = await this.tryAutoAuthCodeFlow({
+      mcpId,
+      agentId,
+      userId,
+      scopeKey,
+      httpServer,
+      wwwAuthenticate,
+      platform: platform ?? "",
+      channelId,
+      conversationId,
+      teamId: tokenData?.teamId,
+      connectionId: tokenData?.connectionId,
+    });
+    if (!result || !this.onAuthRequired) return;
+
+    await this.onAuthRequired(
+      agentId,
+      userId,
+      mcpId,
+      result,
+      channelId,
+      conversationId,
+      tokenData?.teamId,
+      tokenData?.connectionId,
+      platform
+    ).catch((err) =>
+      logger.error(
+        { mcpId, error: String(err) },
+        "onAuthRequired callback failed (discovery)"
+      )
+    );
+  }
+
+  /**
+   * Compute the credential scope key from the server config + request context.
+   * Returns `channel-<channelId>` when `authScope === "channel"` (and channelId
+   * is present), otherwise `userId` for per-user scope.
+   */
+  private computeScopeKey(
+    httpServer: HttpMcpServerConfig,
+    userId: string,
+    channelId: string | undefined
+  ): string {
+    if (httpServer.authScope === "channel" && channelId) {
+      return `channel-${channelId}`;
+    }
+    return userId;
+  }
+
+  /**
+   * Build a Redis key for the upstream Mcp-Session-Id associated with a
+   * specific (agent, mcp, scope) triple. Scoping by scopeKey prevents two
+   * users (or user-vs-channel credentials) from sharing a single upstream
+   * session, which would leak context across scopes.
+   */
+  private buildSessionKey(
+    agentId: string,
+    mcpId: string,
+    scopeKey?: string
+  ): string {
+    const scope = scopeKey ?? "_unscoped";
+    return `mcp:session:${agentId}:${mcpId}:${scope}`;
+  }
+
+  /**
+   * Auto-start MCP OAuth 2.1 authorization-code + PKCE flow when an upstream
+   * returns 401. Uses WWW-Authenticate header to walk the RFC 9728 → 8414 →
+   * 7591 discovery chain. Returns a payload for `onAuthRequired`, or null on
+   * failure (caller should fall back to device-auth).
+   */
+  private async tryAutoAuthCodeFlow(params: {
+    mcpId: string;
+    agentId: string;
+    userId: string;
+    scopeKey: string;
+    httpServer: HttpMcpServerConfig;
+    wwwAuthenticate: string | null;
+    platform: string;
+    channelId: string;
+    conversationId: string;
+    teamId?: string;
+    connectionId?: string;
+  }): Promise<{
+    status: "login_required";
+    url: string;
+    message: string;
+  } | null> {
+    if (!this.publicGatewayUrl) {
+      logger.warn("Auth-code flow skipped: publicGatewayUrl not configured", {
+        mcpId: params.mcpId,
+      });
+      return null;
+    }
+
+    try {
+      const redirectUri = `${this.publicGatewayUrl.replace(/\/+$/, "")}/mcp/oauth/callback`;
+      const { authorizationUrl } = await startAuthCodeFlow({
+        redis: this.redisClient,
+        secretStore: this.secretStore,
+        mcpId: params.mcpId,
+        upstreamUrl: params.httpServer.upstreamUrl,
+        agentId: params.agentId,
+        userId: params.userId,
+        scopeKey: params.scopeKey,
+        wwwAuthenticate: params.wwwAuthenticate,
+        redirectUri,
+        staticOauth: params.httpServer.oauth,
+        platform: params.platform,
+        channelId: params.channelId,
+        conversationId: params.conversationId,
+        teamId: params.teamId,
+        connectionId: params.connectionId,
+      });
+      return {
+        status: "login_required",
+        url: authorizationUrl,
+        message:
+          "Authentication is required. STOP calling tools and show the user this login link. Do NOT retry this tool call — wait for the user to complete login in their browser first.",
+      };
+    } catch (error) {
+      logger.warn("Auto auth-code flow failed", {
+        mcpId: params.mcpId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
   }
 
   /**

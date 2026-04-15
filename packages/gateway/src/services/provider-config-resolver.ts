@@ -10,7 +10,9 @@ export interface ResolvedMcpRegistryServer {
 }
 
 export class ProviderConfigResolver {
-  constructor(private readonly providerRegistryService: ProviderRegistryService) {}
+  constructor(
+    private readonly providerRegistryService: ProviderRegistryService
+  ) {}
 
   async getProviderConfigs(): Promise<Record<string, ProviderConfigEntry>> {
     return this.providerRegistryService.getProviderConfigs();

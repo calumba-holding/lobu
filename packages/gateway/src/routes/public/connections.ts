@@ -432,7 +432,7 @@ export function createConnectionCrudRoutes(
     const connections = await manager.listConnections();
     const targets = new Map<
       string,
-      { platform: string; defaultTarget?: string }
+      { platform: string; defaultTarget?: string; agentId?: string }
     >();
 
     for (const connection of connections) {
@@ -451,6 +451,9 @@ export function createConnectionCrudRoutes(
             manager,
             connection.id
           ),
+          // Expose the owning agent so test scripts can route to the
+          // configured agent instead of a placeholder like `test-slack`.
+          agentId: connection.templateAgentId,
         });
       }
     }

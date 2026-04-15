@@ -161,6 +161,24 @@ export function createGatewayApp(
   }
   logger.debug("Module endpoints registered");
 
+  // MCP OAuth auth-code callback (public — browser-facing).
+  // MUST register BEFORE the MCP proxy mount at /mcp, otherwise the proxy's
+  // catch-all `/:mcpId/*` route swallows /mcp/oauth/callback.
+  if (coreServices) {
+    const { createMcpOAuthRoutes } = require("../routes/public/mcp-oauth");
+    const mcpOAuthRouter = createMcpOAuthRoutes({
+      redis: coreServices.getQueue().getRedisClient(),
+      secretStore: coreServices.getSecretStore(),
+      publicGatewayUrl: coreServices.getPublicGatewayUrl(),
+      coreServices,
+      chatInstanceManager: chatInstanceManager ?? undefined,
+    });
+    app.route("", mcpOAuthRouter);
+    logger.debug(
+      "MCP OAuth callback route enabled at :8080/mcp/oauth/callback"
+    );
+  }
+
   // MCP proxy routes (Hono)
   if (mcpProxy) {
     // Handle root path requests with X-Mcp-Id header
@@ -178,8 +196,7 @@ export function createGatewayApp(
 
   // File routes (already Hono) - uses platform registry for per-platform file handling
   if (platformRegistry && coreServices) {
-    const { ArtifactStore } = require("../files/artifact-store");
-    const artifactStore = new ArtifactStore();
+    const artifactStore = coreServices.getArtifactStore();
     const { createFileRoutes } = require("../routes/internal/files");
     const fileRouter = createFileRoutes(
       platformRegistry,
@@ -304,7 +321,6 @@ export function createGatewayApp(
           const pending = JSON.parse(raw);
           const pattern = `/mcp/${pending.mcpId}/tools/${pending.toolName}`;
           const expiresMap: Record<string, number | null> = {
-            once: Date.now() + 60_000,
             "1h": Date.now() + 3_600_000,
             "24h": Date.now() + 86_400_000,
             always: null,
@@ -1295,21 +1311,26 @@ export async function startGateway(config: GatewayConfig): Promise<void> {
     if (fileLoadedAgents.length > 0) {
       for (const agent of fileLoadedAgents) {
         if (!agent.connections?.length) continue;
+        // Look up by stable id — `(platform, templateAgentId)` alone collapses
+        // multi-connection agents (e.g. two Slack workspaces) into one seed.
+        const existingForAgent = await chatInstanceManager.listConnections({
+          platform: undefined,
+          templateAgentId: agent.agentId,
+        });
+        const existingIds = new Set(existingForAgent.map((c: any) => c.id));
         for (const conn of agent.connections) {
-          const existing = await chatInstanceManager.listConnections({
-            platform: conn.type,
-            templateAgentId: agent.agentId,
-          });
-          if (existing.length > 0) continue;
+          if (existingIds.has(conn.id)) continue;
           try {
             await chatInstanceManager.addConnection(
               conn.type,
               agent.agentId,
               { platform: conn.type as any, ...conn.config },
-              { allowGroups: true }
+              { allowGroups: true },
+              {},
+              conn.id
             );
             logger.debug(
-              `Created ${conn.type} connection for agent "${agent.agentId}"`
+              `Created ${conn.type} connection for agent "${agent.agentId}" as "${conn.id}"`
             );
           } catch (err) {
             logger.error(

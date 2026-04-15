@@ -29,6 +29,8 @@ import { AgentSettingsStore, AuthProfilesManager } from "../auth/settings";
 import { ModelPreferenceStore } from "../auth/settings/model-preference-store";
 import { UserAgentsStore } from "../auth/user-agents-store";
 import { ChannelBindingService } from "../channels";
+import { ConversationStateStore } from "../connections/conversation-state-store";
+import { createGatewayStateAdapter } from "../connections/state-adapter";
 import { registerBuiltInCommands } from "../commands/built-in-commands";
 import type { AgentConfig, GatewayConfig } from "../config";
 import type { RuntimeProviderCredentialResolver } from "../embedded";
@@ -69,7 +71,7 @@ import { BedrockModelCatalog } from "./bedrock-model-catalog";
 import { BedrockOpenAIService } from "./bedrock-openai-service";
 import { ImageGenerationService } from "./image-generation-service";
 import { InstructionService } from "./instruction-service";
-import { RedisSessionStore, SessionManager } from "./session-manager";
+import { SessionManager, StateAdapterSessionStore } from "./session-manager";
 import { SettingsResolver } from "./settings-resolver";
 import { ProviderConfigResolver } from "./provider-config-resolver";
 import { ProviderRegistryService } from "./provider-registry-service";
@@ -325,7 +327,11 @@ export class CoreServices {
 
     const redisClient = this.queue.getRedisClient();
 
-    const sessionStore = new RedisSessionStore(this.queue);
+    const stateAdapter = await createGatewayStateAdapter(redisClient);
+    await stateAdapter.connect();
+    const sessionStore = new StateAdapterSessionStore(
+      new ConversationStateStore(stateAdapter)
+    );
     this.sessionManager = new SessionManager(sessionStore);
     logger.debug("Session manager initialized");
 
@@ -761,9 +767,10 @@ export class CoreServices {
       secretStore: this.secretStore,
       toolCache: mcpToolCache,
       grantStore: this.grantStore,
+      publicGatewayUrl: this.config.mcp.publicGatewayUrl,
     });
     this.mcpProxy.onToolBlocked = async (
-      _requestId,
+      requestId,
       agentId,
       userId,
       mcpId,
@@ -776,6 +783,7 @@ export class CoreServices {
       connectionId
     ) => {
       await this.interactionService?.postToolApproval(
+        requestId,
         agentId,
         userId,
         conversationId,

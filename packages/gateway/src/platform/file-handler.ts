@@ -1,19 +1,15 @@
 /**
  * File handler interface for platform-specific file operations.
+ *
+ * Inbound files are NOT handled here — `MessageHandlerBridge` fetches each
+ * inbound attachment via the chat SDK's `Attachment.fetchData()`, publishes
+ * it as a gateway artifact, and forwards a signed download URL on
+ * `platformMetadata.files[].downloadUrl`. This interface only exists for
+ * outbound uploads where the platform's native file API is preferred (e.g.
+ * Slack `files.uploadV2`, Telegram `sendDocument`).
  */
 
 import type { Readable } from "node:stream";
-
-export interface FileMetadata {
-  id: string;
-  name: string;
-  mimetype?: string;
-  size: number;
-  url: string;
-  downloadUrl?: string;
-  permalink?: string;
-  timestamp?: number;
-}
 
 export interface FileUploadResult {
   fileId: string;
@@ -36,33 +32,8 @@ export interface FileUploadOptions {
 }
 
 export interface IFileHandler {
-  /**
-   * Download a file by its platform-specific ID.
-   * Each platform implementation handles its own authentication internally.
-   */
-  downloadFile(
-    fileId: string
-  ): Promise<{ stream: Readable; metadata: FileMetadata }>;
-
   uploadFile(
     fileStream: Readable,
     options: FileUploadOptions
   ): Promise<FileUploadResult>;
-
-  generateFileToken(
-    sessionKey: string,
-    fileId: string,
-    expiresIn?: number
-  ): string;
-
-  validateFileToken(token: string): {
-    valid: boolean;
-    sessionKey?: string;
-    fileId?: string;
-    error?: string;
-  };
-
-  getSessionFiles(sessionKey: string): string[];
-
-  cleanupSession(sessionKey: string): void;
 }

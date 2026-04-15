@@ -27,6 +27,17 @@ const providerSchema = z
 
 const connectionSchema = z.object({
   type: z.string(),
+  /**
+   * Optional disambiguator when an agent has multiple connections of the same
+   * type (e.g. two Slack workspaces). Slugged and appended to the stable
+   * connection ID: `{agent}-{type}-{name}`. Omit for single-connection setups.
+   */
+  name: z
+    .string()
+    .regex(/^[a-z0-9][a-z0-9-]*$/, {
+      message: "connection name must be lowercase alphanumeric with hyphens",
+    })
+    .optional(),
   /** Platform-specific config (e.g. `{ botToken: "$BOT_TOKEN" }`). */
   config: z.record(z.string(), z.string()),
 });
@@ -43,12 +54,27 @@ const mcpOAuthSchema = z.object({
 });
 
 const mcpServerSchema = z.object({
+  /**
+   * Transport kind. `streamable-http` (default for HTTP URLs) posts to a single
+   * endpoint and accepts either JSON or SSE-framed responses per the MCP spec.
+   * `sse` is the legacy transport with a separate /sse GET channel. `stdio`
+   * runs a local command.
+   */
+  type: z.enum(["streamable-http", "sse", "stdio"]).optional(),
   url: z.string().optional(),
   command: z.string().optional(),
   args: z.array(z.string()).optional(),
   env: z.record(z.string(), z.string()).optional(),
   headers: z.record(z.string(), z.string()).optional(),
   oauth: mcpOAuthSchema.optional(),
+  /**
+   * Credential scope for OAuth-authenticated MCPs.
+   * - `"user"` (default): each chat user logs in separately. Safe default.
+   * - `"channel"`: a single credential is shared across all users in a chat
+   *   channel/conversation. Use only for shared-data integrations (e.g. team
+   *   wikis) where per-user attribution isn't required.
+   */
+  auth_scope: z.enum(["user", "channel"]).optional(),
 });
 
 // ── Skills ──────────────────────────────────────────────────────────────────

@@ -31,7 +31,35 @@ export interface FileLoadedAgent {
     key?: string;
     secretRef?: string;
   }>;
-  connections: Array<{ type: string; config: Record<string, string> }>;
+  connections: Array<{
+    /** Stable, human-readable ID derived from agentId + type (+ name). */
+    id: string;
+    type: string;
+    config: Record<string, string>;
+  }>;
+}
+
+/** Slugify agent IDs and platform names for use in connection IDs. */
+function slugifyForConnectionId(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/**
+ * Build the stable connection ID: `{agent}-{type}` or `{agent}-{type}-{name}`.
+ * Used to make webhook URLs (e.g. `/api/v1/webhooks/<id>`) survive Redis
+ * flushes and fresh-clone setups — the ID is a pure function of lobu.toml.
+ */
+export function buildStableConnectionId(
+  agentId: string,
+  type: string,
+  name?: string
+): string {
+  const parts = [slugifyForConnectionId(agentId), slugifyForConnectionId(type)];
+  if (name) parts.push(slugifyForConnectionId(name));
+  return parts.join("-");
 }
 
 // ── Main Entry Point ──────────────────────────────────────────────────────
@@ -279,6 +307,9 @@ async function buildAgentConfig(
         args: mcp.args,
         headers: mcp.headers,
       };
+      if (mcp.auth_scope) {
+        mapped.authScope = mcp.auth_scope;
+      }
       if (mcp.oauth) {
         mapped.oauth = {
           authUrl: mcp.oauth.auth_url,
@@ -368,8 +399,25 @@ async function buildAgentConfig(
     .filter((c) => c.key || c.secretRef);
 
   // Connections
+  // Reject duplicate `(type, name)` pairs so the stable ID derivation stays
+  // collision-free. Users must set an explicit `name` when they want >1
+  // connection of the same platform under the same agent.
+  const seenConnKeys = new Set<string>();
+  for (const conn of agentConfig.connections) {
+    const key = `${conn.type}:${conn.name ?? ""}`;
+    if (seenConnKeys.has(key)) {
+      throw new Error(
+        conn.name
+          ? `agent "${agentId}" has duplicate connection (type=${conn.type}, name=${conn.name})`
+          : `agent "${agentId}" has multiple "${conn.type}" connections — add a unique \`name = "..."\` to each to disambiguate`
+      );
+    }
+    seenConnKeys.add(key);
+  }
+
   const connections = agentConfig.connections
     .map((conn) => ({
+      id: buildStableConnectionId(agentId, conn.type, conn.name),
       type: conn.type,
       config: Object.fromEntries(
         Object.entries(conn.config).map(([k, v]) => [

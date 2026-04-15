@@ -1,0 +1,213 @@
+import { DEFAULTS } from "@lobu/core";
+import type { StateAdapter } from "chat";
+import type { ThreadSession } from "../session";
+
+interface SessionThreadIndex {
+  sessionKey: string;
+}
+
+export interface HistoryEntry {
+  role: "user" | "assistant";
+  content: string;
+  authorName?: string;
+  timestamp: number;
+}
+
+export interface HistoryMessage {
+  role: "user" | "assistant";
+  content: string;
+  name?: string;
+}
+
+type HistoryChannelIndex = Record<string, number>;
+
+export const MAX_HISTORY_MESSAGES = 10;
+export const HISTORY_TTL_MS = 86_400_000; // 24 hours
+export const SESSION_TTL_MS = DEFAULTS.SESSION_TTL_MS;
+const HISTORY_INDEX_LOCK_TTL_MS = 5_000;
+
+export function historyKey(connectionId: string, channelId: string): string {
+  return `history:${connectionId}:${channelId}`;
+}
+
+export function historyIndexKey(connectionId: string): string {
+  return `history_index:${connectionId}`;
+}
+
+export function sessionKey(sessionId: string): string {
+  return `session:${sessionId}`;
+}
+
+export function threadIndexKey(channelId: string, threadTs: string): string {
+  return `conversation_index:${channelId}:${threadTs}`;
+}
+
+/**
+ * Unified conversation-scoped state backed by the Chat SDK StateAdapter.
+ * Owns both sliding-window history and thread session metadata so chat state
+ * lives behind a single abstraction even when Redis is the underlying store.
+ */
+export class ConversationStateStore {
+  constructor(private readonly state: StateAdapter) {}
+
+  async getSession(sessionId: string): Promise<ThreadSession | null> {
+    return (await this.state.get<ThreadSession>(sessionKey(sessionId))) ?? null;
+  }
+
+  async setSession(
+    sessionId: string,
+    session: ThreadSession,
+    ttlMs: number = SESSION_TTL_MS
+  ): Promise<void> {
+    await Promise.all([
+      this.state.set(sessionKey(sessionId), session, ttlMs),
+      this.state.set(
+        threadIndexKey(session.channelId, session.conversationId),
+        { sessionKey: sessionId } satisfies SessionThreadIndex,
+        ttlMs
+      ),
+    ]);
+  }
+
+  async deleteSession(sessionId: string): Promise<void> {
+    const session = await this.getSession(sessionId);
+    await this.state.delete(sessionKey(sessionId));
+
+    if (session?.conversationId) {
+      await this.state.delete(
+        threadIndexKey(session.channelId, session.conversationId)
+      );
+    }
+  }
+
+  async getSessionByThread(
+    channelId: string,
+    threadTs: string
+  ): Promise<ThreadSession | null> {
+    const index = await this.state.get<SessionThreadIndex>(
+      threadIndexKey(channelId, threadTs)
+    );
+    if (!index?.sessionKey) {
+      return null;
+    }
+    return this.getSession(index.sessionKey);
+  }
+
+  async getHistory(
+    connectionId: string,
+    channelId: string
+  ): Promise<HistoryMessage[]> {
+    const entries = await this.getEntries(connectionId, channelId);
+
+    return entries.slice(-MAX_HISTORY_MESSAGES).map((entry) => ({
+      role: entry.role,
+      content: entry.content,
+      name: entry.authorName,
+    }));
+  }
+
+  async getEntries(
+    connectionId: string,
+    channelId: string
+  ): Promise<HistoryEntry[]> {
+    return this.state.getList<HistoryEntry>(
+      historyKey(connectionId, channelId)
+    );
+  }
+
+  async appendHistory(
+    connectionId: string,
+    channelId: string,
+    entry: HistoryEntry
+  ): Promise<void> {
+    await Promise.all([
+      this.trackHistoryChannel(connectionId, channelId),
+      this.state.appendToList(historyKey(connectionId, channelId), entry, {
+        maxLength: MAX_HISTORY_MESSAGES,
+        ttlMs: HISTORY_TTL_MS,
+      }),
+    ]);
+  }
+
+  async clearHistory(connectionId: string, channelId: string): Promise<void> {
+    await Promise.all([
+      this.state.delete(historyKey(connectionId, channelId)),
+      this.removeHistoryChannel(connectionId, channelId),
+    ]);
+  }
+
+  async hasHistory(connectionId: string, channelId: string): Promise<boolean> {
+    const entries = await this.getEntries(connectionId, channelId);
+    return entries.length > 0;
+  }
+
+  async listHistoryChannels(connectionId: string): Promise<string[]> {
+    const index = await this.state.get<HistoryChannelIndex>(
+      historyIndexKey(connectionId)
+    );
+    if (!index) return [];
+    return Object.keys(index);
+  }
+
+  async clearAllHistory(connectionId: string): Promise<number> {
+    const channels = await this.listHistoryChannels(connectionId);
+    await Promise.all([
+      ...channels.map((channelId) =>
+        this.state.delete(historyKey(connectionId, channelId))
+      ),
+      this.state.delete(historyIndexKey(connectionId)),
+    ]);
+    return channels.length;
+  }
+
+  private async trackHistoryChannel(
+    connectionId: string,
+    channelId: string
+  ): Promise<void> {
+    await this.updateHistoryIndex(connectionId, (index) => {
+      index[channelId] = Date.now();
+      return index;
+    });
+  }
+
+  private async removeHistoryChannel(
+    connectionId: string,
+    channelId: string
+  ): Promise<void> {
+    await this.updateHistoryIndex(connectionId, (index) => {
+      delete index[channelId];
+      return index;
+    });
+  }
+
+  private async updateHistoryIndex(
+    connectionId: string,
+    update: (index: HistoryChannelIndex) => HistoryChannelIndex
+  ): Promise<void> {
+    const lockId = `lock:${historyIndexKey(connectionId)}`;
+    const lock = await this.state
+      .acquireLock(lockId, HISTORY_INDEX_LOCK_TTL_MS)
+      .catch(() => null);
+
+    try {
+      const current =
+        (await this.state.get<HistoryChannelIndex>(
+          historyIndexKey(connectionId)
+        )) ?? {};
+      const next = update({ ...current });
+      if (Object.keys(next).length === 0) {
+        await this.state.delete(historyIndexKey(connectionId));
+      } else {
+        await this.state.set(
+          historyIndexKey(connectionId),
+          next,
+          HISTORY_TTL_MS
+        );
+      }
+    } finally {
+      if (lock) {
+        await this.state.releaseLock(lock).catch(() => undefined);
+      }
+    }
+  }
+}

@@ -1,4 +1,4 @@
-import { createLogger } from "@lobu/core";
+import { createLogger, getJsonValue, setJsonValue } from "@lobu/core";
 
 const logger = createLogger("mcp-tool-cache");
 
@@ -39,16 +39,11 @@ export class McpToolCache {
   ): Promise<CachedMcpServer | null> {
     const key = this.buildKey(mcpId, agentId);
     try {
-      const cached = await this.redisClient.get(key);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        // Backward compat: if cached value is an array, it's old format (tools only)
-        if (Array.isArray(parsed)) {
-          return { tools: parsed as McpTool[] };
-        }
-        return parsed as CachedMcpServer;
+      const parsed = await getJsonValue<CachedMcpServer>(this.redisClient, key);
+      if (!parsed) {
+        return null;
       }
-      return null;
+      return parsed;
     } catch (error) {
       logger.error("Failed to read tool cache", { key, error });
       return null;
@@ -62,12 +57,7 @@ export class McpToolCache {
   ): Promise<void> {
     const key = this.buildKey(mcpId, agentId);
     try {
-      await this.redisClient.set(
-        key,
-        JSON.stringify(info),
-        "EX",
-        CACHE_TTL_SECONDS
-      );
+      await setJsonValue(this.redisClient, key, info, CACHE_TTL_SECONDS);
     } catch (error) {
       logger.error("Failed to write tool cache", { key, error });
     }

@@ -29,7 +29,15 @@ export interface LobuAgentConfig {
     key?: string;
     secretRef?: string;
   }>;
-  connections?: Array<{ type: string; [key: string]: string }>;
+  /**
+   * Platform connections. Use `name` to disambiguate when an agent has
+   * multiple connections of the same `type` (e.g. two Slack workspaces).
+   */
+  connections?: Array<{
+    type: string;
+    name?: string;
+    [key: string]: string | undefined;
+  }>;
   skills?: string[];
   network?: { allowed?: string[]; denied?: string[] };
   nixPackages?: string[];
@@ -313,26 +321,50 @@ export class Lobu {
   private async seedConnections(): Promise<void> {
     if (!this.chatInstanceManager) return;
 
+    const { buildStableConnectionId } = await import("./config/file-loader");
+
     for (const agent of this.agentConfigs) {
       if (!agent.connections?.length) continue;
 
+      // Reject duplicate `(type, name)` pairs so stable IDs stay collision-free.
+      const seenConnKeys = new Set<string>();
       for (const conn of agent.connections) {
-        const { type, ...configFields } = conn;
+        const key = `${conn.type}:${conn.name ?? ""}`;
+        if (seenConnKeys.has(key)) {
+          throw new Error(
+            conn.name
+              ? `agent "${agent.id}" has duplicate connection (type=${conn.type}, name=${conn.name})`
+              : `agent "${agent.id}" has multiple "${conn.type}" connections — add a unique \`name\` to each to disambiguate`
+          );
+        }
+        seenConnKeys.add(key);
+      }
 
-        const existing = await this.chatInstanceManager.listConnections({
-          platform: type,
-          templateAgentId: agent.id,
-        });
-        if (existing.length > 0) continue;
+      // Pre-fetch existing connections once per agent and match by stable id.
+      const existingForAgent = await this.chatInstanceManager.listConnections({
+        platform: undefined,
+        templateAgentId: agent.id,
+      });
+      const existingIds = new Set(existingForAgent.map((c: any) => c.id));
+
+      for (const conn of agent.connections) {
+        const { type, name, ...configFields } = conn;
+        const stableId = buildStableConnectionId(agent.id, type, name);
+
+        if (existingIds.has(stableId)) continue;
 
         try {
           await this.chatInstanceManager.addConnection(
             type,
             agent.id,
             { platform: type as any, ...configFields },
-            { allowGroups: true }
+            { allowGroups: true },
+            {},
+            stableId
           );
-          logger.debug(`Created ${type} connection for agent "${agent.id}"`);
+          logger.debug(
+            `Created ${type} connection for agent "${agent.id}" as "${stableId}"`
+          );
         } catch (err) {
           logger.error(
             `Failed to create ${type} connection for agent "${agent.id}"`,

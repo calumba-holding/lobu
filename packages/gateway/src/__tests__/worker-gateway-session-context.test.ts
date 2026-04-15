@@ -34,7 +34,8 @@ describe("WorkerGateway session context", () => {
           agentInstructions: "",
           platformInstructions: "",
           networkInstructions: "",
-          skillsInstructions: "## Skills\n\n- **Custom Skill** (`owner/custom-skill`)",
+          skillsInstructions:
+            "## Skills\n\n- **Custom Skill** (`owner/custom-skill`)",
           mcpStatus: [],
         }),
       } as any,

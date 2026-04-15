@@ -29,7 +29,10 @@ export class ProviderRegistryService {
   private rawLoaded?: ProvidersConfigFile;
   private loadAttempted = false;
 
-  constructor(configUrl?: string, preloadedProviders?: ProviderRegistryEntry[]) {
+  constructor(
+    configUrl?: string,
+    preloadedProviders?: ProviderRegistryEntry[]
+  ) {
     this.configUrl = configUrl;
     if (preloadedProviders) {
       const config: ProvidersConfigFile = { providers: preloadedProviders };
@@ -79,9 +82,7 @@ export class ProviderRegistryService {
       ) {
         const response = await fetch(this.configUrl);
         if (!response.ok) {
-          logger.error(
-            `Failed to fetch providers config: ${response.status}`
-          );
+          logger.error(`Failed to fetch providers config: ${response.status}`);
           return null;
         }
         raw = await response.text();

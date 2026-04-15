@@ -12,6 +12,7 @@ import type { AgentSettingsStore } from "./auth/settings";
 import type { ModelPreferenceStore } from "./auth/settings/model-preference-store";
 import type { UserAgentsStore } from "./auth/user-agents-store";
 import type { ChannelBindingService } from "./channels";
+import type { ArtifactStore } from "./files/artifact-store";
 import type { WorkerGateway } from "./gateway";
 import type { IMessageQueue, QueueProducer } from "./infrastructure/queue";
 import type { InteractionService } from "./interactions";
@@ -42,6 +43,7 @@ export interface CoreServices {
   getModelPreferenceStore(): ModelPreferenceStore | undefined;
   getOAuthStateStore(): ProviderOAuthStateStore | undefined;
   getPublicGatewayUrl(): string;
+  getArtifactStore(): ArtifactStore;
   getSessionManager(): ISessionManager;
   getInstructionService(): InstructionService | undefined;
   getInteractionService(): InteractionService;

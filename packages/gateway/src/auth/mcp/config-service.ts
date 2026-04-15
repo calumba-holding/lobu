@@ -20,6 +20,15 @@ export interface HttpMcpServerConfig {
   oauth?: McpOAuthConfig;
   inputs?: McpInput[];
   headers?: Record<string, string>;
+  /**
+   * Credential scope for OAuth flows.
+   * - "user" (default): per-user credential — each chat user authenticates separately.
+   * - "channel": credential is shared across all users in a conversation/channel
+   *   (keyed by channelId). For shared-data integrations where per-user identity
+   *   isn't required. Must be explicitly opted in via `auth_scope = "channel"`
+   *   in lobu.toml.
+   */
+  authScope?: "user" | "channel";
 }
 
 interface WorkerMcpConfig {
@@ -238,12 +247,21 @@ export class McpConfigService {
    * Return global MCP server configs in settings-compatible format.
    */
   async getGlobalMcpServers(): Promise<
-    Record<string, { url?: string; type?: "sse" | "stdio" }>
+    Record<string, { url?: string; type?: "sse" | "stdio" | "streamable-http" }>
   > {
     const config = await this.loadConfig();
-    const result: Record<string, { url?: string; type?: "sse" | "stdio" }> = {};
+    const result: Record<
+      string,
+      { url?: string; type?: "sse" | "stdio" | "streamable-http" }
+    > = {};
     for (const [id, raw] of Object.entries(config.rawServers)) {
-      const type = raw.type === "stdio" ? ("stdio" as const) : ("sse" as const);
+      const declared = raw.type;
+      const type: "sse" | "stdio" | "streamable-http" =
+        declared === "stdio"
+          ? "stdio"
+          : declared === "streamable-http"
+            ? "streamable-http"
+            : "sse";
       result[id] = { url: raw.url, type };
     }
     return result;
@@ -348,6 +366,7 @@ function normalizeConfig(config: { mcpServers: Record<string, any> }) {
           cloned.headers && typeof cloned.headers === "object"
             ? cloned.headers
             : undefined,
+        authScope: parseAuthScope(cloned),
       });
     }
   }
@@ -386,7 +405,19 @@ function toHttpServerConfig(
       cloned.headers && typeof cloned.headers === "object"
         ? cloned.headers
         : undefined,
+    authScope: parseAuthScope(cloned),
   };
+}
+
+function parseAuthScope(raw: any): "user" | "channel" | undefined {
+  const value =
+    typeof raw.authScope === "string"
+      ? raw.authScope
+      : typeof raw.auth_scope === "string"
+        ? raw.auth_scope
+        : undefined;
+  if (value === "user" || value === "channel") return value;
+  return undefined;
 }
 
 function cloneConfig(config: any) {

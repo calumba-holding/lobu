@@ -100,6 +100,7 @@ export type {
 } from "./provider-config-types";
 // Redis & worker helpers
 export * from "./redis/base-store";
+export * from "./redis/json-helpers";
 export * from "./secret-refs";
 // Observability
 export { getSentry, initSentry } from "./sentry";

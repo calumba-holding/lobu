@@ -1150,7 +1150,7 @@ export function createAgentApi(
       if (!requestId || !decision) {
         return c.json({ error: "Missing requestId or decision" }, 400);
       }
-      const validDecisions = ["once", "1h", "24h", "always", "deny"];
+      const validDecisions = ["1h", "24h", "always", "deny"];
       if (!validDecisions.includes(decision)) {
         return c.json(
           {

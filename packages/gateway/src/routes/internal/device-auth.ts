@@ -12,7 +12,7 @@ const logger = createLogger("device-auth");
 const DEFAULT_MCP_SCOPE = "mcp:read mcp:write profile:read";
 const DEVICE_CODE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
 
-interface StoredCredential {
+export interface StoredCredential {
   accessToken: string;
   refreshToken?: string;
   expiresAt: number;
@@ -21,6 +21,18 @@ interface StoredCredential {
   tokenUrl: string;
   /** RFC 8707 resource indicator, included in refresh requests. */
   resource?: string;
+  /**
+   * How to authenticate to the token endpoint on refresh.
+   * - `none` — public PKCE client, send no secret.
+   * - `client_secret_basic` — send secret via HTTP Basic header (RFC 6749 §2.3.1 default).
+   * - `client_secret_post` — send secret in form body.
+   *
+   * Omitted → legacy device-code behavior (secret in body, JSON content-type).
+   */
+  tokenEndpointAuthMethod?:
+    | "none"
+    | "client_secret_basic"
+    | "client_secret_post";
 }
 
 interface StoredDeviceAuth {
@@ -275,6 +287,30 @@ async function storeCredential(
 }
 
 /**
+ * Persist an OAuth credential under an opaque scope key.
+ * `scopeKey` is `userId` for per-user scope or `channel-<id>` for channel scope.
+ * Exposed so the MCP auth-code callback can write credentials without importing
+ * internal helpers.
+ */
+export async function storeCredentialForScope(
+  redis: Redis,
+  secretStore: WritableSecretStore,
+  agentId: string,
+  scopeKey: string,
+  mcpId: string,
+  credential: StoredCredential
+): Promise<void> {
+  await storeCredential(
+    redis,
+    secretStore,
+    agentId,
+    scopeKey,
+    mcpId,
+    credential
+  );
+}
+
+/**
  * Delete a stored MCP device-auth credential (logout).
  * Removes both the Redis pointer and the secret value from the store so no
  * orphaned tokens linger for the remainder of the 90-day TTL.
@@ -329,20 +365,41 @@ export async function refreshCredential(
       client_id: credential.clientId,
       refresh_token: credential.refreshToken,
     };
-    if (credential.clientSecret) {
-      body.client_secret = credential.clientSecret;
-    }
     if (credential.resource) {
       body.resource = credential.resource;
     }
 
+    const authMethod = credential.tokenEndpointAuthMethod;
+    const headers: Record<string, string> = { Accept: "application/json" };
+    let requestBody: string;
+
+    if (!authMethod) {
+      // Legacy device-code path — JSON body with secret inline.
+      if (credential.clientSecret) body.client_secret = credential.clientSecret;
+      headers["Content-Type"] = "application/json";
+      requestBody = JSON.stringify(body);
+    } else {
+      // RFC 6749-compliant form-encoded refresh. Auth method drives where the
+      // secret goes.
+      headers["Content-Type"] = "application/x-www-form-urlencoded";
+      if (authMethod === "client_secret_post" && credential.clientSecret) {
+        body.client_secret = credential.clientSecret;
+      } else if (
+        authMethod === "client_secret_basic" &&
+        credential.clientSecret
+      ) {
+        const basic = Buffer.from(
+          `${encodeURIComponent(credential.clientId)}:${encodeURIComponent(credential.clientSecret)}`
+        ).toString("base64");
+        headers.Authorization = `Basic ${basic}`;
+      }
+      requestBody = new URLSearchParams(body).toString();
+    }
+
     const response = await fetch(credential.tokenUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify(body),
+      headers,
+      body: requestBody,
     });
 
     if (!response.ok) {
@@ -372,6 +429,7 @@ export async function refreshCredential(
       clientSecret: credential.clientSecret,
       tokenUrl: credential.tokenUrl,
       resource: credential.resource,
+      tokenEndpointAuthMethod: credential.tokenEndpointAuthMethod,
     };
 
     await storeCredential(

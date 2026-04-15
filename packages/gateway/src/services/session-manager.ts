@@ -1,8 +1,7 @@
 #!/usr/bin/env bun
 
-import { createLogger, DEFAULTS, REDIS_KEYS } from "@lobu/core";
-import type Redis from "ioredis";
-import type { IMessageQueue } from "../infrastructure/queue";
+import { createLogger } from "@lobu/core";
+import type { ConversationStateStore } from "../connections/conversation-state-store";
 import {
   computeSessionKey,
   type ISessionManager,
@@ -13,39 +12,16 @@ import {
 const logger = createLogger("session-manager");
 
 /**
- * Redis-based session storage
- * Sessions are stored with automatic TTL expiration
+ * Session storage backed by the shared conversation state layer.
+ * Thread sessions and chat history now share the same StateAdapter-backed
+ * storage abstraction instead of talking to Redis separately.
  */
-export class RedisSessionStore implements SessionStore {
-  private readonly SESSION_PREFIX = REDIS_KEYS.SESSION;
-  private readonly THREAD_INDEX_PREFIX = "conversation_index:";
-  private readonly DEFAULT_TTL_SECONDS = DEFAULTS.SESSION_TTL_SECONDS;
-  private redis: Redis;
-
-  constructor(queue: IMessageQueue) {
-    // Get Redis client from queue connection pool
-    this.redis = queue.getRedisClient();
-  }
-
-  private getSessionKey(sessionKey: string): string {
-    return `${this.SESSION_PREFIX}${sessionKey}`;
-  }
-
-  private getThreadIndexKey(channelId: string, threadTs: string): string {
-    return `${this.THREAD_INDEX_PREFIX}${channelId}:${threadTs}`;
-  }
+export class StateAdapterSessionStore implements SessionStore {
+  constructor(private readonly conversations: ConversationStateStore) {}
 
   async get(sessionKey: string): Promise<ThreadSession | null> {
     try {
-      const key = this.getSessionKey(sessionKey);
-      const data = await this.redis.get(key);
-
-      if (!data) {
-        return null;
-      }
-
-      // Parse JSON
-      return JSON.parse(data) as ThreadSession;
+      return await this.conversations.getSession(sessionKey);
     } catch (error) {
       logger.error(`Failed to get session ${sessionKey}:`, error);
       return null;
@@ -54,22 +30,7 @@ export class RedisSessionStore implements SessionStore {
 
   async set(sessionKey: string, session: ThreadSession): Promise<void> {
     try {
-      const key = this.getSessionKey(sessionKey);
-      const indexKey = this.getThreadIndexKey(
-        session.channelId,
-        session.conversationId
-      );
-
-      // Atomically set both session and thread index keys
-      const pipeline = this.redis.pipeline();
-      pipeline.setex(key, this.DEFAULT_TTL_SECONDS, JSON.stringify(session));
-      pipeline.setex(
-        indexKey,
-        this.DEFAULT_TTL_SECONDS,
-        JSON.stringify({ sessionKey })
-      );
-      await pipeline.exec();
-
+      await this.conversations.setSession(sessionKey, session);
       logger.debug(`Stored session ${sessionKey}`);
     } catch (error) {
       logger.error(`Failed to set session ${sessionKey}:`, error);
@@ -79,25 +40,7 @@ export class RedisSessionStore implements SessionStore {
 
   async delete(sessionKey: string): Promise<void> {
     try {
-      // Get session first to clean up thread index
-      const session = await this.get(sessionKey);
-
-      const key = this.getSessionKey(sessionKey);
-
-      // Atomically delete both session and thread index keys
-      if (session?.conversationId) {
-        const indexKey = this.getThreadIndexKey(
-          session.channelId,
-          session.conversationId
-        );
-        const pipeline = this.redis.pipeline();
-        pipeline.del(key);
-        pipeline.del(indexKey);
-        await pipeline.exec();
-      } else {
-        await this.redis.del(key);
-      }
-
+      await this.conversations.deleteSession(sessionKey);
       logger.debug(`Deleted session ${sessionKey}`);
     } catch (error) {
       logger.error(`Failed to delete session ${sessionKey}:`, error);
@@ -110,15 +53,7 @@ export class RedisSessionStore implements SessionStore {
     threadTs: string
   ): Promise<ThreadSession | null> {
     try {
-      const indexKey = this.getThreadIndexKey(channelId, threadTs);
-      const indexData = await this.redis.get(indexKey);
-
-      if (!indexData) {
-        return null;
-      }
-
-      const index = JSON.parse(indexData) as { sessionKey: string };
-      return await this.get(index.sessionKey);
+      return await this.conversations.getSessionByThread(channelId, threadTs);
     } catch (error) {
       logger.error(
         `Failed to get session by thread ${channelId}:${threadTs}:`,
@@ -128,9 +63,9 @@ export class RedisSessionStore implements SessionStore {
     }
   }
 
-  /** Optional cleanup - Redis handles this via TTL */
+  /** Optional cleanup - state adapter TTL handles this automatically */
   async cleanup?(): Promise<number> {
-    logger.debug("Redis TTL handles automatic cleanup");
+    logger.debug("StateAdapter TTL handles automatic cleanup");
     return 0;
   }
 }
@@ -254,7 +189,7 @@ export class SessionManager implements ISessionManager {
 
   /**
    * Cleanup expired sessions (for in-memory stores)
-   * Note: Redis-based stores handle this automatically via TTL
+   * Note: state-adapter-backed stores handle this automatically via TTL
    */
   async cleanupExpired(ttl: number): Promise<number> {
     return (await this.store.cleanup?.(ttl)) || 0;

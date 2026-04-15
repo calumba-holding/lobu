@@ -1,5 +1,10 @@
 import { randomBytes } from "node:crypto";
-import { createLogger, type Logger } from "@lobu/core";
+import {
+  createLogger,
+  getdelJsonValue,
+  setJsonValue,
+  type Logger,
+} from "@lobu/core";
 import type Redis from "ioredis";
 
 /**
@@ -32,11 +37,7 @@ export class OAuthStateStore<T extends object> {
       createdAt: Date.now(),
     };
 
-    await this.redis.setex(
-      key,
-      OAuthStateStore.TTL_SECONDS,
-      JSON.stringify(stateData)
-    );
+    await setJsonValue(this.redis, key, stateData, OAuthStateStore.TTL_SECONDS);
 
     const userId =
       typeof (data as { userId?: unknown }).userId === "string"
@@ -58,31 +59,28 @@ export class OAuthStateStore<T extends object> {
     const key = this.getKey(state);
 
     // Get and delete in one operation
-    const data = await this.redis.getdel(key);
+    const stateData = await getdelJsonValue<T & { createdAt: number }>(
+      this.redis,
+      key
+    );
 
-    if (!data) {
+    if (!stateData) {
       this.logger.warn(`Invalid or expired OAuth state: ${state}`);
       return null;
     }
 
-    try {
-      const stateData = JSON.parse(data) as T & { createdAt: number };
-      const stateDataWithUser = stateData as unknown as { userId?: unknown };
-      const userId =
-        typeof stateDataWithUser.userId === "string"
-          ? stateDataWithUser.userId
-          : undefined;
-      this.logger.info(
-        userId
-          ? `Consumed OAuth state for user ${userId}`
-          : "Consumed OAuth state",
-        { state }
-      );
-      return stateData;
-    } catch (error) {
-      this.logger.error(`Failed to parse OAuth state: ${state}`, { error });
-      return null;
-    }
+    const stateDataWithUser = stateData as unknown as { userId?: unknown };
+    const userId =
+      typeof stateDataWithUser.userId === "string"
+        ? stateDataWithUser.userId
+        : undefined;
+    this.logger.info(
+      userId
+        ? `Consumed OAuth state for user ${userId}`
+        : "Consumed OAuth state",
+      { state }
+    );
+    return stateData;
   }
 
   /**

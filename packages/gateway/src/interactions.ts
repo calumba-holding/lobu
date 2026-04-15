@@ -126,8 +126,13 @@ export class InteractionService extends EventEmitter {
   /**
    * Post a tool approval request with duration buttons (non-blocking, fire-and-forget).
    * Emits "tool:approval-needed" for platform renderers.
+   *
+   * `requestId` MUST be the same value the MCP proxy used as the `pending-tool:*`
+   * Redis key. It's embedded into the button `actionId` so the interaction
+   * bridge can look up the pending invocation on click.
    */
   async postToolApproval(
+    requestId: string,
     agentId: string,
     userId: string,
     conversationId: string,
@@ -144,7 +149,7 @@ export class InteractionService extends EventEmitter {
     }
 
     const posted: PostedToolApproval = {
-      id: `ta_${randomUUID()}`,
+      id: requestId,
       agentId,
       userId,
       conversationId,

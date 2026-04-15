@@ -46,64 +46,11 @@ export function createFileRoutes(
 ): Hono<WorkerContext> {
   const router = new Hono<WorkerContext>();
 
-  /**
-   * Download file endpoint for workers
-   * GET /download?fileId=xxx
-   */
-  router.get("/download", authenticateWorker, async (c) => {
-    try {
-      const fileId = c.req.query("fileId");
-      const worker = c.get("worker");
-
-      if (!fileId) {
-        return c.json({ error: "Missing fileId parameter" }, 400);
-      }
-
-      const fileHandler = resolveFileHandler(platformRegistry, {
-        platformName: worker.platform,
-        connectionId: worker.connectionId,
-        channelId: worker.channelId,
-        conversationId: worker.conversationId,
-        teamId: worker.teamId,
-      });
-      if (!fileHandler) {
-        return c.json(
-          {
-            error: `No file handler available for platform ${worker.platform || "unknown"}`,
-          },
-          501
-        );
-      }
-
-      logger.info(
-        `Worker downloading file ${fileId} for conversation ${worker.conversationId}`
-      );
-
-      const { stream, metadata } = await fileHandler.downloadFile(fileId);
-
-      c.header("Content-Type", metadata.mimetype || "application/octet-stream");
-      c.header("Content-Length", metadata.size.toString());
-      c.header(
-        "Content-Disposition",
-        `attachment; filename="${metadata.name}"`
-      );
-
-      const webStream = new ReadableStream({
-        start(controller) {
-          stream.on("data", (chunk: Buffer) => controller.enqueue(chunk));
-          stream.on("end", () => controller.close());
-          stream.on("error", (err: Error) => controller.error(err));
-        },
-      });
-
-      return new Response(webStream, {
-        headers: c.res.headers,
-      });
-    } catch (error) {
-      logger.error("Failed to download file:", error);
-      return c.json({ error: "Failed to download file" }, 500);
-    }
-  });
+  // Worker file downloads are no longer routed through the gateway with a
+  // platform-specific fileId. Inbound attachments are pre-published as
+  // gateway artifacts in `MessageHandlerBridge.ingestAttachments` and the
+  // worker fetches them directly via the signed `/api/v1/files/:artifactId`
+  // public URL embedded in `platformMetadata.files[].downloadUrl`.
 
   /**
    * Upload file endpoint for workers

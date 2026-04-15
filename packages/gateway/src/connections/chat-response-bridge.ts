@@ -1,6 +1,10 @@
 /**
  * Chat response bridge — handles outbound responses from workers back through Chat SDK.
- * Covers platform-specific markdown handling and message chunking.
+ *
+ * Streaming is delegated to Chat SDK: deltas are pushed into an AsyncIterable which
+ * is handed to `target.post()`. The adapter owns throttling, chunking, and
+ * platform-specific rendering (Telegram buffers, Slack streams, etc.), so this
+ * bridge is platform-agnostic.
  */
 
 import { unlink } from "node:fs/promises";
@@ -8,45 +12,101 @@ import { resolve } from "node:path";
 import { createLogger } from "@lobu/core";
 import type { ThreadResponsePayload } from "../infrastructure/queue";
 import { extractSettingsLinkButtons } from "../platform/link-buttons";
-import { chunkMessage, delay } from "../platform/renderer-utils";
 import type { ResponseRenderer } from "../platform/response-renderer";
 import type { ChatInstanceManager } from "./chat-instance-manager";
-import { storeOutgoingHistory } from "./message-handler-bridge";
 
 const logger = createLogger("chat-response-bridge");
 
-function shouldBufferUntilCompletion(platform: string): boolean {
-  return platform === "telegram";
+/**
+ * Construct a minimal Chat SDK `Message`-shaped object from the inbound
+ * sender carried on `platformMetadata`. We only need enough to keep the SDK's
+ * streaming code path happy — it reads `_currentMessage.author.userId` and
+ * `_currentMessage.raw.team_id`/`raw.team` for ephemeral/DM fallback hints.
+ * Passing `{}` crashes the SDK; passing `undefined` silently disables the
+ * recipient hint; a proper Message preserves it.
+ */
+function buildCurrentMessageFromMetadata(
+  threadId: string,
+  platformMetadata: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  const senderId = platformMetadata?.senderId as string | undefined;
+  if (!senderId) return undefined;
+  const senderUsername = platformMetadata?.senderUsername as string | undefined;
+  const senderDisplayName = platformMetadata?.senderDisplayName as
+    | string
+    | undefined;
+  const teamId = platformMetadata?.teamId as string | undefined;
+  return {
+    threadId,
+    text: "",
+    author: {
+      userId: senderId,
+      userName: senderUsername,
+      fullName: senderDisplayName,
+    },
+    raw: teamId ? { team_id: teamId, team: teamId } : {},
+  };
 }
 
-const MESSAGE_CHUNK_SIZE = 4096;
-const CHUNK_DELAY_MS = 500;
-
 /**
- * Format message content for the target platform.
- * Keep everything inside Chat SDK's supported PostableMessage shapes.
- * The Telegram adapter understands markdown itself; passing `{ html: ... }`
- * causes Chat SDK to reject the payload after the adapter has already sent it.
+ * Push-based async iterable: producers call `push(value)` and `close()`;
+ * consumers iterate via `for await (...)`.
  */
-function formatForPlatform(
-  text: string,
-  platform: string
-): { markdown: string } {
-  void platform;
-  return { markdown: text };
+class AsyncPushIterator<T> implements AsyncIterable<T> {
+  private queue: T[] = [];
+  private waiter: ((v: IteratorResult<T>) => void) | null = null;
+  private done = false;
+
+  push(value: T): void {
+    if (this.done) return;
+    if (this.waiter) {
+      const w = this.waiter;
+      this.waiter = null;
+      w({ value, done: false });
+    } else {
+      this.queue.push(value);
+    }
+  }
+
+  close(): void {
+    if (this.done) return;
+    this.done = true;
+    if (this.waiter) {
+      const w = this.waiter;
+      this.waiter = null;
+      w({ value: undefined as unknown as T, done: true });
+    }
+  }
+
+  [Symbol.asyncIterator](): AsyncIterator<T> {
+    return {
+      next: () =>
+        new Promise<IteratorResult<T>>((resolve) => {
+          const first = this.queue.shift();
+          if (first !== undefined) {
+            resolve({ value: first, done: false });
+            return;
+          }
+          if (this.done) {
+            resolve({ value: undefined as unknown as T, done: true });
+            return;
+          }
+          this.waiter = resolve;
+        }),
+    };
+  }
 }
 
-/**
- * Streaming state for progressive message editing.
- */
 interface StreamState {
+  iterator: AsyncPushIterator<string>;
+  streamPromise: Promise<unknown>;
+  /** Accumulated text — kept only so handleCompletion can persist it to history. */
   buffer: string;
-  sentMessage: any | null; // SentMessage from Chat SDK
-  lastEditTime: number;
-  editTimer?: NodeJS.Timeout;
+  /** Set when the adapter's streaming API rejected. Completion posts the buffer. */
+  streamFailed: boolean;
+  /** The resolved Chat SDK target — reused on failure fallback without a second resolveTarget call. */
+  target: any;
 }
-
-const EDIT_INTERVAL_MS = 2000;
 
 interface ResponseContext {
   connectionId: string;
@@ -107,80 +167,77 @@ export class ChatResponseBridge implements ResponseRenderer {
 
     const { connectionId, instance, channelId } = ctx;
     const key = `${channelId}:${payload.conversationId}`;
-    const shouldBuffer = shouldBufferUntilCompletion(ctx.platform);
+    const existing = this.streams.get(key);
 
-    let stream = this.streams.get(key);
+    // Full replacement: close current stream, await delivery, then start fresh.
+    // This only fires in rare error paths (see worker.ts:584).
+    if (payload.isFullReplacement && existing) {
+      existing.iterator.close();
+      try {
+        await existing.streamPromise;
+      } catch (error) {
+        logger.debug(
+          { connectionId, error: String(error) },
+          "Prior stream failed during full-replacement flush"
+        );
+      }
+      this.streams.delete(key);
+    }
+
+    let stream = payload.isFullReplacement ? undefined : existing;
 
     if (!stream) {
-      if (shouldBuffer) {
-        this.streams.set(key, {
-          buffer: payload.delta,
-          sentMessage: null,
-          lastEditTime: Date.now(),
-        });
-        return null;
-      }
-
-      // First delta — send initial message
+      // First delta — open a new stream
       try {
         const target = await this.resolveTarget(
           instance,
           channelId,
           payload.conversationId,
-          (payload.platformMetadata as any)?.responseThreadId
+          (payload.platformMetadata as any)?.responseThreadId,
+          payload.platformMetadata as Record<string, unknown> | undefined
         );
-
-        if (target) {
-          const sentMessage = await target.post(
-            formatForPlatform(payload.delta, ctx.platform) as any
+        if (!target) {
+          logger.warn(
+            { connectionId, channelId },
+            "Failed to resolve target for delta — dropping"
           );
-          stream = {
-            buffer: payload.delta,
-            sentMessage,
-            lastEditTime: Date.now(),
-          };
-          this.streams.set(key, stream);
+          return null;
         }
+
+        const iterator = new AsyncPushIterator<string>();
+        iterator.push(payload.delta);
+        // target.post(AsyncIterable) — the adapter owns throttling + chunking.
+        const newStream: StreamState = {
+          iterator,
+          streamPromise: Promise.resolve(),
+          buffer: payload.delta,
+          streamFailed: false,
+          target,
+        };
+        newStream.streamPromise = Promise.resolve(
+          target.post(iterator as any)
+        ).catch((error) => {
+          newStream.streamFailed = true;
+          logger.warn(
+            { connectionId, error: String(error) },
+            "Adapter stream failed — will post buffered text on completion"
+          );
+        });
+        stream = newStream;
+        this.streams.set(key, stream);
       } catch (error) {
         logger.warn(
           { connectionId, error: String(error) },
-          "Failed to send initial delta"
+          "Failed to open delta stream"
         );
-        // Clean up orphaned stream entry if it was set before the failure
         this.streams.delete(key);
       }
       return null;
     }
 
-    // Append delta
-    if (payload.isFullReplacement) {
-      stream.buffer = payload.delta;
-    } else {
-      stream.buffer += payload.delta;
-    }
-
-    if (shouldBuffer) {
-      return null;
-    }
-
-    // Throttle edits
-    const now = Date.now();
-    if (now - stream.lastEditTime >= EDIT_INTERVAL_MS) {
-      await this.editStreamMessage(stream, connectionId, ctx.platform);
-    } else if (!stream.editTimer) {
-      stream.editTimer = setTimeout(
-        async () => {
-          // Guard against race: stream may have been deleted by handleCompletion
-          // between when this timer was scheduled and when it fires.
-          const current = this.streams.get(key);
-          if (!current) return;
-          current.editTimer = undefined;
-          await this.editStreamMessage(current, connectionId, ctx.platform);
-        },
-        EDIT_INTERVAL_MS - (now - stream.lastEditTime)
-      );
-    }
-
+    // Subsequent delta — push into the live iterator
+    stream.iterator.push(payload.delta);
+    stream.buffer += payload.delta;
     return null;
   }
 
@@ -191,43 +248,58 @@ export class ChatResponseBridge implements ResponseRenderer {
     const ctx = this.extractResponseContext(payload);
     if (!ctx) return;
 
-    const { connectionId, instance, channelId } = ctx;
+    const { connectionId, channelId } = ctx;
     const key = `${channelId}:${payload.conversationId}`;
 
     const stream = this.streams.get(key);
     if (stream) {
-      // Clear edit timer before deleting to prevent stale timer callbacks
-      if (stream.editTimer) {
-        clearTimeout(stream.editTimer);
-        stream.editTimer = undefined;
-      }
-
-      if (stream.buffer.trim()) {
-        await this.sendFinalMessage(
-          stream,
-          instance,
-          channelId,
-          payload.conversationId,
-          connectionId,
-          (payload.platformMetadata as any)?.responseThreadId
+      stream.iterator.close();
+      try {
+        await stream.streamPromise;
+      } catch (error) {
+        logger.debug(
+          { connectionId, error: String(error) },
+          "Adapter stream errored during completion"
         );
       }
-
+      // Fallback: when native streaming rejected (e.g. Slack's chatStream
+      // requires a recipient user/team id that the public-API send path
+      // can't supply), post the accumulated buffer non-streaming so the
+      // response still lands in the thread instead of being silently dropped.
+      if (stream.streamFailed && stream.buffer.trim() && stream.target) {
+        try {
+          await stream.target.post(stream.buffer);
+          logger.info(
+            { connectionId, channelId },
+            "Posted buffered response via non-streaming fallback"
+          );
+        } catch (error) {
+          logger.warn(
+            { connectionId, error: String(error) },
+            "Non-streaming fallback post failed"
+          );
+        }
+      }
       this.streams.delete(key);
     }
 
+    const conversationState =
+      this.manager.getInstance(connectionId)?.conversationState;
+
     // Gap 1: Store outgoing response in history
-    if (stream?.buffer.trim()) {
-      const redis = this.manager.getServices().getQueue().getRedisClient();
-      await storeOutgoingHistory(redis, connectionId, channelId, stream.buffer);
+    if (stream?.buffer.trim() && conversationState) {
+      await conversationState.appendHistory(connectionId, channelId, {
+        role: "assistant",
+        content: stream.buffer,
+        timestamp: Date.now(),
+      });
     }
 
-    // Session reset: clear Redis history and delete session file
+    // Session reset: clear history and delete session file
     if ((payload.platformMetadata as any)?.sessionReset) {
       const agentId = (payload.platformMetadata as any)?.agentId;
       try {
-        const redis = this.manager.getServices().getQueue().getRedisClient();
-        await redis.del(`chat:history:${connectionId}:${channelId}`);
+        await conversationState?.clearHistory(connectionId, channelId);
         logger.info(
           { connectionId, channelId },
           "Cleared chat history for session reset"
@@ -283,10 +355,17 @@ export class ChatResponseBridge implements ResponseRenderer {
     const { connectionId, instance, channelId } = ctx;
     const key = `${channelId}:${payload.conversationId}`;
 
-    // Clean up stream
+    // Clean up stream — close iterator so the adapter call resolves.
     const stream = this.streams.get(key);
-    if (stream?.editTimer) clearTimeout(stream.editTimer);
-    this.streams.delete(key);
+    if (stream) {
+      stream.iterator.close();
+      try {
+        await stream.streamPromise;
+      } catch {
+        // swallow — we're already in error path
+      }
+      this.streams.delete(key);
+    }
 
     // For known error codes, render user-facing guidance without sending users
     // to the retired end-user settings UI.
@@ -301,7 +380,8 @@ export class ChatResponseBridge implements ResponseRenderer {
         instance,
         channelId,
         payload.conversationId,
-        (payload.platformMetadata as any)?.responseThreadId
+        (payload.platformMetadata as any)?.responseThreadId,
+        payload.platformMetadata as Record<string, unknown> | undefined
       );
       if (target) {
         await target.post(`Error: ${payload.error}`);
@@ -326,7 +406,8 @@ export class ChatResponseBridge implements ResponseRenderer {
         instance,
         channelId,
         payload.conversationId,
-        (payload.platformMetadata as any)?.responseThreadId
+        (payload.platformMetadata as any)?.responseThreadId,
+        payload.platformMetadata as Record<string, unknown> | undefined
       );
       if (target) {
         await target.startTyping?.("Processing...");
@@ -349,7 +430,8 @@ export class ChatResponseBridge implements ResponseRenderer {
         instance,
         channelId,
         payload.conversationId,
-        (payload.platformMetadata as any)?.responseThreadId
+        (payload.platformMetadata as any)?.responseThreadId,
+        payload.platformMetadata as Record<string, unknown> | undefined
       );
       if (target) {
         const { processedContent, linkButtons } = extractSettingsLinkButtons(
@@ -399,166 +481,12 @@ export class ChatResponseBridge implements ResponseRenderer {
 
   // --- Private ---
 
-  private async editStreamMessage(
-    stream: StreamState,
-    connectionId: string,
-    platform = ""
-  ): Promise<void> {
-    if (!stream.sentMessage?.edit) return;
-    try {
-      await stream.sentMessage.edit(
-        formatForPlatform(stream.buffer, platform) as any
-      );
-      stream.lastEditTime = Date.now();
-    } catch (error) {
-      logger.debug(
-        { connectionId, error: String(error) },
-        "Failed to edit stream message"
-      );
-    }
-  }
-
-  private async sendFinalMessage(
-    stream: StreamState,
-    instance: any,
-    channelId: string,
-    conversationId: string,
-    connectionId: string,
-    responseThreadId?: string
-  ): Promise<void> {
-    const shouldBuffer = shouldBufferUntilCompletion(
-      instance.connection.platform
-    );
-    const target = await this.resolveTarget(
-      instance,
-      channelId,
-      conversationId,
-      responseThreadId
-    );
-    if (!target) {
-      logger.warn(
-        {
-          connectionId,
-          channelId,
-          conversationId,
-          platform: instance.connection.platform,
-        },
-        "resolveTarget returned null — response will not be delivered"
-      );
-      return;
-    }
-
-    logger.info(
-      {
-        connectionId,
-        channelId,
-        platform: instance.connection.platform,
-        bufferLength: stream.buffer.length,
-        shouldBuffer,
-      },
-      "sendFinalMessage: about to post"
-    );
-
-    const platform = instance.connection.platform;
-
-    if (stream.buffer.length <= MESSAGE_CHUNK_SIZE) {
-      try {
-        if (!shouldBuffer && stream.sentMessage?.edit) {
-          await stream.sentMessage.edit(
-            formatForPlatform(stream.buffer, platform) as any
-          );
-        } else {
-          const result = await target.post(
-            formatForPlatform(stream.buffer, platform) as any
-          );
-          logger.info(
-            {
-              connectionId,
-              channelId,
-              resultId: result?.id,
-              resultThreadId: result?.threadId,
-            },
-            "sendFinalMessage: post succeeded"
-          );
-        }
-      } catch (error) {
-        logger.warn(
-          { connectionId, error: String(error) },
-          "Failed final message send/edit"
-        );
-        // Retry as plain text (no markdown) so the user still sees the response
-        try {
-          if (!shouldBuffer && stream.sentMessage?.edit) {
-            await stream.sentMessage.edit(stream.buffer);
-          } else {
-            await target.post(stream.buffer);
-          }
-          logger.info(
-            { connectionId, channelId },
-            "sendFinalMessage: plain-text fallback succeeded"
-          );
-        } catch {
-          // give up
-        }
-      }
-      return;
-    }
-
-    const chunks = chunkMessage(stream.buffer, MESSAGE_CHUNK_SIZE);
-    if (chunks.length === 0) return;
-    const [firstChunk, ...remainingChunks] = chunks;
-    if (!firstChunk) return;
-
-    try {
-      if (!shouldBuffer && stream.sentMessage?.edit) {
-        await stream.sentMessage.edit(
-          formatForPlatform(firstChunk, platform) as any
-        );
-      } else {
-        await target.post(formatForPlatform(firstChunk, platform) as any);
-      }
-    } catch (error) {
-      logger.debug(
-        { connectionId, error: String(error) },
-        "Failed to send first final chunk"
-      );
-      try {
-        if (!shouldBuffer && stream.sentMessage?.edit) {
-          await stream.sentMessage.edit(firstChunk);
-        } else {
-          await target.post(firstChunk);
-        }
-      } catch {
-        // give up on first chunk
-      }
-    }
-
-    for (let i = 0; i < remainingChunks.length; i++) {
-      const chunk = remainingChunks[i]!;
-      try {
-        await target.post(formatForPlatform(chunk, platform) as any);
-      } catch (error) {
-        logger.debug(
-          { connectionId, error: String(error) },
-          "Failed to send chunk"
-        );
-        try {
-          await target.post(chunk);
-        } catch {
-          // give up on this chunk
-        }
-      }
-      if (i < remainingChunks.length - 1) {
-        await delay(CHUNK_DELAY_MS);
-      }
-    }
-  }
-
   private async resolveTarget(
     instance: any,
     channelId: string,
     conversationId?: string,
-    responseThreadId?: string
+    responseThreadId?: string,
+    platformMetadata?: Record<string, unknown>
   ): Promise<any | null> {
     const platform = instance.connection.platform;
     const chat = instance.chat;
@@ -570,11 +498,18 @@ export class ChatResponseBridge implements ResponseRenderer {
       const createThread = (chat as any).createThread;
       if (adapter && typeof createThread === "function") {
         try {
+          // Build the initialMessage from the inbound sender so the Chat SDK
+          // can populate `_currentMessage.author` for `handleStream` (it reads
+          // `.author.userId` unconditionally — passing `{}` crashes there).
+          const currentMessage = buildCurrentMessageFromMetadata(
+            responseThreadId,
+            platformMetadata
+          );
           const thread = await createThread.call(
             chat,
             adapter,
             responseThreadId,
-            {},
+            currentMessage,
             false
           );
           if (thread) return thread;
@@ -587,8 +522,9 @@ export class ChatResponseBridge implements ResponseRenderer {
       }
     }
 
+    const channelKey = `${platform}:${channelId}`;
+
     if (!conversationId || conversationId === channelId) {
-      const channelKey = `${platform}:${channelId}`;
       const channel = chat.channel?.(channelKey);
       if (channel) {
         return channel;
@@ -603,16 +539,46 @@ export class ChatResponseBridge implements ResponseRenderer {
         },
         "chat.channel() returned null for DM"
       );
+      return null;
     }
 
-    const thread =
-      (await chat.getThread?.(platform, channelId, conversationId)) ?? null;
-    if (!thread) {
+    // Threaded fallback: reconstruct the adapter's full thread id and use
+    // `createThread`. Mirrors interaction-bridge.resolveThread. The Chat SDK
+    // has no `getThread` — calling the missing method was a silent no-op.
+    const adapter = chat.getAdapter?.(platform);
+    const createThread = (chat as any).createThread;
+    if (adapter && typeof createThread === "function") {
+      const fullThreadId = `${channelKey}:${conversationId}`;
+      try {
+        const currentMessage = buildCurrentMessageFromMetadata(
+          fullThreadId,
+          platformMetadata
+        );
+        const thread = await createThread.call(
+          chat,
+          adapter,
+          fullThreadId,
+          currentMessage,
+          false
+        );
+        if (thread) return thread;
+      } catch (error) {
+        logger.warn(
+          { platform, fullThreadId, error: String(error) },
+          "createThread with composite thread id failed"
+        );
+      }
+    }
+
+    // Last-resort channel-level fallback so the response still lands somewhere
+    // instead of silently disappearing.
+    const channel = chat.channel?.(channelKey);
+    if (!channel) {
       logger.warn(
-        { platform, channelId, conversationId, hasGetThread: !!chat.getThread },
-        "chat.getThread() also returned null"
+        { platform, channelId, channelKey, conversationId },
+        "resolveTarget: unable to resolve thread or channel"
       );
     }
-    return thread;
+    return channel ?? null;
   }
 }

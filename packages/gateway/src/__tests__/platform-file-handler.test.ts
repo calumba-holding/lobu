@@ -73,56 +73,9 @@ describe("ChatInstanceManager platform file handlers", () => {
     });
   });
 
-  test("provides a telegram file handler that downloads files via Telegram getFile", async () => {
-    const manager = new ChatInstanceManager() as any;
-    manager.instances = new Map([
-      [
-        "conn-1",
-        {
-          connection: {
-            id: "conn-1",
-            platform: "telegram",
-            config: { botToken: "telegram-token" },
-            metadata: {},
-          },
-          chat: {},
-        },
-      ],
-    ]);
-
-    const adapter = manager
-      .createPlatformAdapters()
-      .find((platform) => platform.name === "telegram");
-    const handler = adapter?.getFileHandler?.({ connectionId: "conn-1" });
-
-    let call = 0;
-    globalThis.fetch = mock(async (input: RequestInfo | URL) => {
-      call += 1;
-      const url = String(input);
-      if (call === 1) {
-        expect(url).toBe("https://api.telegram.org/bottelegram-token/getFile");
-        return Response.json({
-          ok: true,
-          result: {
-            file_path: "documents/test.txt",
-            file_size: 5,
-          },
-        });
-      }
-      expect(url).toBe(
-        "https://api.telegram.org/file/bottelegram-token/documents/test.txt"
-      );
-      return new Response(Buffer.from("hello"));
-    }) as unknown as typeof fetch;
-
-    const result = await handler!.downloadFile("file-123");
-    const chunks: Buffer[] = [];
-    for await (const chunk of result.stream) {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    }
-
-    expect(Buffer.concat(chunks).toString("utf8")).toBe("hello");
-    expect(result.metadata.name).toBe("test.txt");
-    expect(result.metadata.size).toBe(5);
-  });
+  // Inbound file fetching is no longer the file handler's job — every
+  // attachment is fetched via `Attachment.fetchData()` and republished as a
+  // gateway artifact in `MessageHandlerBridge.ingestAttachments`. The
+  // worker downloads from the artifact URL, so platform handlers only need
+  // to implement outbound `uploadFile`.
 });

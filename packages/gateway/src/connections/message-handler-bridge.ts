@@ -10,7 +10,6 @@ import {
   flushTracing,
   generateTraceId,
 } from "@lobu/core";
-import type Redis from "ioredis";
 import type { CommandDispatcher } from "../commands/command-dispatcher";
 import { createChatReply } from "../commands/command-reply-adapters";
 import type { ArtifactStore } from "../files/artifact-store";
@@ -21,20 +20,11 @@ import {
   resolveAgentId,
   resolveAgentOptions,
 } from "../services/platform-helpers";
+import type { ConversationStateStore } from "./conversation-state-store";
 import type { ChatInstanceManager } from "./chat-instance-manager";
 import type { PlatformConnection } from "./types";
 
 const logger = createLogger("chat-message-bridge");
-
-const MAX_HISTORY_MESSAGES = 10;
-const HISTORY_TTL_SECONDS = 86400; // 24 hours
-
-interface HistoryEntry {
-  role: "user" | "assistant";
-  content: string;
-  authorName?: string;
-  timestamp: number;
-}
 
 /**
  * Inbound file shape passed to the worker on platformMetadata.files.
@@ -68,6 +58,93 @@ function deriveFilename(
   return ext ? `${stem}-${index + 1}.${ext}` : `${stem}-${index + 1}`;
 }
 
+/**
+ * Inbound chat SDK attachment shape (loose subset of `chat.Attachment`).
+ * Defined here so that this module — and its tests — don't have to take a
+ * runtime dependency on the chat SDK.
+ */
+export interface InboundAttachmentLike {
+  data?: Buffer | Blob;
+  fetchData?: () => Promise<Buffer>;
+  mimeType?: string;
+  name?: string;
+  size?: number;
+  type?: string;
+}
+
+/**
+ * Fetch every inbound attachment via the chat SDK's auth-aware
+ * `Attachment.fetchData()` and publish each as a gateway artifact. Returns
+ * the worker-facing `files` array (signed `downloadUrl` per file) and the
+ * raw audio buffers needed by the transcription path. Errors fetching an
+ * individual attachment are logged and skipped — they must not abort the
+ * whole message.
+ */
+export async function ingestInboundAttachments(
+  attachments: InboundAttachmentLike[] | undefined,
+  artifactStore: ArtifactStore,
+  publicGatewayUrl: string
+): Promise<{
+  files: IngestedFile[];
+  audioBytes: Array<{ buffer: Buffer; mimeType: string }>;
+}> {
+  if (!attachments?.length) return { files: [], audioBytes: [] };
+
+  const files: IngestedFile[] = [];
+  const audioBytes: Array<{ buffer: Buffer; mimeType: string }> = [];
+
+  for (let i = 0; i < attachments.length; i++) {
+    const att = attachments[i]!;
+    try {
+      let buffer: Buffer | undefined;
+      if (att.data) {
+        buffer = Buffer.isBuffer(att.data)
+          ? att.data
+          : Buffer.from(await (att.data as Blob).arrayBuffer());
+      } else if (att.fetchData) {
+        buffer = await att.fetchData();
+      }
+      if (!buffer || buffer.length === 0) {
+        logger.warn(
+          { mimeType: att.mimeType, type: att.type, name: att.name },
+          "Skipping inbound attachment with no fetchable data"
+        );
+        continue;
+      }
+      const mimeType = att.mimeType || "application/octet-stream";
+      if (isAudioAttachment(mimeType)) {
+        audioBytes.push({ buffer, mimeType });
+      }
+      const filename = deriveFilename(att, i);
+      const published = await artifactStore.publish({
+        buffer,
+        filename,
+        contentType: mimeType,
+        publicGatewayUrl,
+      });
+      files.push({
+        id: published.artifactId,
+        name: published.filename,
+        mimetype: published.contentType,
+        size: published.size,
+        downloadUrl: published.downloadUrl,
+      });
+    } catch (error) {
+      logger.error(
+        {
+          error: String(error),
+          mimeType: att.mimeType,
+          type: att.type,
+          name: att.name,
+        },
+        "Failed to ingest inbound attachment"
+      );
+    }
+  }
+
+  return { files, audioBytes };
+}
+
 export function isSenderAllowed(
   allowFrom: string[] | undefined,
   userId: string
@@ -80,6 +157,10 @@ export function isSenderAllowed(
 
 /**
  * Register Chat SDK event handlers for a connection.
+ *
+ * Returns the bridge instance so callers (e.g. ChatInstanceManager) can
+ * reuse its enqueue pipeline for non-`onNewMention` ingress points —
+ * specifically, button clicks from the interaction bridge.
  */
 export function registerMessageHandlers(
   chat: any,
@@ -87,7 +168,7 @@ export function registerMessageHandlers(
   services: CoreServices,
   manager: ChatInstanceManager,
   commandDispatcher?: CommandDispatcher
-): void {
+): MessageHandlerBridge {
   const handler = new MessageHandlerBridge(
     connection,
     services,
@@ -106,10 +187,11 @@ export function registerMessageHandlers(
   chat.onSubscribedMessage(async (thread: any, message: any) => {
     await handler.handleMessage(thread, message, "subscribed");
   });
+
+  return handler;
 }
 
-class MessageHandlerBridge {
-  private redis: Redis;
+export class MessageHandlerBridge {
   private artifactStore: ArtifactStore;
   private publicGatewayUrl: string;
 
@@ -119,91 +201,18 @@ class MessageHandlerBridge {
     private manager: ChatInstanceManager,
     private commandDispatcher?: CommandDispatcher
   ) {
-    this.redis = services.getQueue().getRedisClient();
     this.artifactStore = services.getArtifactStore();
     this.publicGatewayUrl = services.getPublicGatewayUrl();
   }
 
   /**
-   * Fetch every inbound attachment via the chat SDK's auth-aware
-   * `Attachment.fetchData()` and publish each as a gateway artifact.
-   * The returned list is what the worker sees on `platformMetadata.files`,
-   * with `downloadUrl` pointing at a signed public URL it can fetch over
-   * its egress proxy — no platform-specific auth ever crosses the
-   * gateway/worker boundary.
-   *
-   * Audio attachments still need their bytes for transcription, so we hand
-   * the raw buffer back via the `audioBytes` slot rather than re-fetching.
+   * Locate the per-connection history store. Read lazily since the instance
+   * is registered after `registerMessageHandlers` runs.
    */
-  private async ingestAttachments(message: {
-    attachments?: Array<{
-      data?: Buffer | Blob;
-      fetchData?: () => Promise<Buffer>;
-      mimeType?: string;
-      name?: string;
-      size?: number;
-      type?: string;
-    }>;
-  }): Promise<{
-    files: IngestedFile[];
-    audioBytes: Array<{ buffer: Buffer; mimeType: string }>;
-  }> {
-    const attachments = message.attachments;
-    if (!attachments?.length) return { files: [], audioBytes: [] };
-
-    const files: IngestedFile[] = [];
-    const audioBytes: Array<{ buffer: Buffer; mimeType: string }> = [];
-
-    for (let i = 0; i < attachments.length; i++) {
-      const att = attachments[i]!;
-      try {
-        let buffer: Buffer | undefined;
-        if (att.data) {
-          buffer = Buffer.isBuffer(att.data)
-            ? att.data
-            : Buffer.from(await (att.data as Blob).arrayBuffer());
-        } else if (att.fetchData) {
-          buffer = await att.fetchData();
-        }
-        if (!buffer || buffer.length === 0) {
-          logger.warn(
-            { mimeType: att.mimeType, type: att.type, name: att.name },
-            "Skipping inbound attachment with no fetchable data"
-          );
-          continue;
-        }
-        const mimeType = att.mimeType || "application/octet-stream";
-        if (isAudioAttachment(mimeType)) {
-          audioBytes.push({ buffer, mimeType });
-        }
-        const filename = deriveFilename(att, i);
-        const published = await this.artifactStore.publish({
-          buffer,
-          filename,
-          contentType: mimeType,
-          publicGatewayUrl: this.publicGatewayUrl,
-        });
-        files.push({
-          id: published.artifactId,
-          name: published.filename,
-          mimetype: published.contentType,
-          size: published.size,
-          downloadUrl: published.downloadUrl,
-        });
-      } catch (error) {
-        logger.error(
-          {
-            error: String(error),
-            mimeType: att.mimeType,
-            type: att.type,
-            name: att.name,
-          },
-          "Failed to ingest inbound attachment"
-        );
-      }
-    }
-
-    return { files, audioBytes };
+  private conversationState(): ConversationStateStore | null {
+    return (
+      this.manager.getInstance(this.connection.id)?.conversationState ?? null
+    );
   }
 
   async handleMessage(
@@ -261,67 +270,74 @@ class MessageHandlerBridge {
       }
     }
 
-    // Gap 2: Resolve agent ID
-    const { agentId } = await resolveAgentId({
+    // Gap 2: Resolve agent ID (cross-platform) — see resolveAgentId's contract
+    // for the 3-tier precedence (binding → template → shadow). We own the
+    // auto-bind side effect here so resolveAgentId can stay pure.
+    const channelBindingService = this.services.getChannelBindingService();
+    const rawTeamId =
+      (message.raw as Record<string, unknown> | undefined)?.team_id ??
+      (message.raw as Record<string, unknown> | undefined)?.team;
+    const teamId = typeof rawTeamId === "string" ? rawTeamId : undefined;
+
+    const resolved = await resolveAgentId({
       platform,
       userId,
       channelId,
       isGroup,
+      teamId,
+      templateAgentId: this.connection.templateAgentId,
+      channelBindingService,
     });
+    const agentId = resolved.agentId;
 
-    // Gap 2: Auto-create agent metadata
-    const agentMetadataStore = this.services.getAgentMetadataStore();
-    const userAgentsStore = this.services.getUserAgentsStore();
-    if (agentMetadataStore) {
-      const existing = await agentMetadataStore.getMetadata(agentId);
-      if (!existing) {
-        const agentName = isGroup
-          ? `${platform} Group ${channelId}`
-          : `${platform} ${message.author?.fullName || userId}`;
-        await agentMetadataStore.createAgent(
+    // Tier 2 hit → persist a binding so subsequent events are O(1) tier-1
+    // hits and the binding is visible via the admin API.
+    if (resolved.source === "template" && channelBindingService) {
+      try {
+        await channelBindingService.createBinding(
           agentId,
-          agentName,
           platform,
-          userId,
-          { parentConnectionId: this.connection.id }
+          channelId,
+          teamId,
+          { configuredBy: `connection:${this.connection.id}` }
         );
-        await userAgentsStore?.addAgent(platform, userId, agentId);
-        logger.info({ agentId, userId }, "Auto-created agent");
+        logger.info(
+          { agentId, platform, channelId, teamId },
+          "Auto-bound channel to connection template agent"
+        );
+      } catch (error) {
+        logger.warn(
+          { agentId, platform, channelId, error: String(error) },
+          "Failed to persist channel binding from connection template"
+        );
+      }
+    }
 
-        // Clone settings from template agent if connection has one
-        if (this.connection.templateAgentId) {
-          try {
-            const agentSettingsStore = this.services.getAgentSettingsStore();
-            if (agentSettingsStore) {
-              const templateSettings = await agentSettingsStore.getSettings(
-                this.connection.templateAgentId
-              );
-              if (templateSettings) {
-                const { buildDefaultSettingsFromSource } = await import(
-                  "../auth/settings/template-utils"
-                );
-                const cloned = buildDefaultSettingsFromSource(templateSettings);
-                cloned.templateAgentId = this.connection.templateAgentId;
-                await agentSettingsStore.saveSettings(agentId, cloned);
-                logger.info(
-                  {
-                    agentId,
-                    templateAgentId: this.connection.templateAgentId,
-                  },
-                  "Cloned settings from template agent"
-                );
-              }
-            }
-          } catch (error) {
-            logger.warn(
-              {
-                agentId,
-                templateAgentId: this.connection.templateAgentId,
-                error: String(error),
-              },
-              "Failed to clone template agent settings"
-            );
-          }
+    // Gap 2: Auto-create agent metadata for shadow agents only.
+    // When the resolved agent is the connection's owning template (either
+    // routed there by an existing binding or just auto-bound above), the
+    // agent metadata is already owned by the template's definition — do
+    // NOT overwrite it with a shadow owner/name, or we clobber the real
+    // agent's identity every time someone new DMs the bot.
+    const isTemplateAgent = agentId === this.connection.templateAgentId;
+    if (!isTemplateAgent) {
+      const agentMetadataStore = this.services.getAgentMetadataStore();
+      const userAgentsStore = this.services.getUserAgentsStore();
+      if (agentMetadataStore) {
+        const existing = await agentMetadataStore.getMetadata(agentId);
+        if (!existing) {
+          const agentName = isGroup
+            ? `${platform} Group ${channelId}`
+            : `${platform} ${message.author?.fullName || userId}`;
+          await agentMetadataStore.createAgent(
+            agentId,
+            agentName,
+            platform,
+            userId,
+            { parentConnectionId: this.connection.id }
+          );
+          await userAgentsStore?.addAgent(platform, userId, agentId);
+          logger.info({ agentId, userId }, "Auto-created shadow agent");
         }
       }
     }
@@ -329,8 +345,11 @@ class MessageHandlerBridge {
     // Ingest every inbound attachment as an artifact, regardless of type.
     // Workers consume them via `platformMetadata.files`; we never hand the
     // worker platform-specific file IDs or bot tokens.
-    const { files: ingestedFiles, audioBytes } =
-      await this.ingestAttachments(message);
+    const { files: ingestedFiles, audioBytes } = await ingestInboundAttachments(
+      message.attachments,
+      this.artifactStore,
+      this.publicGatewayUrl
+    );
 
     // Gap 7: Audio transcription — runs over the bytes we already fetched.
     let messageText = message.text ?? "";
@@ -371,8 +390,10 @@ class MessageHandlerBridge {
       messageText = "Starting new session.";
       sessionReset = true;
     } else if (trimmedLower === "/clear") {
-      const historyKey = `chat:history:${this.connection.id}:${channelId}`;
-      await this.redis.del(historyKey);
+      await this.conversationState()?.clearHistory(
+        this.connection.id,
+        channelId
+      );
       await thread.post({ text: "Chat history cleared." });
       return;
     }
@@ -394,12 +415,13 @@ class MessageHandlerBridge {
       if (handled) return;
     }
 
-    // Gap 1: Retrieve conversation history from Redis
-    const historyKey = `chat:history:${this.connection.id}:${channelId}`;
-    const conversationHistory = await this.getHistory(historyKey);
+    // Gap 1: Retrieve + append conversation history via the SDK state adapter.
+    const conversationState = this.conversationState();
+    const conversationHistory =
+      (await conversationState?.getHistory(this.connection.id, channelId)) ??
+      [];
 
-    // Gap 1: Store inbound message
-    await this.appendHistory(historyKey, {
+    await conversationState?.appendHistory(this.connection.id, channelId, {
       role: "user",
       content: messageText,
       authorName: message.author?.fullName,
@@ -451,6 +473,10 @@ class MessageHandlerBridge {
           senderId: userId,
           senderUsername: message.author?.userName,
           senderDisplayName: message.author?.fullName,
+          // Platform-native team/workspace id (Slack: team_id). Used by the
+          // Chat SDK as a fallback hint for ephemeral/DM routing. Undefined
+          // for platforms that don't carry a workspace concept (Telegram, etc.)
+          teamId,
           isGroup,
           connectionId: this.connection.id,
           responseChannel: channelId,
@@ -490,67 +516,163 @@ class MessageHandlerBridge {
     }
   }
 
-  // Gap 1: Redis-backed conversation history
+  /**
+   * Feed a button-click into the same enqueue pipeline as a typed inbound
+   * message. Chat SDK filters bot self-posts via `isMe`, so posting the
+   * clicked value back into the thread does NOT trigger `handleMessage` —
+   * this method is what makes a question-click actually become a new
+   * worker turn.
+   *
+   * The caller supplies the original PostedQuestion context (userId,
+   * channelId, conversationId, teamId, agentId) so routing stays identical
+   * to the original session. The clicked `value` becomes the new
+   * `messageText`.
+   */
+  async ingestClick(params: {
+    userId: string;
+    channelId: string;
+    conversationId: string;
+    teamId?: string;
+    authorName?: string;
+    authorUsername?: string;
+    value: string;
+    thread: any;
+    responseThreadId?: string;
+  }): Promise<void> {
+    const { connection } = this;
 
-  private async getHistory(
-    key: string
-  ): Promise<
-    Array<{ role: "user" | "assistant"; content: string; name?: string }>
-  > {
-    const raw = await this.redis.lrange(key, 0, MAX_HISTORY_MESSAGES - 1);
-    const results: Array<{
-      role: "user" | "assistant";
-      content: string;
-      name?: string;
-    }> = [];
-    for (const entry of raw) {
-      try {
-        const parsed = JSON.parse(entry) as HistoryEntry;
-        results.push({
-          role: parsed.role,
-          content: parsed.content,
-          name: parsed.authorName,
-        });
-      } catch (err) {
-        logger.warn(
-          { key, error: String(err) },
-          "Skipping corrupt history entry"
-        );
-      }
+    if (!this.manager.has(connection.id)) {
+      logger.info(
+        { connectionId: connection.id },
+        "Connection no longer active, dropping click ingest"
+      );
+      return;
     }
-    return results;
-  }
 
-  private async appendHistory(key: string, entry: HistoryEntry): Promise<void> {
-    await this.redis
-      .pipeline()
-      .rpush(key, JSON.stringify(entry))
-      .ltrim(key, -MAX_HISTORY_MESSAGES, -1)
-      .expire(key, HISTORY_TTL_SECONDS)
-      .exec();
-  }
-}
+    const platform = connection.platform;
+    const {
+      userId,
+      channelId,
+      conversationId,
+      teamId,
+      authorName,
+      authorUsername,
+      value,
+      thread,
+      responseThreadId,
+    } = params;
 
-/**
- * Store an outgoing bot response in conversation history.
- * Called from the response bridge.
- */
-export async function storeOutgoingHistory(
-  redis: Redis,
-  connectionId: string,
-  channelId: string,
-  text: string
-): Promise<void> {
-  const key = `chat:history:${connectionId}:${channelId}`;
-  const entry: HistoryEntry = {
-    role: "assistant",
-    content: text,
-    timestamp: Date.now(),
-  };
-  await redis
-    .pipeline()
-    .rpush(key, JSON.stringify(entry))
-    .ltrim(key, -MAX_HISTORY_MESSAGES, -1)
-    .expire(key, HISTORY_TTL_SECONDS)
-    .exec();
+    if (!isSenderAllowed(connection.settings?.allowFrom, userId)) {
+      logger.info({ userId }, "Click blocked by allowlist");
+      return;
+    }
+
+    const messageId = `click-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const isGroup = conversationId !== channelId;
+
+    const channelBindingService = this.services.getChannelBindingService();
+    const resolved = await resolveAgentId({
+      platform,
+      userId,
+      channelId,
+      isGroup,
+      teamId,
+      templateAgentId: this.connection.templateAgentId,
+      channelBindingService,
+    });
+    const agentId = resolved.agentId;
+
+    const conversationState = this.conversationState();
+    const conversationHistory =
+      (await conversationState?.getHistory(this.connection.id, channelId)) ??
+      [];
+
+    await conversationState?.appendHistory(this.connection.id, channelId, {
+      role: "user",
+      content: value,
+      authorName,
+      timestamp: Date.now(),
+    });
+
+    const traceId = generateTraceId(messageId);
+    const agentSettingsStore = this.services.getAgentSettingsStore();
+
+    const { span: rootSpan, traceparent } = createRootSpan(
+      "question_click_received",
+      {
+        "lobu.agent_id": agentId,
+        "lobu.message_id": messageId,
+        "lobu.platform": platform,
+        "lobu.connection_id": this.connection.id,
+      }
+    );
+
+    try {
+      if (!(await hasConfiguredProvider(agentId, agentSettingsStore))) {
+        await thread.post(
+          "No AI provider is configured yet. Provider setup is not available in the end-user chat flow yet. Ask an admin to connect a provider for the base agent."
+        );
+        return;
+      }
+
+      const agentOptions = await resolveAgentOptions(
+        agentId,
+        {},
+        agentSettingsStore
+      );
+
+      const payload = buildMessagePayload({
+        platform,
+        userId,
+        botId: platform,
+        conversationId,
+        teamId: teamId || platform,
+        agentId,
+        messageId,
+        messageText: value,
+        channelId,
+        platformMetadata: {
+          traceId,
+          traceparent: traceparent || undefined,
+          agentId,
+          chatId: channelId,
+          senderId: userId,
+          senderUsername: authorUsername,
+          senderDisplayName: authorName,
+          teamId,
+          isGroup,
+          connectionId: this.connection.id,
+          responseChannel: channelId,
+          responseId: messageId,
+          responseThreadId: responseThreadId ?? thread.id,
+          conversationHistory:
+            conversationHistory.length > 0 ? conversationHistory : undefined,
+        },
+        agentOptions,
+      });
+
+      const queueProducer = this.services.getQueueProducer();
+      await queueProducer.enqueueMessage(payload);
+
+      logger.info(
+        {
+          traceId,
+          messageId,
+          agentId,
+          connectionId: this.connection.id,
+          value,
+        },
+        "Question click enqueued via Chat SDK bridge"
+      );
+
+      try {
+        await thread.startTyping?.("Processing...");
+      } catch {
+        // best effort
+      }
+    } finally {
+      rootSpan?.end();
+      void flushTracing();
+    }
+  }
 }

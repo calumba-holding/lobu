@@ -278,7 +278,7 @@ describe("hasConfiguredProvider", () => {
 });
 
 describe("resolveAgentId", () => {
-  test("uses deterministic id by default", async () => {
+  test("uses deterministic shadow id when no binding and no template", async () => {
     const resolved = await resolveAgentId({
       platform: "telegram",
       userId: "777",
@@ -288,7 +288,124 @@ describe("resolveAgentId", () => {
 
     expect(resolved).toEqual({
       agentId: "telegram-777",
-      promptSent: false,
+      source: "shadow",
     });
+  });
+
+  test("existing binding wins over template (tier 1)", async () => {
+    const bindingService = {
+      getBinding: async (
+        platform: string,
+        channelId: string,
+        teamId?: string
+      ) => {
+        expect(platform).toBe("slack");
+        expect(channelId).toBe("C1");
+        expect(teamId).toBe("T1");
+        return { agentId: "bound-agent", platform, channelId, teamId };
+      },
+    };
+
+    const resolved = await resolveAgentId({
+      platform: "slack",
+      userId: "U1",
+      channelId: "C1",
+      isGroup: true,
+      teamId: "T1",
+      templateAgentId: "template-agent",
+      channelBindingService: bindingService as any,
+    });
+
+    expect(resolved).toEqual({
+      agentId: "bound-agent",
+      source: "binding",
+    });
+  });
+
+  test("no binding + templateAgentId routes to template (tier 2)", async () => {
+    const bindingService = {
+      getBinding: async () => null,
+    };
+
+    const resolved = await resolveAgentId({
+      platform: "slack",
+      userId: "U1",
+      channelId: "C1",
+      isGroup: true,
+      teamId: "T1",
+      templateAgentId: "template-agent",
+      channelBindingService: bindingService as any,
+    });
+
+    expect(resolved).toEqual({
+      agentId: "template-agent",
+      source: "template",
+    });
+  });
+
+  test("no binding + no template falls back to shadow (tier 3)", async () => {
+    const bindingService = {
+      getBinding: async () => null,
+    };
+
+    const resolved = await resolveAgentId({
+      platform: "slack",
+      userId: "U1",
+      channelId: "C1",
+      isGroup: true,
+      teamId: "T1",
+      channelBindingService: bindingService as any,
+    });
+
+    expect(resolved).toEqual({
+      agentId: "slack-g-C1",
+      source: "shadow",
+    });
+  });
+
+  test("template tier works on platforms without teamId (Telegram)", async () => {
+    const bindingService = {
+      getBinding: async (_p: string, _c: string, teamId?: string) => {
+        expect(teamId).toBeUndefined();
+        return null;
+      },
+    };
+
+    const resolved = await resolveAgentId({
+      platform: "telegram",
+      userId: "777",
+      channelId: "12345",
+      isGroup: false,
+      templateAgentId: "my-tg-agent",
+      channelBindingService: bindingService as any,
+    });
+
+    expect(resolved).toEqual({
+      agentId: "my-tg-agent",
+      source: "template",
+    });
+  });
+
+  test("resolver does NOT write bindings — pure side-effect-free", async () => {
+    let createCount = 0;
+    const bindingService = {
+      getBinding: async () => null,
+      createBinding: async () => {
+        createCount += 1;
+      },
+    };
+
+    await resolveAgentId({
+      platform: "slack",
+      userId: "U1",
+      channelId: "C1",
+      isGroup: true,
+      teamId: "T1",
+      templateAgentId: "template-agent",
+      channelBindingService: bindingService as any,
+    });
+
+    // Bridge owns the auto-bind side effect, not the resolver.
+    expect(createCount).toBe(0);
   });
 });

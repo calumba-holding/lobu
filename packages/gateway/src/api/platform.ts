@@ -84,7 +84,7 @@ export class ApiPlatform implements PlatformAdapter {
         toolName: event.toolName,
         args: event.args,
         grantPattern: event.grantPattern,
-        durationOptions: ["once", "1h", "24h", "always"],
+        durationOptions: ["1h", "24h", "always"],
         timestamp: Date.now(),
       });
     });

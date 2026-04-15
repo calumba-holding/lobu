@@ -266,8 +266,16 @@ export function buildMessagePayload(params: {
 }
 
 /**
- * Resolve agent ID. Deterministic for all platforms.
- * Channel binding is checked first for Slack (multi-tenant), then falls back to platformAgentId.
+ * Resolve agent ID with a deterministic 3-tier precedence:
+ *   1. `binding`  — an existing `channel_binding:*` record wins.
+ *   2. `template` — a connection-owned `templateAgentId` is used and the
+ *      caller is expected to persist a binding so tier 1 hits next time.
+ *   3. `shadow`   — `{platform}-g-{channelId}` / `{platform}-{userId}` fallback
+ *      for admin-UI connections with no owning agent.
+ *
+ * Pure resolution: never writes a binding. The caller owns the auto-bind
+ * side effect (see message-handler-bridge), so this function stays safe to
+ * call from tests and from read-only code paths.
  */
 export async function resolveAgentId(params: {
   platform: string;
@@ -275,20 +283,19 @@ export async function resolveAgentId(params: {
   channelId: string;
   isGroup: boolean;
   teamId?: string;
+  templateAgentId?: string;
   channelBindingService?: ChannelBindingService;
-  sendConfigPrompt?: () => Promise<boolean>;
-}): Promise<{ agentId: string; promptSent: boolean }> {
+}): Promise<{ agentId: string; source: "binding" | "template" | "shadow" }> {
   const {
     platform,
     userId,
     channelId,
     isGroup,
     teamId,
+    templateAgentId,
     channelBindingService,
-    sendConfigPrompt,
   } = params;
 
-  // Check channel binding first (Slack multi-tenant)
   if (channelBindingService) {
     const binding = await channelBindingService.getBinding(
       platform,
@@ -296,20 +303,26 @@ export async function resolveAgentId(params: {
       teamId
     );
     if (binding) {
-      logger.info({ agentId: binding.agentId, channelId }, "Using bound agent");
-      return { agentId: binding.agentId, promptSent: false };
+      logger.info(
+        { agentId: binding.agentId, platform, channelId },
+        "Routing via existing channel binding"
+      );
+      return { agentId: binding.agentId, source: "binding" };
     }
+  }
 
-    if (sendConfigPrompt) {
-      const sent = await sendConfigPrompt();
-      if (sent) return { agentId: "", promptSent: true };
-    }
+  if (templateAgentId) {
+    logger.info(
+      { agentId: templateAgentId, platform, channelId },
+      "Routing to connection template agent"
+    );
+    return { agentId: templateAgentId, source: "template" };
   }
 
   const agentId = platformAgentId(platform, userId, channelId, isGroup);
   logger.info(
     { agentId, platform, channelId },
-    "Deterministic agent ID resolved"
+    "Routing to shadow agent (no binding, no template)"
   );
-  return { agentId, promptSent: false };
+  return { agentId, source: "shadow" };
 }
