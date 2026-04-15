@@ -42,19 +42,23 @@ export function getProviderAuthHintFromError(
     return null;
   }
 
+  // Prefer the caller-supplied canonical provider name (e.g. gateway slug
+  // "z-ai") over a name extracted from the error string, because upstream
+  // libraries may use internal aliases (e.g. the model registry says "zai").
+  // Fall back to regex extraction only when the caller has no context.
+  const fallbackProvider = defaultProvider?.trim().toLowerCase() || undefined;
   const explicitProviderMatch = errorMessage.match(
     /(?:No API key found for|Authentication failed for)\s+"?([A-Za-z0-9_-]+)/i
   );
   const jsonProviderMatch = errorMessage.match(
     /"provider"\s*:\s*"([A-Za-z0-9._-]+)"/i
   );
-  const fallbackProvider = defaultProvider?.trim().toLowerCase() || undefined;
   const providerName =
-    explicitProviderMatch?.[1]?.toLowerCase() ||
-    jsonProviderMatch?.[1]?.toLowerCase() ||
     (fallbackProvider && fallbackProvider !== "undefined"
       ? fallbackProvider
       : undefined) ||
+    explicitProviderMatch?.[1]?.toLowerCase() ||
+    jsonProviderMatch?.[1]?.toLowerCase() ||
     "provider";
 
   return {

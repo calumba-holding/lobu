@@ -57,6 +57,7 @@ interface SessionContextResponse {
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 const DEFAULT_SESSION_CONTEXT = {
+  agentInstructions: "",
   gatewayInstructions: "",
   providerConfig: {} as ProviderConfig,
   skillsConfig: [] as SkillContent[],
@@ -67,6 +68,7 @@ const DEFAULT_SESSION_CONTEXT = {
 
 // Module-level cache for session context
 let cachedResult: {
+  agentInstructions: string;
   gatewayInstructions: string;
   providerConfig: ProviderConfig;
   skillsConfig: SkillContent[];
@@ -155,6 +157,15 @@ function buildMcpServerInstructions(
  * Skips MCP server config (OpenClaw doesn't use Claude SDK's MCP format).
  */
 export async function getOpenClawSessionContext(): Promise<{
+  /**
+   * Identity/soul/user instructions for this agent. Returned separately from
+   * `gatewayInstructions` so the worker can prepend identity BEFORE the
+   * pi-coding-agent base prompt (which would otherwise anchor the model with
+   * "You are an expert coding assistant" before the agent's real persona is
+   * declared).
+   */
+  agentInstructions: string;
+  /** Platform / network / skills / MCP setup instructions (no identity). */
   gatewayInstructions: string;
   providerConfig: ProviderConfig;
   skillsConfig: SkillContent[];
@@ -210,8 +221,11 @@ export async function getOpenClawSessionContext(): Promise<{
       data.mcpInstructions || {}
     );
 
+    // Identity/soul/user instructions are returned separately so the worker
+    // can prepend them BEFORE the pi-coding-agent base prompt.
+    const agentInstructions = data.agentInstructions || "";
+
     const gatewayInstructions = [
-      data.agentInstructions,
       data.platformInstructions,
       data.networkInstructions,
       data.skillsInstructions,
@@ -224,12 +238,13 @@ export async function getOpenClawSessionContext(): Promise<{
     const mcpTools = data.mcpTools || {};
 
     logger.info(
-      `Built gateway instructions: agent (${(data.agentInstructions || "").length} chars) + platform (${data.platformInstructions.length} chars) + network (${data.networkInstructions.length} chars) + skills (${(data.skillsInstructions || "").length} chars) + MCP setup (${mcpSetupInstructions.length} chars) + MCP server instructions (${mcpServerInstructions.length} chars), mcpTools: ${Object.keys(mcpTools).length} servers`
+      `Built gateway instructions: agent (${agentInstructions.length} chars, prepended) + platform (${data.platformInstructions.length} chars) + network (${data.networkInstructions.length} chars) + skills (${(data.skillsInstructions || "").length} chars) + MCP setup (${mcpSetupInstructions.length} chars) + MCP server instructions (${mcpServerInstructions.length} chars), mcpTools: ${Object.keys(mcpTools).length} servers`
     );
 
     const mcpContext = data.mcpContext || {};
 
     const result = {
+      agentInstructions,
       gatewayInstructions,
       providerConfig: data.providerConfig || {},
       skillsConfig: data.skillsConfig || [],

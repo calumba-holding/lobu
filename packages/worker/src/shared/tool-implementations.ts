@@ -300,7 +300,7 @@ export async function askUserQuestion(
     if (error) return error;
 
     return textResult(
-      "Question posted with buttons. Your session will end now. The user's answer will arrive as your next message."
+      "Question posted with buttons. End your turn now — the user's click will arrive as a new inbound message that resumes this session."
     );
   });
 }

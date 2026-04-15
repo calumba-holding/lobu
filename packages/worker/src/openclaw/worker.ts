@@ -55,6 +55,7 @@ import {
   registerDynamicProvider,
   resolveModelRef,
 } from "./model-resolver";
+import { checkSandboxLeak } from "./sandbox-leak";
 import {
   loadPlugins,
   runPluginHooks,
@@ -95,6 +96,35 @@ const DEFAULT_MEMORY_FLUSH_CONFIG: ResolvedMemoryFlushConfig = {
   prompt:
     "Write any lasting notes to memory using available memory tools. Reply with NO_REPLY if nothing to store.",
 };
+
+/**
+ * Pi-coding-agent's buildSystemPrompt() (in `@mariozechner/pi-coding-agent`)
+ * always opens the system prompt with this exact sentence. Lobu agents can
+ * override their identity via IDENTITY.md, but unless we strip out this
+ * opener the model sees two competing role declarations and tends to favour
+ * "expert coding assistant" because it appears first.
+ *
+ * This helper substitutes the opener with the agent's identity and keeps the
+ * rest of the base prompt (tools list, guidelines, docs paths, cwd) intact.
+ *
+ * If the upstream package ever changes the opener wording, this becomes a
+ * no-op and `replaced === original`. In that case we fall back to prepending
+ * the identity with a small framing note so identity still wins ordering.
+ */
+const PI_CODING_AGENT_OPENER_RE =
+  /^You are an expert coding assistant operating inside pi, a coding agent harness\.[^\n]*/;
+
+export function replaceBasePromptIdentity(
+  basePrompt: string,
+  identity: string
+): string {
+  if (PI_CODING_AGENT_OPENER_RE.test(basePrompt)) {
+    return basePrompt.replace(PI_CODING_AGENT_OPENER_RE, identity);
+  }
+  // Upstream wording drifted — prepend identity with a framing note rather
+  // than silently letting the upstream opener win.
+  return `${identity}\n\nThe section below describes the runtime tooling available to you. It does not change your role.\n\n${basePrompt}`;
+}
 
 function isLikelyImageGenerationRequest(prompt: string): boolean {
   const lower = prompt.toLowerCase();
@@ -500,35 +530,29 @@ export class OpenClawWorker implements WorkerExecutor {
                 hintWorkerToken
               )
             : null;
-        const leakedSandboxLink =
-          !sawUploadedFileEvent &&
-          /(sandbox:\/|\/app\/workspaces\/|\/workspace\/)/i.test(
-            outputSnapshot
-          );
-        const fileDeliveryFailureMessage = leakedSandboxLink
-          ? "I created a local file, but I did not actually upload it for you. Local sandbox/workspace links are not user-accessible, so this file-delivery attempt failed. Please ask me to try again and I must use UploadUserFile."
-          : null;
-
         const finalResult = this.progressProcessor.getFinalResult();
-        if (fileDeliveryFailureMessage) {
-          logger.warn(
-            "Detected sandbox/local file link without UploadUserFile success; replacing final response"
+        if (finalResult) {
+          const leakCheck = checkSandboxLeak(
+            finalResult.text,
+            sawUploadedFileEvent
           );
-          await this.workerTransport.sendStreamDelta(
-            fileDeliveryFailureMessage,
-            true,
-            true
-          );
-        } else if (finalResult) {
+          if (leakCheck.leaked) {
+            logger.warn(
+              "Detected unfulfilled file-delivery claim in final message; redacting link targets"
+            );
+          }
           const finalText = audioPermissionHint
-            ? `${finalResult.text}\n\n${audioPermissionHint}`
-            : finalResult.text;
+            ? `${leakCheck.redactedText}\n\n${audioPermissionHint}`
+            : leakCheck.redactedText;
           logger.info(
             `📤 Sending final result (${finalText.length} chars) with deduplication flag`
           );
+          // When a leak was redacted, the already-streamed content contains the
+          // pre-redaction URLs — a delta-append would leave them on the client.
+          // Force a full replacement so the client discards the leaky prefix.
           await this.workerTransport.sendStreamDelta(
             finalText,
-            false,
+            leakCheck.leaked,
             finalResult.isFinal
           );
         } else if (audioPermissionHint) {
@@ -980,7 +1004,9 @@ export class OpenClawWorker implements WorkerExecutor {
       authStorage.setRuntimeApiKey(provider, credValue);
       logger.info(`Set runtime API key for ${provider}`);
     } else {
-      const fallbackEnvVar = getApiKeyEnvVarForProvider(provider);
+      // Look up the env var by the canonical gateway slug (e.g. "z-ai" → Z_AI_API_KEY),
+      // not the model-registry alias (e.g. "zai" → ZAI_API_KEY which nobody sets).
+      const fallbackEnvVar = getApiKeyEnvVarForProvider(rawProvider);
       const fallbackValue =
         credentialStore.get(fallbackEnvVar) || process.env[fallbackEnvVar];
       if (fallbackValue) {
@@ -1222,10 +1248,25 @@ Use it when the user references past discussions or you need context.`);
       });
       session = createdSession.session;
 
+      // Pi-coding-agent's base prompt opens with "You are an expert coding
+      // assistant operating inside pi, a coding agent harness…" — that anchor
+      // overrides any IDENTITY.md the agent ships with. Replace just that
+      // opener with the agent's real identity (or the lobu default) so the
+      // tools/guidelines/cwd footer below it still applies, but the role on
+      // top is the one we actually want.
       const basePrompt = session.systemPrompt;
-      session.agent.setSystemPrompt(
-        `${basePrompt}\n\n${finalInstructionsUpdated}`
-      );
+      const identity = context.agentInstructions?.trim();
+      const finalSystemPrompt = identity
+        ? [
+            replaceBasePromptIdentity(basePrompt, identity),
+            finalInstructionsUpdated,
+          ]
+            .filter(Boolean)
+            .join("\n\n---\n\n")
+        : [basePrompt, finalInstructionsUpdated]
+            .filter(Boolean)
+            .join("\n\n---\n\n");
+      session.agent.setSystemPrompt(finalSystemPrompt);
 
       let resolveTurnDone: (() => void) | null = null;
       let turnNonce = 0;
@@ -1495,7 +1536,7 @@ Use it when the user references past discussions or you need context.`);
         });
         const errorWithHint = await this.maybeBuildAuthHintMessage(
           sessionError,
-          provider,
+          rawProvider,
           modelId,
           gatewayUrl,
           workerToken
@@ -1610,22 +1651,25 @@ Use it when the user references past discussions or you need context.`);
     logger.info(`Downloading ${files.length} input files...`);
     const workspaceDir = this.workspaceManager.getCurrentWorkingDirectory();
     const inputDir = path.join(workspaceDir, "input");
-    const dispatcherUrl = process.env.DISPATCHER_URL!;
-    const workerToken = process.env.WORKER_TOKEN!;
 
     for (const file of files) {
       try {
+        if (!file.downloadUrl) {
+          logger.warn(
+            { fileName: file.name, fileId: file.id },
+            "Inbound file has no downloadUrl; gateway must publish it as an artifact before forwarding"
+          );
+          continue;
+        }
         logger.info(`Downloading file: ${file.name} (${file.id})`);
 
-        const response = await fetch(
-          `${dispatcherUrl}/internal/files/download?fileId=${file.id}`,
-          {
-            headers: {
-              Authorization: `Bearer ${workerToken}`,
-            },
-            signal: AbortSignal.timeout(60_000),
-          }
-        );
+        // The gateway pre-publishes every inbound attachment as a signed,
+        // time-limited artifact and embeds the URL in `downloadUrl`. We
+        // fetch through the worker's egress proxy — no platform tokens or
+        // worker JWT cross this boundary anymore.
+        const response = await fetch(file.downloadUrl, {
+          signal: AbortSignal.timeout(60_000),
+        });
 
         if (!response.ok) {
           logger.error(
@@ -1669,6 +1713,7 @@ Use it when the user references past discussions or you need context.`);
     id: string;
     name: string;
     mimetype: string;
+    downloadUrl?: string;
   }> {
     return (this.config as any).platformMetadata?.files || [];
   }
