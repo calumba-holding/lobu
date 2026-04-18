@@ -20,8 +20,6 @@ import {
   persistSecretValue,
   type WritableSecretStore,
 } from "../secrets";
-import { getScheduledWakeupService } from "./scheduled-wakeup";
-
 // Re-export MessagePayload for use by deployment implementations
 export type { MessagePayload };
 
@@ -791,6 +789,11 @@ export abstract class BaseDeploymentManager {
           : undefined,
     };
 
+    const approverField = (key: string): string | undefined => {
+      const v = platformMetadata?.[key];
+      return typeof v === "string" ? v : undefined;
+    };
+
     const workerToken = generateWorkerToken(
       userId,
       conversationId,
@@ -805,6 +808,11 @@ export abstract class BaseDeploymentManager {
             ? platformMetadata.connectionId
             : undefined,
         traceId,
+        approverChannelId: approverField("approverChannelId"),
+        approverConnectionId: approverField("approverConnectionId"),
+        approverTeamId: approverField("approverTeamId"),
+        approverPlatform: approverField("approverPlatform"),
+        approverConversationId: approverField("approverConversationId"),
       }
     );
 
@@ -991,12 +999,6 @@ export abstract class BaseDeploymentManager {
             error
           );
         }
-      }
-
-      // Clean up any scheduled wakeups for this deployment
-      const scheduledWakeupService = getScheduledWakeupService();
-      if (scheduledWakeupService) {
-        await scheduledWakeupService.cleanupForDeployment(deploymentName);
       }
 
       await this.deleteDeployment(deploymentName);
