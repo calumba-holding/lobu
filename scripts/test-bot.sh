@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 # Bot testing script with multi-message and multi-platform support
 # Usage: ./scripts/test-bot.sh "message 1" ["message 2"] ["message 3"] ...
@@ -47,7 +47,7 @@ fetch_telegram_bot_peer() {
 resolve_tguser_python() {
     local tguser_bin shebang interpreter exec_python
 
-    if [ -n "$TGUSER_PYTHON" ] && [ -x "$TGUSER_PYTHON" ]; then
+    if [ -n "${TGUSER_PYTHON:-}" ] && [ -x "$TGUSER_PYTHON" ]; then
         printf '%s\n' "$TGUSER_PYTHON"
         return
     fi
