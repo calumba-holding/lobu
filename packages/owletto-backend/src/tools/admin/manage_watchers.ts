@@ -1513,20 +1513,163 @@ async function handleCompleteWindow(
   }
 
   // ============================================
-  // STEP 5: Fail fast if no content (NO DB WRITES YET!)
-  // ============================================
-  if (uniqueContentIds.length === 0) {
-    throw new Error(
-      'Cannot complete window: no NEW events found for the specified date range ' +
-        `(${window_start} to ${window_end}). ${skippedCount > 0 ? `All ${skippedCount} content items were already analyzed by other windows.` : ''}`
-    );
-  }
-
-  // ============================================
-  // STEP 6: Process extracted_data BEFORE any writes (in-memory)
+  // STEP 5: Process extracted_data BEFORE any writes (in-memory)
   // ============================================
   const fieldsToStrip = getFieldsToStrip(classifiers);
   const cleanedExtractedData = stripFields(extractedData, Array.from(fieldsToStrip));
+
+  // ============================================
+  // STEP 6: No-op if there's nothing to analyze
+  //
+  // Watchers can be triggered for periods where every candidate event was
+  // already consumed by an earlier window. Throwing here causes the agent
+  // loop to retry the same period indefinitely (Sentry: OWLETTO-Q). Treat
+  // it as a successful no-op completion, but persist a zero-content window
+  // so the scheduler has durable cursor progress and retries are idempotent.
+  // ============================================
+  if (uniqueContentIds.length === 0) {
+    const noOpResult = await sql.begin(async (tx) => {
+      let windowId: number;
+      let createdWindow = false;
+
+      if (tokenWindowId) {
+        const windowResult = await tx`
+          SELECT id, content_analyzed
+          FROM watcher_windows
+          WHERE id = ${tokenWindowId} AND watcher_id = ${watcherId}
+          LIMIT 1
+        `;
+        if (windowResult.length === 0) {
+          throw new Error(
+            `Window ${tokenWindowId} not found for watcher ${watcherId}. ` +
+              'The window may have been deleted. Get a fresh token from read_knowledge({ watcher_id: ... }).'
+          );
+        }
+        windowId = tokenWindowId;
+        if (Number(windowResult[0].content_analyzed ?? 0) === 0) {
+          await tx`
+            UPDATE watcher_windows
+            SET extracted_data = ${sql.json(cleanedExtractedData)},
+                content_analyzed = 0,
+                model_used = ${provenanceModel},
+                client_id = ${provenanceClientId},
+                run_metadata = ${sql.json(provenanceMetadata)},
+                created_at = COALESCE(created_at, NOW())
+            WHERE id = ${windowId} AND watcher_id = ${watcherId}
+          `;
+        }
+      } else {
+        const existingWindow = await tx`
+          SELECT id, content_analyzed FROM watcher_windows
+          WHERE watcher_id = ${watcherId}
+            AND window_start = ${window_start}
+            AND window_end = ${window_end}
+            AND granularity = ${timeGranularity}
+          LIMIT 1
+        `;
+
+        if (existingWindow.length > 0) {
+          windowId = existingWindow[0].id as number;
+          if (Number(existingWindow[0].content_analyzed ?? 0) === 0) {
+            await tx`
+              UPDATE watcher_windows
+              SET extracted_data = ${sql.json(cleanedExtractedData)},
+                  content_analyzed = 0,
+                  model_used = ${provenanceModel},
+                  client_id = ${provenanceClientId},
+                  run_metadata = ${sql.json(provenanceMetadata)},
+                  created_at = COALESCE(created_at, NOW())
+              WHERE id = ${windowId} AND watcher_id = ${watcherId}
+            `;
+          }
+        } else {
+          const newWindowId = await getNextNumericId(tx, 'watcher_windows');
+          try {
+            await tx`
+              INSERT INTO watcher_windows (
+                id,
+                watcher_id, window_start, window_end, granularity,
+                extracted_data, content_analyzed, model_used, client_id, run_metadata, created_at
+              ) VALUES (
+                ${newWindowId},
+                ${watcherId}, ${window_start}, ${window_end}, ${timeGranularity},
+                ${sql.json(cleanedExtractedData)}, 0, ${provenanceModel}, ${provenanceClientId}, ${sql.json(provenanceMetadata)}, NOW()
+              )
+            `;
+            windowId = newWindowId;
+            createdWindow = true;
+          } catch (err: any) {
+            if (err?.code !== '23505') throw err;
+            const racedWindow = await tx`
+              SELECT id FROM watcher_windows
+              WHERE watcher_id = ${watcherId}
+                AND window_start = ${window_start}
+                AND window_end = ${window_end}
+                AND granularity = ${timeGranularity}
+              LIMIT 1
+            `;
+            if (racedWindow.length === 0) throw err;
+            windowId = racedWindow[0].id as number;
+          }
+        }
+      }
+
+      let completedRun = false;
+      if (watcherRunId && Number.isFinite(watcherRunId)) {
+        const completedRows = await tx`
+          UPDATE runs
+          SET status = 'completed',
+              window_id = ${windowId},
+              completed_at = current_timestamp,
+              error_message = NULL
+          WHERE id = ${watcherRunId}
+            AND run_type = 'watcher'
+            AND status IN ('running', 'claimed')
+          RETURNING id
+        `;
+        completedRun = completedRows.length > 0;
+      }
+
+      if (createdWindow || completedRun) {
+        const watcherScheduleRows = await tx`
+          SELECT schedule, next_run_at
+          FROM watchers
+          WHERE id = ${watcherId}
+          LIMIT 1
+        `;
+        const watcherSchedule = (watcherScheduleRows[0]?.schedule as string | null) ?? null;
+        const currentNextRunAt = (watcherScheduleRows[0]?.next_run_at as string | null) ?? null;
+        if (watcherSchedule) {
+          const nextRunBase = currentNextRunAt
+            ? new Date(Math.max(Date.now(), new Date(currentNextRunAt).getTime()))
+            : new Date();
+          await tx`
+            UPDATE watchers
+            SET next_run_at = ${nextRunAt(watcherSchedule, nextRunBase)}::timestamptz,
+                updated_at = NOW()
+            WHERE id = ${watcherId}
+          `;
+        }
+      }
+
+      return { windowId };
+    });
+
+    logger.info(
+      `[complete_window] No new content for watcher ${watcherId} (${window_start} - ${window_end}); ` +
+        `${skippedCount} item(s) already analyzed by prior windows. Marked as no-op completion.`
+    );
+
+    return {
+      action: 'complete_window' as const,
+      watcher_id: String(watcherId),
+      window_id: noOpResult.windowId,
+      window_start,
+      window_end,
+      content_linked: 0,
+      reaction_status: 'skipped' as const,
+    };
+  }
 
   // ============================================
   // STEP 7-9: Wrap all DB operations in a transaction
