@@ -1,0 +1,60 @@
+/**
+ * ClientSDK `viewTemplates` namespace. Thin wrapper over `manageViewTemplates`.
+ *
+ * `resource_id` can be a string (entity_type slug) or a number (entity id)
+ * depending on `resource_type`. The handler stores the whole template as a
+ * single `json_template` object — callers may nest a `data_sources` key
+ * inside it when they want SQL-backed sources.
+ */
+
+import type { Env } from "../../index";
+import { manageViewTemplates } from "../../tools/admin/manage_view_templates";
+import type { ToolContext } from "../../tools/registry";
+
+type ResourceType = "entity_type" | "entity";
+type ResourceId = string | number;
+
+export interface ViewTemplateSetInput {
+  resource_type: ResourceType;
+  resource_id: ResourceId;
+  json_template: Record<string, unknown>;
+  tab_name?: string;
+  tab_order?: number;
+  change_notes?: string;
+}
+
+export interface ViewTemplatesNamespace {
+  get(input: {
+    resource_type: ResourceType;
+    resource_id: ResourceId;
+    tab_name?: string;
+  }): Promise<unknown>;
+  set(input: ViewTemplateSetInput): Promise<unknown>;
+  rollback(input: {
+    resource_type: ResourceType;
+    resource_id: ResourceId;
+    /** Version number (not the row id) to roll back to. */
+    version: number;
+    tab_name?: string;
+  }): Promise<unknown>;
+  removeTab(input: {
+    resource_type: ResourceType;
+    resource_id: ResourceId;
+    tab_name: string;
+  }): Promise<unknown>;
+}
+
+export function buildViewTemplatesNamespace(
+  ctx: ToolContext,
+  env: Env,
+): ViewTemplatesNamespace {
+  const call = <T>(payload: Record<string, unknown>): Promise<T> =>
+    manageViewTemplates(payload as never, env, ctx) as Promise<T>;
+
+  return {
+    get: (input) => call({ action: "get", ...input }),
+    set: (input) => call({ action: "set", ...input }),
+    rollback: (input) => call({ action: "rollback", ...input }),
+    removeTab: (input) => call({ action: "remove_tab", ...input }),
+  };
+}

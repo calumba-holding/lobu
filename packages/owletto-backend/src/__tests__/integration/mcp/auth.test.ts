@@ -262,17 +262,15 @@ describe('MCP Authentication', () => {
       const body = await response.json();
       const toolNames = body.result.tools.map((tool: any) => tool.name);
 
+      // Public reads survive: search_knowledge, search (SDK discovery).
       expect(toolNames).toContain('search_knowledge');
+      expect(toolNames).toContain('search');
+      // Writes and admin reads must not be visible to anonymous public callers.
       expect(toolNames).not.toContain('save_knowledge');
       expect(toolNames).not.toContain('query_sql');
-
-      const manageEntity = body.result.tools.find((tool: any) => tool.name === 'manage_entity');
-      expect(manageEntity).toBeDefined();
-      expect(manageEntity.inputSchema.properties.action.enum).toEqual([
-        'list',
-        'get',
-        'list_links',
-      ]);
+      expect(toolNames).not.toContain('execute');
+      // Legacy `manage_*` tools are no longer registered as external MCP tools.
+      expect(toolNames).not.toContain('manage_entity');
     });
 
     it('allows anonymous public-read tool calls on public org MCP routes', async () => {
@@ -379,16 +377,11 @@ describe('MCP Authentication', () => {
       const toolNames = body.result.tools.map((tool: any) => tool.name);
 
       expect(toolNames).toContain('search_knowledge');
+      expect(toolNames).toContain('search');
       expect(toolNames).not.toContain('save_knowledge');
       expect(toolNames).not.toContain('query_sql');
-
-      const manageEntity = body.result.tools.find((tool: any) => tool.name === 'manage_entity');
-      expect(manageEntity).toBeDefined();
-      expect(manageEntity.inputSchema.properties.action.enum).toEqual([
-        'list',
-        'get',
-        'list_links',
-      ]);
+      expect(toolNames).not.toContain('execute');
+      expect(toolNames).not.toContain('manage_entity');
     });
 
     it('should reject expired OAuth access token', async () => {
@@ -730,7 +723,10 @@ describe('MCP Authentication', () => {
       expect(body.error?.message).toContain("Agent 'missing-agent' was not found");
     });
 
-    it('hides org switching tools on scoped /mcp/:org routes', async () => {
+    it('exposes org switching tools on scoped /mcp/:org routes too', async () => {
+      // PR-2: list_organizations + switch_organization are no longer
+      // gated behind the unscoped /mcp endpoint. Scoped sessions can still
+      // call switch_organization to move off the URL pin.
       const { token } = await createTestAccessToken(user.id, org.id, client.client_id);
 
       const response = await post(`/mcp/${org.slug}`, {
@@ -747,8 +743,8 @@ describe('MCP Authentication', () => {
       const body = await response.json();
       const toolNames = body.result.tools.map((tool: any) => tool.name);
 
-      expect(toolNames).not.toContain('list_organizations');
-      expect(toolNames).not.toContain('switch_organization');
+      expect(toolNames).toContain('list_organizations');
+      expect(toolNames).toContain('switch_organization');
     });
   });
 
@@ -924,12 +920,19 @@ describe('MCP Authentication', () => {
 
       expect(result.tools).toBeInstanceOf(Array);
 
-      // Verify expected tools are present
+      // Verify expected tools are present. The legacy `manage_*`,
+      // `read_knowledge`, `get_watcher`, `list_watchers` MCP tools are now
+      // internal-only and reachable via the SDK from `execute` scripts.
       const toolNames = result.tools.map((t: any) => t.name);
       expect(toolNames).toContain('search_knowledge');
-      expect(toolNames).toContain('read_knowledge');
-      expect(toolNames).toContain('get_watcher');
-      expect(toolNames).toContain('list_watchers');
+      expect(toolNames).toContain('save_knowledge');
+      expect(toolNames).toContain('search');
+      expect(toolNames).toContain('execute');
+      expect(toolNames).not.toContain('read_knowledge');
+      expect(toolNames).not.toContain('get_watcher');
+      expect(toolNames).not.toContain('list_watchers');
+      expect(toolNames).not.toContain('manage_entity');
+      expect(toolNames).not.toContain('join_organization');
     });
 
     it('should include tool descriptions', async () => {

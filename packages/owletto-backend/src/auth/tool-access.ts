@@ -3,12 +3,23 @@
  *
  * Centralizes role/scoped MCP access checks and what anonymous/public
  * callers are allowed to read.
+ *
+ * Note on `execute`: the MCP entry point requires write-tier access, and
+ * admin-only SDK methods still re-check role + MCP scope at the delegated
+ * handler boundary before any mutation runs.
  */
 
-type ToolAccessLevel = 'read' | 'write' | 'admin';
+export type ToolAccessLevel = 'read' | 'write' | 'admin';
 
 const MEMBER_WRITE_ACTIONS: Record<string, Set<string> | null> = {
   save_knowledge: null,
+  // `execute` reaches admin handlers inside the script; per-call gates fire
+  // on each SDK method, so the entry-point check is just write-tier.
+  execute: null,
+  // Legacy `manage_*` policy entries — the tools themselves are no longer
+  // registered with MCP, but the handlers are still reached via SDK
+  // namespace wrappers from inside `execute`, and `routeAction` consults
+  // these tables to fire the same per-action access decisions.
   manage_entity: new Set(['create', 'update', 'link', 'unlink', 'update_link']),
 };
 
@@ -20,15 +31,19 @@ const OWNER_ADMIN_ACTIONS: Record<string, Set<string>> = {
     'update',
     'delete',
     'connect',
+    'reauthenticate',
     'test',
     'install_connector',
     'uninstall_connector',
     'toggle_connector_login',
     'update_connector_auth',
+    'update_connector_default_config',
     'set_connector_entity_link_overrides',
   ]),
   manage_feeds: new Set(['create_feed', 'update_feed', 'delete_feed', 'trigger_feed']),
   manage_auth_profiles: new Set([
+    'get_auth_profile',
+    'test_auth_profile',
     'create_auth_profile',
     'update_auth_profile',
     'delete_auth_profile',
@@ -40,9 +55,11 @@ const OWNER_ADMIN_ACTIONS: Record<string, Set<string>> = {
     'create_version',
     'upgrade',
     'complete_window',
+    'trigger',
     'delete',
     'set_reaction_script',
     'submit_feedback',
+    'create_from_version',
   ]),
   manage_classifiers: new Set([
     'create',
@@ -52,26 +69,33 @@ const OWNER_ADMIN_ACTIONS: Record<string, Set<string>> = {
     'delete',
     'classify',
   ]),
+  manage_view_templates: new Set(['set', 'rollback', 'remove_tab']),
 };
 
 const PUBLIC_READ_ACTIONS: Record<string, Set<string> | null> = {
   resolve_path: null,
   search_knowledge: null,
+  // SDK method discovery — safe to expose; surfaces no data.
+  search: null,
+  // Internal read-paths — kept for tests that exercise public-readability
+  // semantics; legitimate external access is via `execute`.
   read_knowledge: null,
   get_watcher: null,
   list_watchers: null,
-  // Visible to anonymous/non-member sessions so the LLM can discover the
-  // self-serve join path on a public workspace. The tool itself enforces
-  // authentication and public-org policy at call time.
-  join_organization: null,
   manage_entity: new Set(['list', 'get', 'list_links']),
   manage_entity_schema: new Set(['list', 'get', 'audit', 'list_rules']),
   manage_connections: new Set(['list', 'get', 'list_connector_definitions']),
   manage_feeds: new Set(['list_feeds', 'get_feed']),
   manage_auth_profiles: new Set(['list_auth_profiles']),
   manage_operations: new Set(['list_available', 'list_runs', 'get_run']),
-  manage_watchers: new Set(['get_versions', 'get_version_details', 'get_component_reference']),
+  manage_watchers: new Set([
+    'get_versions',
+    'get_version_details',
+    'get_component_reference',
+    'get_feedback',
+  ]),
   manage_classifiers: new Set(['list', 'get_versions']),
+  manage_view_templates: new Set(['get']),
 };
 
 function getAction(args: unknown): string | null {
@@ -106,7 +130,8 @@ export function requiresOwnerAdmin(
   args: unknown,
   readOnlyHint: boolean
 ): boolean {
-  // query_sql is intentionally owner/admin only despite being read-only.
+  // query_sql is intentionally owner/admin only despite being read-only —
+  // it can read across the whole org's data, including audit/event tables.
   if (toolName === 'query_sql') return true;
 
   if (actionMatches(OWNER_ADMIN_ACTIONS, toolName, args)) return true;
@@ -123,9 +148,26 @@ export function getRequiredAccessLevel(
   readOnlyHint: boolean
 ): ToolAccessLevel {
   if (toolName === 'switch_organization') return 'read';
+  if (toolName === 'list_organizations') return 'read';
   if (requiresOwnerAdmin(toolName, args, readOnlyHint)) return 'admin';
   if (requiresMemberWrite(toolName, args, readOnlyHint)) return 'write';
   return 'read';
+}
+
+export function hasRequiredMcpScope(
+  requiredAccess: ToolAccessLevel,
+  scopes: string[] | null | undefined
+): boolean {
+  if (scopes == null) return true;
+  if (scopes.length === 0) return false;
+  const scopeSet = new Set(scopes);
+  if (requiredAccess === 'read') {
+    return scopeSet.has('mcp:read') || scopeSet.has('mcp:write') || scopeSet.has('mcp:admin');
+  }
+  if (requiredAccess === 'write') {
+    return scopeSet.has('mcp:write') || scopeSet.has('mcp:admin');
+  }
+  return scopeSet.has('mcp:admin');
 }
 
 export function isPublicReadable(toolName: string, args: unknown): boolean {
