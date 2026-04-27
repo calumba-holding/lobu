@@ -353,18 +353,27 @@ async function _resolvePath(
     const isLeaf = i === parsedSegments.length - 1;
 
     if (!isLeaf) {
-      // Lightweight query for intermediate path entities – no COUNT subqueries, no template joins
+      // Lightweight query for intermediate path entities – no COUNT subqueries, no template joins.
+      // Cross-org tolerance: a tenant path can traverse into a public-catalog entity.
+      // $member is per-tenant — never fall back to a public catalog's $member row, since
+      // member-redaction uses the caller's workspace role, not the resolved entity's org.
       const row = await simpleQuery(sql`
         SELECT e.id, et.slug AS entity_type, e.slug, e.name, e.parent_id
         FROM entities e
         JOIN entity_types et ON et.id = e.entity_type_id
-        WHERE e.organization_id = ${workspace.id}
+        LEFT JOIN organization eo ON eo.id = e.organization_id
+        WHERE (
+            e.organization_id = ${workspace.id}
+            OR (eo.visibility = 'public' AND et.slug <> '$member')
+          )
+          AND e.deleted_at IS NULL
           AND et.slug = ${segment.entity_type}
           AND e.slug = ${segment.slug}
           AND (
             (${parentId}::bigint IS NULL AND e.parent_id IS NULL)
             OR e.parent_id = ${parentId}
           )
+        ORDER BY (e.organization_id = ${workspace.id}) DESC, e.id ASC
         LIMIT 1
       `);
 
@@ -386,7 +395,8 @@ async function _resolvePath(
       continue;
     }
 
-    // Leaf entity: fetch core data (without expensive COUNT subqueries)
+    // Leaf entity: fetch core data (without expensive COUNT subqueries).
+    // Cross-org tolerance: same widening as the intermediate query, excluding $member.
     const row = await simpleQuery(sql`
         SELECT
           e.id,
@@ -404,13 +414,19 @@ async function _resolvePath(
           ON vtv_entity.id = e.current_view_template_version_id
         LEFT JOIN view_template_versions vtv_et
           ON vtv_et.id = et.current_view_template_version_id
-        WHERE e.organization_id = ${workspace.id}
+        LEFT JOIN organization eo ON eo.id = e.organization_id
+        WHERE (
+            e.organization_id = ${workspace.id}
+            OR (eo.visibility = 'public' AND et.slug <> '$member')
+          )
+          AND e.deleted_at IS NULL
           AND et.slug = ${segment.entity_type}
           AND e.slug = ${segment.slug}
           AND (
             (${parentId}::bigint IS NULL AND e.parent_id IS NULL)
             OR e.parent_id = ${parentId}
           )
+        ORDER BY (e.organization_id = ${workspace.id}) DESC, e.id ASC
         LIMIT 1
       `);
 
@@ -453,7 +469,10 @@ async function _resolvePath(
       Promise.all([
         simpleQuery(
           sql.unsafe<{ cnt: number }>(
-            `SELECT COUNT(*) as cnt FROM current_event_records ev WHERE ${entityLinkMatchSql(`${Number(entityRow.id)}::bigint`, 'ev')}`
+            `SELECT COUNT(*) as cnt FROM current_event_records ev
+             WHERE ${entityLinkMatchSql(`${Number(entityRow.id)}::bigint`, 'ev')}
+               AND ev.organization_id = $1`,
+            [workspace.id]
           )
         ),
         simpleQuery(sql`
@@ -466,7 +485,10 @@ async function _resolvePath(
             AND cn.deleted_at IS NULL
         `),
         simpleQuery(
-          sql`SELECT COUNT(*) as cnt FROM watchers i WHERE ${Number(entityRow.id)}::int = ANY(i.entity_ids) AND i.status = 'active'`
+          sql`SELECT COUNT(*) as cnt FROM watchers i
+              WHERE ${Number(entityRow.id)}::int = ANY(i.entity_ids)
+                AND i.organization_id = ${workspace.id}
+                AND i.status = 'active'`
         ),
         fetchTabs(sql, 'entity', String(entityRow.id), workspace.id),
         fetchTabs(sql, 'entity_type', entityRow.entity_type, workspace.id),

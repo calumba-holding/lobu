@@ -197,16 +197,17 @@ purely visual:
 No new components; no new pages. The dropdown's data shape grows by one
 field. Same component everywhere.
 
-### 3. Discovery: lean on the existing org dropdown
+### 3. Discovery: lean on the existing org dropdown ✅ shipped
 
 A user wanting to *browse* a public catalog already navigates to
 `/{public-org-slug}` (e.g. `/venture-capital`). The org dropdown returns
-public orgs alongside member orgs. No new UI surface needed.
+public orgs alongside member orgs.
 
-What is *missing* from the dropdown today: visual separation between "your
-orgs" and "public catalogs you can read." Single-line change in the dropdown
-component to render two grouped sections, gated on
-`org.visibility === 'public'`.
+The "Your Organizations" / "Public Organizations" split with a separator
+already exists in
+`packages/owletto-web/src/components/sidebar/organization-dropdown.tsx`
+(grouped via `CommandGroup` headings + `CommandSeparator`, gated on
+`is_member` / `visibility`). No further work.
 
 For users who want to *find* a canonical entity by name without knowing the
 catalog: that's an agent task (`search_knowledge`), not a frontend search.
@@ -226,19 +227,29 @@ Same pattern as #377's `fetchEntityById`: widen each read site to
 e.deleted_at IS NULL`. Operational counts already gated by the CASE-WHEN
 shape.
 
-### 5. Visibility-flip safety (~10 LOC)
+### 5. Visibility-flip safety — deferred until there's a flip path
 
-If a public catalog flips back to private, existing tenant cross-org refs
-become semantically dangling. Cheapest defense: refuse the flip. In
-`tools/organizations.ts` (or wherever org settings are mutated), when a
-`visibility=public → private` change is requested, query
-`SELECT EXISTS (SELECT 1 FROM entity_relationships
-  JOIN entities te ON te.id = to_entity_id
-  WHERE te.organization_id = $org_being_flipped)`. If true, reject with
-"this catalog has incoming references; remove them or split your data into a
-new private org first."
+There is no exposed mutation that lets users (or admins) change
+`organization.visibility` today. `tools/organizations.ts` exposes only
+`listOrganizations` and `switchOrganization`; visibility is set at org
+creation. Item #7 already notes this. Adding a guard on a non-existent
+mutation is dead code.
 
-Cleaner than retroactive revalidation, no migration cost.
+When the admin visibility-control path lands, plug this guard in at the
+mutation site:
+
+```sql
+SELECT EXISTS (
+  SELECT 1
+  FROM entity_relationships r
+  JOIN entities te ON te.id = r.to_entity_id
+  WHERE te.organization_id = $org_being_flipped
+)
+```
+
+If true on a `public → private` flip, reject with: *"this catalog has
+incoming references; remove them or split your data into a new private org
+first."* Cleaner than retroactive revalidation, no migration cost.
 
 ### 6. Catalog curation pass (data, not code)
 
@@ -254,6 +265,29 @@ mixed in:
 Before recommending these as references in agent prompts, do a one-off
 prune. Pure SQL pass against prod (we have direct access). No PR needed —
 just a documented changelog of what was removed.
+
+#### 2026-04-27 — first pass
+
+Inventory taken across all `visibility='public'` orgs (~200 entities, 12
+catalogs). Soft-deleted:
+
+- `entities.id = 45` `classification-test-brand` "Classification Test
+  Brand" in `market-intelligence` (no inbound rels) — clearly test data.
+
+Held back, pending user judgment:
+
+- `$member` rows in public orgs (careops 26, market-intelligence 2,
+  venture-capital 6). These represent real cross-org membership; auto-
+  provisioned when a user joins. Soft-deleting them would either be
+  re-created on next access or break member lookups for those users.
+  Treating them as catalog cruft was a misread.
+- `stripe-test` brand in market-intelligence — name suggests test data
+  but plausibly intentional (Stripe sandbox). Skipped.
+- The ~5-entity verticals (`leadership`, `sales`, `devops`, `delivery`,
+  `ecommerce`, `finance`, `legal-review`, `support`) — generic placeholder
+  rows that look like template seeds. Pruning a whole org is destructive
+  and may break downstream agents pointing at them. Needs explicit user
+  call before any further removal.
 
 ### 7. `is_catalog` flag on `organization` (~30 LOC + migration)
 
