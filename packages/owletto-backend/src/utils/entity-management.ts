@@ -427,6 +427,10 @@ export async function getEntity(
   // public-catalog entity, totals reflect the caller's events/feeds/watchers/
   // children that reference it — never cross-tenant activity around the
   // public row.
+  //
+  // Visibility branches checked here:
+  //   1. caller's own org (always readable)
+  //   2. public-catalog entity (anyone reads, except `$member`)
   const result = await sql<CreatedEntity>`
     SELECT
       e.id, et.slug AS entity_type, e.name, e.slug, e.parent_id, e.metadata, e.created_at,

@@ -11,6 +11,9 @@
  * Bump CURRENT_SCHEMA_VERSION when making breaking changes.
  */
 
+import { AutoCreateWhenRule } from '@lobu/owletto-sdk';
+import { TypeCompiler } from '@sinclair/typebox/compiler';
+
 export const CURRENT_SCHEMA_VERSION = 1;
 
 export type ModelType = 'entity' | 'relationship' | 'watcher';
@@ -29,12 +32,26 @@ export interface EntitySchema {
   metadata_schema?: Record<string, unknown>;
 }
 
+export interface RelationshipTypeRule {
+  source: string;
+  target: string;
+}
+
 export interface RelationshipSchema {
   version?: number;
   type: 'relationship';
   slug: string;
   name: string;
   description?: string;
+  /**
+   * Allowed (source_entity_type, target_entity_type) pairs. When omitted, any
+   * pair is permitted (backend `validateTypeRule` short-circuits if there are
+   * no rules). Provide rules to constrain the relationship — especially for
+   * cross-org references where unconstrained types would let any source
+   * entity link to any target.
+   */
+  rules?: RelationshipTypeRule[];
+  auto_create_when?: AutoCreateWhenRule[];
 }
 
 export interface WatcherSchema {
@@ -132,6 +149,37 @@ function requireObject(
   return true;
 }
 
+// Single source of truth for auto_create_when shape lives in
+// `@lobu/owletto-sdk`'s `AutoCreateWhenRule` schema. Compile once at module
+// load and surface every TypeBox error as a ValidationError.
+const compiledRule = TypeCompiler.Compile(AutoCreateWhenRule);
+
+function validateAutoCreateWhenRules(
+  value: unknown,
+  file: string,
+  errors: ValidationError[]
+): void {
+  if (!Array.isArray(value)) {
+    errors.push({
+      file,
+      field: 'auto_create_when',
+      message: '"auto_create_when" must be an array of identity-engine rules',
+    });
+    return;
+  }
+  value.forEach((rule, idx) => {
+    for (const err of compiledRule.Errors(rule)) {
+      // TypeBox paths use JSON-Pointer slashes; translate to dot notation to
+      // match the rest of this file's `field` style.
+      errors.push({
+        file,
+        field: `auto_create_when[${idx}]${err.path.replaceAll('/', '.')}`,
+        message: err.message,
+      });
+    }
+  });
+}
+
 export function validateModel(parsed: Record<string, unknown>, file: string): ValidationError[] {
   const errors: ValidationError[] = [];
   checkVersion(parsed, file, errors);
@@ -152,6 +200,46 @@ export function validateModel(parsed: Record<string, unknown>, file: string): Va
   if (modelType === 'watcher') {
     requireString(parsed, 'schedule', file, errors);
     requireString(parsed, 'prompt', file, errors);
+  }
+
+  if (modelType === 'relationship' && parsed.auto_create_when !== undefined) {
+    validateAutoCreateWhenRules(parsed.auto_create_when, file, errors);
+  }
+
+  if (modelType === 'relationship' && parsed.rules !== undefined) {
+    if (!Array.isArray(parsed.rules)) {
+      errors.push({
+        file,
+        field: 'rules',
+        message: '"rules" must be an array of { source, target } pairs',
+      });
+    } else {
+      parsed.rules.forEach((rule, idx) => {
+        if (!rule || typeof rule !== 'object' || Array.isArray(rule)) {
+          errors.push({
+            file,
+            field: `rules[${idx}]`,
+            message: 'each rule must be an object with "source" and "target" string fields',
+          });
+          return;
+        }
+        const r = rule as Record<string, unknown>;
+        if (typeof r.source !== 'string' || r.source === '') {
+          errors.push({
+            file,
+            field: `rules[${idx}].source`,
+            message: '"source" is required and must be a non-empty entity-type slug',
+          });
+        }
+        if (typeof r.target !== 'string' || r.target === '') {
+          errors.push({
+            file,
+            field: `rules[${idx}].target`,
+            message: '"target" is required and must be a non-empty entity-type slug',
+          });
+        }
+      });
+    }
   }
 
   return errors;
