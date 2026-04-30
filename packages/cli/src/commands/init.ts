@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { confirm, input, password, select } from "@inquirer/prompts";
 import chalk from "chalk";
 import ora from "ora";
-import { promptPlatformConfig } from "../commands/connections/platforms.js";
+import { promptPlatformConfig } from "../commands/platforms/platform-prompts.js";
 import { secretsSetCommand } from "../commands/secrets.js";
 import {
   getProviderById,
@@ -149,7 +149,7 @@ export async function initCommand(
   // Define skills locally via skills/<name>/SKILL.md or
   // agents/<id>/skills/<name>/SKILL.md.
 
-  // Connection (messaging platform) selection
+  // Chat platform selection
   const platformChoices = [
     { name: "Skip — I'll connect a platform later", value: "" },
     { name: "Telegram", value: "telegram" },
@@ -161,14 +161,14 @@ export async function initCommand(
   ];
 
   const platformType = await select<string>({
-    message: "Connect a messaging platform?",
+    message: "Connect a chat platform?",
     choices: platformChoices,
     default: "",
   });
 
-  const { connectionConfig, connectionSecrets } = platformType
+  const { platformConfig, platformSecrets } = platformType
     ? await promptPlatformConfig(platformType)
-    : { connectionConfig: {}, connectionSecrets: [] };
+    : { platformConfig: {}, platformSecrets: [] };
 
   // Memory
   const memoryChoice = await select<
@@ -196,7 +196,7 @@ export async function initCommand(
     });
     envSecrets.push({ envVar: "MEMORY_URL", value: owlettoUrl });
   }
-  // "none" — no Owletto scaffold, gateway defaults to filesystem memory
+  // "none" — no memory scaffold, gateway defaults to filesystem memory
 
   // Observability — OTEL tracing endpoint
   const otelEndpoint = await input({
@@ -286,9 +286,9 @@ export async function initCommand(
       providerId: providerId || undefined,
       providerEnvVar: selectedProvider?.providers?.[0]?.envVarName,
       providerModel: selectedProvider?.providers?.[0]?.defaultModel,
-      connectionType: platformType || undefined,
-      connectionConfig:
-        Object.keys(connectionConfig).length > 0 ? connectionConfig : undefined,
+      platformType: platformType || undefined,
+      platformConfig:
+        Object.keys(platformConfig).length > 0 ? platformConfig : undefined,
       includeOwlettoMemory,
       owlettoOrg: includeOwlettoMemory ? projectName : undefined,
       owlettoName: includeOwlettoMemory ? humanizeSlug(projectName) : undefined,
@@ -325,8 +325,8 @@ export async function initCommand(
       );
     }
 
-    // Save connection secrets to .env
-    for (const secret of connectionSecrets) {
+    // Save platform secrets to .env
+    for (const secret of platformSecrets) {
       await secretsSetCommand(projectDir, secret.envVar, secret.value);
     }
 
@@ -432,10 +432,10 @@ turns:
     );
     if (includeOwlettoMemory) {
       console.log(
-        chalk.dim("     - models/                      (Owletto model files)")
+        chalk.dim("     - models/                      (memory model files)")
       );
       console.log(
-        chalk.dim("     - data/                        (Owletto seed data)")
+        chalk.dim("     - data/                        (memory seed data)")
       );
     }
     console.log(chalk.dim("     - .env                         (secrets)"));
@@ -455,7 +455,12 @@ turns:
     );
     if (owlettoUrl) {
       console.log(chalk.cyan("  Lobu memory:"));
-      console.log(chalk.dim(`     ${owlettoUrl}\n`));
+      console.log(chalk.dim(`     ${owlettoUrl}`));
+      console.log(
+        chalk.dim(
+          "     Run `lobu memory init` to configure local MCP clients.\n"
+        )
+      );
     }
     console.log(chalk.cyan("  4. Start the services:"));
     console.log(chalk.dim("     npx @lobu/cli@latest run\n"));
@@ -492,8 +497,8 @@ export async function generateLobuToml(
     providerId?: string;
     providerEnvVar?: string;
     providerModel?: string;
-    connectionType?: string;
-    connectionConfig?: Record<string, string>;
+    platformType?: string;
+    platformConfig?: Record<string, string>;
     includeOwlettoMemory?: boolean;
     owlettoOrg?: string;
     owlettoName?: string;
@@ -535,21 +540,21 @@ export async function generateLobuToml(
 
   lines.push("");
 
-  if (options.connectionType && options.connectionConfig) {
+  if (options.platformType && options.platformConfig) {
     lines.push(
-      `[[agents.${id}.connections]]`,
-      `type = "${options.connectionType}"`
+      `[[agents.${id}.platforms]]`,
+      `type = "${options.platformType}"`
     );
-    lines.push(`[agents.${id}.connections.config]`);
-    for (const [key, value] of Object.entries(options.connectionConfig)) {
+    lines.push(`[agents.${id}.platforms.config]`);
+    for (const [key, value] of Object.entries(options.platformConfig)) {
       lines.push(`${key} = "${value}"`);
     }
   } else {
     lines.push(
-      "# Messaging platform (add via the gateway configuration APIs or uncomment below):",
-      `# [[agents.${id}.connections]]`,
+      "# Chat platform (add via the gateway configuration APIs or uncomment below):",
+      `# [[agents.${id}.platforms]]`,
       '# type = "telegram"',
-      `# [agents.${id}.connections.config]`,
+      `# [agents.${id}.platforms.config]`,
       '# botToken = "$TELEGRAM_BOT_TOKEN"'
     );
   }

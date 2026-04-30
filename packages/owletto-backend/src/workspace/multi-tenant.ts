@@ -6,6 +6,7 @@ import type { AuthInfo } from '../auth/oauth/types';
 import { PersonalAccessTokenService } from '../auth/tokens';
 import { isPublicReadable } from '../auth/tool-access';
 import { getDb, simpleQuery } from '../db/client';
+import { CliTokenService } from '../gateway/auth/cli/token-service';
 import type { Env } from '../index';
 import logger from '../utils/logger';
 import { getConfiguredPublicOrigin } from '../utils/public-origin';
@@ -134,6 +135,7 @@ export class MultiTenantProvider implements WorkspaceProvider {
     c.set('memberRole', null);
     c.set('user', null);
     c.set('session', null);
+    c.set('authSource', null);
 
     let requestedOrgId: string | null = null;
     let requestedOrgVisibility: string | null = null;
@@ -220,6 +222,7 @@ export class MultiTenantProvider implements WorkspaceProvider {
         memberRole: string | null;
         user: unknown;
         session: unknown;
+        authSource: 'session' | 'pat' | 'oauth' | 'cli-token' | null;
       }>
     ) {
       if (overrides.mcpAuthInfo !== undefined) c.set('mcpAuthInfo', overrides.mcpAuthInfo);
@@ -229,15 +232,92 @@ export class MultiTenantProvider implements WorkspaceProvider {
       if (overrides.memberRole !== undefined) c.set('memberRole', overrides.memberRole);
       if (overrides.user !== undefined) c.set('user', overrides.user as any);
       if (overrides.session !== undefined) c.set('session', overrides.session as any);
+      if (overrides.authSource !== undefined) c.set('authSource', overrides.authSource);
       return next();
     }
 
     // 1) Bearer token auth (PAT or OAuth)
     if (authHeader?.startsWith('Bearer ')) {
       const token = authHeader.slice(7);
-      const authInfo = token.startsWith('owl_pat_')
+      const isPat = token.startsWith('owl_pat_');
+      const authInfo = isPat
         ? await new PersonalAccessTokenService(sql).verify(token)
         : await new OAuthProvider(sql, baseUrl).verifyAccessToken(token);
+
+      if (!authInfo && !isPat) {
+        const cliIdentity = await new CliTokenService().verifyAccessToken(token);
+        if (cliIdentity) {
+          let effectiveOrgId = requestedOrgId;
+
+          if (!effectiveOrgId) {
+            if (isUnscopedMcpRoute) {
+              await setContextAndContinue({
+                mcpIsAuthenticated: true,
+                organizationId: null,
+                memberRole: null,
+                user: {
+                  id: cliIdentity.userId,
+                  email: cliIdentity.email ?? '',
+                  name: cliIdentity.name ?? '',
+                  emailVerified: false,
+                },
+                session: {
+                  id: cliIdentity.sessionId,
+                  userId: cliIdentity.userId,
+                  token,
+                  expiresAt: new Date(cliIdentity.expiresAt),
+                },
+                authSource: 'cli-token',
+              });
+              return undefined;
+            }
+            return c.json(
+              {
+                error: 'invalid_request',
+                error_description: 'Organization slug required in URL (e.g. /mcp/{org})',
+              },
+              400
+            );
+          }
+
+          const role = await getMembershipRole(effectiveOrgId, cliIdentity.userId, {
+            bypassCache: true,
+          });
+          const allowPublicOrgWithoutMembership =
+            !role && requestedOrgId === effectiveOrgId && requestedOrgVisibility === 'public';
+
+          if (!role && !allowPublicOrgWithoutMembership) {
+            return c.json(
+              {
+                error: 'forbidden',
+                error_description: 'Token owner is not a member of this organization',
+              },
+              403
+            );
+          }
+
+          await setContextAndContinue({
+            mcpIsAuthenticated: true,
+            organizationId: effectiveOrgId,
+            memberRole: role,
+            user: {
+              id: cliIdentity.userId,
+              email: cliIdentity.email ?? '',
+              name: cliIdentity.name ?? '',
+              emailVerified: false,
+            },
+            session: {
+              id: cliIdentity.sessionId,
+              userId: cliIdentity.userId,
+              token,
+              expiresAt: new Date(cliIdentity.expiresAt),
+              activeOrganizationId: effectiveOrgId,
+            },
+            authSource: 'cli-token',
+          });
+          return undefined;
+        }
+      }
 
       if (!authInfo) {
         return c.json(
@@ -282,6 +362,7 @@ export class MultiTenantProvider implements WorkspaceProvider {
             mcpIsAuthenticated: true,
             organizationId: null,
             memberRole: null,
+            authSource: isPat ? 'pat' : 'oauth',
           });
           return undefined;
         }
@@ -311,11 +392,49 @@ export class MultiTenantProvider implements WorkspaceProvider {
         );
       }
 
+      // Populate `user` for PAT/OAuth-bearer paths so REST routes that read
+      // `c.get('user')` (e.g. POST /agents owner attribution) have a value.
+      // Mirrors the cli-token branch above so the two bearer flavours behave
+      // identically downstream.
+      let bearerUser: { id: string; email: string; name: string; emailVerified: boolean } | null =
+        null;
+      try {
+        const userRows = await simpleQuery(sql`
+          SELECT id, email, name, "emailVerified"
+          FROM "user"
+          WHERE id = ${authInfo.userId}
+          LIMIT 1
+        `);
+        if (userRows.length > 0) {
+          const row = userRows[0] as {
+            id: string;
+            email: string;
+            name: string;
+            emailVerified: boolean | string | number | null;
+          };
+          bearerUser = {
+            id: row.id,
+            email: row.email ?? '',
+            name: row.name ?? '',
+            emailVerified:
+              typeof row.emailVerified === 'boolean'
+                ? row.emailVerified
+                : row.emailVerified === 't' ||
+                  row.emailVerified === 'true' ||
+                  row.emailVerified === 1,
+          };
+        }
+      } catch {
+        bearerUser = null;
+      }
+
       await setContextAndContinue({
         mcpAuthInfo: authInfo,
         mcpIsAuthenticated: true,
         organizationId: effectiveOrgId,
         memberRole: role,
+        user: bearerUser,
+        authSource: isPat ? 'pat' : 'oauth',
       });
       return undefined;
     }
@@ -355,6 +474,7 @@ export class MultiTenantProvider implements WorkspaceProvider {
               memberRole: null,
               user: session.user,
               session: session.session,
+              authSource: 'session',
             });
             return undefined;
           }
@@ -372,6 +492,7 @@ export class MultiTenantProvider implements WorkspaceProvider {
             memberRole: role,
             user: session.user,
             session: session.session,
+            authSource: 'session',
           });
           return undefined;
         }
@@ -392,6 +513,7 @@ export class MultiTenantProvider implements WorkspaceProvider {
           memberRole: null,
           user: session.user,
           session: session.session,
+          authSource: 'session',
         });
         return undefined;
       }

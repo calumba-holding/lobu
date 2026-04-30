@@ -15,6 +15,19 @@ async function getPackageVersion(): Promise<string> {
   return pkg.version ?? "0.0.0";
 }
 
+function handleCliError(error: unknown): void {
+  const exitCode =
+    typeof error === "object" &&
+    error !== null &&
+    "exitCode" in error &&
+    typeof (error as { exitCode?: unknown }).exitCode === "number"
+      ? (error as { exitCode: number }).exitCode
+      : 1;
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(chalk.red("\n  Error:"), message);
+  process.exitCode = exitCode;
+}
+
 export async function runCli(
   argv: readonly string[] = process.argv
 ): Promise<void> {
@@ -119,6 +132,53 @@ export async function runCli(
       if (!valid) process.exit(1);
     });
 
+  // ─── apply ──────────────────────────────────────────────────────────
+  // One-way `lobu.toml` → cloud org converger. GETs current state, renders
+  // a diff, prompts to confirm, then loops over the existing CRUD endpoints
+  // in dependency order. Re-running converges on partial failure.
+  program
+    .command("apply")
+    .description(
+      "Sync lobu.toml + agent dirs to your Lobu Cloud org (idempotent)"
+    )
+    .option("--dry-run", "Show the plan and exit without mutating")
+    .option("--yes", "Skip the confirmation prompt (CI mode)")
+    .option(
+      "--only <kind>",
+      "Restrict to one resource family: 'agents' | 'memory'"
+    )
+    .option("--org <slug>", "Org slug override (defaults to active session)")
+    .option("--url <url>", "Server URL override")
+    .action(
+      async (options: {
+        dryRun?: boolean;
+        yes?: boolean;
+        only?: string;
+        org?: string;
+        url?: string;
+      }) => {
+        if (
+          options.only !== undefined &&
+          options.only !== "agents" &&
+          options.only !== "memory"
+        ) {
+          console.error(
+            chalk.red("\n  Error:"),
+            `--only must be 'agents' or 'memory' (got: ${options.only})`
+          );
+          process.exit(2);
+        }
+        const { lobuApplyCommand } = await import("./commands/apply.js");
+        await lobuApplyCommand({
+          dryRun: options.dryRun,
+          yes: options.yes,
+          only: options.only as "agents" | "memory" | undefined,
+          org: options.org,
+          url: options.url,
+        });
+      }
+    );
+
   // ─── run ────────────────────────────────────────────────────────────
   // Boots the embedded Lobu stack (gateway + workers + memory backend) as
   // a single Node process. Extra args are forwarded to the bundle entry.
@@ -175,6 +235,17 @@ export async function runCli(
     .action(async (options: { context?: string }) => {
       const { whoamiCommand } = await import("./commands/whoami.js");
       await whoamiCommand(options);
+    });
+
+  // ─── token ──────────────────────────────────────────────────────────
+  program
+    .command("token")
+    .description("Print the current Lobu access token")
+    .option("-c, --context <name>", "Use a named context")
+    .option("--raw", "Print token only (no labels)")
+    .action(async (options: { context?: string; raw?: boolean }) => {
+      const { tokenCommand } = await import("./commands/token.js");
+      await tokenCommand(options);
     });
 
   // ─── context ────────────────────────────────────────────────────────
@@ -306,32 +377,218 @@ export async function runCli(
       await skillsAddCommand(process.cwd(), id, options);
     });
 
-  // ─── connections ────────────────────────────────────────────────────
-  const connections = program
-    .command("connections")
-    .description("Manage messaging platform connections");
+  // ─── platforms ──────────────────────────────────────────────────────
+  const platforms = program
+    .command("platforms")
+    .description("Manage chat platforms");
 
-  connections
+  platforms
     .command("list")
-    .description("List configured connections per agent")
+    .description("List configured platforms per agent")
     .action(async () => {
-      const { connectionsListCommand } = await import(
-        "./commands/connections/list.js"
+      const { platformsListCommand } = await import(
+        "./commands/platforms/list.js"
       );
-      await connectionsListCommand(process.cwd());
+      await platformsListCommand(process.cwd());
     });
 
-  connections
+  platforms
     .command("add <platform>")
     .description(
-      "Add a messaging platform connection (telegram, slack, discord, whatsapp, teams, gchat)"
+      "Add a chat platform (telegram, slack, discord, whatsapp, teams, gchat)"
     )
     .action(async (platform: string) => {
-      const { connectionsAddCommand } = await import(
-        "./commands/connections/add.js"
+      const { platformsAddCommand } = await import(
+        "./commands/platforms/add.js"
       );
-      await connectionsAddCommand(process.cwd(), platform);
+      await platformsAddCommand(process.cwd(), platform);
     });
 
-  await program.parseAsync(argv);
+  // ─── doctor ─────────────────────────────────────────────────────────
+  program
+    .command("doctor")
+    .description("Health checks (system deps, memory MCP)")
+    .option("--memory-only", "Only check memory MCP connectivity + auth")
+    .action(async (options: { memoryOnly?: boolean }) => {
+      const { doctorCommand } = await import("./commands/doctor.js");
+      await doctorCommand(options);
+    });
+
+  // ─── memory ─────────────────────────────────────────────────────────
+  // Memory operations live under the Lobu CLI. Auth is top-level (`lobu login`);
+  // memory subcommands only configure endpoints and call tools.
+  const memory = program
+    .command("memory")
+    .description("Lobu memory MCP — tools, seeding, and client configuration");
+
+  const memoryOrg = memory
+    .command("org")
+    .description("Manage active organization for memory MCP");
+  memoryOrg
+    .command("current")
+    .description("Show the active org")
+    .action(async () => {
+      const { memoryOrgCurrentCommand } = await import(
+        "./commands/memory/org.js"
+      );
+      memoryOrgCurrentCommand();
+    });
+  memoryOrg
+    .command("set <slug>")
+    .description("Set the active org slug")
+    .action(async (slug: string) => {
+      const { memoryOrgSetCommand } = await import("./commands/memory/org.js");
+      memoryOrgSetCommand(slug);
+    });
+
+  memory
+    .command("run [tool] [params]")
+    .description("Invoke an MCP tool (or list tools when called bare)")
+    .option("--url <url>", "Server URL override")
+    .option("--org <slug>", "Org slug override")
+    .action(
+      async (
+        tool: string | undefined,
+        params: string | undefined,
+        options: { url?: string; org?: string }
+      ) => {
+        const { memoryRunCommand } = await import("./commands/memory/run.js");
+        await memoryRunCommand(tool, params, options);
+      }
+    );
+
+  memory
+    .command("health")
+    .description("Validate Lobu login + MCP connectivity")
+    .option("--url <url>", "Server URL override")
+    .option("--org <slug>", "Org slug override")
+    .action(async (options: { url?: string; org?: string }) => {
+      const { memoryHealthCommand } = await import(
+        "./commands/memory/health.js"
+      );
+      await memoryHealthCommand(options);
+    });
+
+  memory
+    .command("configure")
+    .description(
+      "Write OpenClaw plugin config pointing at the active memory MCP"
+    )
+    .option("--url <url>", "Server URL override")
+    .option("--org <slug>", "Org slug override")
+    .option(
+      "--config-path <path>",
+      "OpenClaw config path (defaults to ~/.openclaw/openclaw.json)"
+    )
+    .option(
+      "--token-command <cmd>",
+      "Override the plugin's token retrieval command"
+    )
+    .action(
+      async (options: {
+        url?: string;
+        org?: string;
+        configPath?: string;
+        tokenCommand?: string;
+      }) => {
+        const { memoryConfigureCommand } = await import(
+          "./commands/memory/configure.js"
+        );
+        memoryConfigureCommand(options);
+      }
+    );
+
+  memory
+    .command("seed [path]")
+    .description(
+      "Provision a Lobu memory workspace from [memory.owletto] in lobu.toml + ./models + optional ./data"
+    )
+    .option("--dry-run", "Log what would be created without mutating")
+    .option(
+      "--org <slug>",
+      "Org slug override (defaults to [memory.owletto].org)"
+    )
+    .option("--url <url>", "Server URL override")
+    .action(
+      async (
+        pathArg: string | undefined,
+        options: {
+          dryRun?: boolean;
+          org?: string;
+          url?: string;
+        }
+      ) => {
+        const { memorySeedCommand } = await import("./commands/memory/seed.js");
+        await memorySeedCommand(pathArg, options);
+      }
+    );
+
+  memory
+    .command("init")
+    .description("Wire an existing project's agents to a memory MCP endpoint")
+    .option("--url <url>", "MCP server URL (skips the picker)")
+    .option("--agent <id>", "Configure a specific agent only")
+    .option("--skip-auth", "Skip the authentication step")
+    .action(
+      async (options: { url?: string; agent?: string; skipAuth?: boolean }) => {
+        const { memoryInitCommand } = await import("./commands/memory/init.js");
+        await memoryInitCommand(options);
+      }
+    );
+
+  memory
+    .command("browser-auth")
+    .description(
+      "Capture cookies from your local Chrome browser for a connector"
+    )
+    .requiredOption("--connector <key>", 'Connector key (e.g. "x")')
+    .option("--domains <list>", "Comma-separated cookie domains override")
+    .option(
+      "--chrome-profile <name>",
+      "Chrome profile name (interactive prompt if not specified)"
+    )
+    .option(
+      "--auth-profile-slug <slug>",
+      "Browser auth profile slug to store cookies on"
+    )
+    .option(
+      "--launch-cdp",
+      "Launch a dedicated Chrome user-data-dir with remote debugging enabled"
+    )
+    .option(
+      "--remote-debug-port <port>",
+      "Remote debugging port for --launch-cdp",
+      "9222"
+    )
+    .option(
+      "--dedicated-profile <name>",
+      "Dedicated Chrome profile dir name for --launch-cdp"
+    )
+    .option(
+      "--check",
+      "Check if stored cookies for a browser auth profile are still valid"
+    )
+    .action(
+      async (options: {
+        connector: string;
+        domains?: string;
+        chromeProfile?: string;
+        authProfileSlug?: string;
+        launchCdp?: boolean;
+        remoteDebugPort?: string;
+        dedicatedProfile?: string;
+        check?: boolean;
+      }) => {
+        const { memoryBrowserAuthCommand } = await import(
+          "./commands/memory/browser-auth.js"
+        );
+        await memoryBrowserAuthCommand(options);
+      }
+    );
+
+  try {
+    await program.parseAsync(argv);
+  } catch (error) {
+    handleCliError(error);
+  }
 }

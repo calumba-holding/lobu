@@ -38,11 +38,10 @@ Install the Lobu starter skill into any local `skills/` directory:
 npx @lobu/cli@latest skills add lobu
 ```
 
-Install the Owletto starter skill separately when the agent should understand Owletto memory and tooling:
+The bundled Lobu starter skill includes memory guidance. Configure local MCP clients when needed:
 
 ```bash
-npx owletto@latest skills add owletto
-npx owletto@latest init
+npx @lobu/cli@latest memory init
 ```
 
 ### Deployment

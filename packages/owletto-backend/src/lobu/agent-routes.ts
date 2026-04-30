@@ -216,6 +216,58 @@ function withOrg(c: any, fn: () => Promise<Response>): Promise<Response> {
   return orgContext.run({ organizationId: orgId }, fn);
 }
 
+/**
+ * Admin-tier auth gate.
+ *
+ * Before #468, agent CRUD + connection mutation routes implicitly required a
+ * web session — `c.get('user')` was null for PAT bearers, so the create-agent
+ * handler short-circuited with a 401. #468 hydrated `c.var.user` for PAT and
+ * OAuth bearers (matching the cli-token branch) so `lobu apply` could call
+ * these endpoints with a PAT. That fix removed the implicit gate.
+ *
+ * This helper restores the gate explicitly: admin-tier routes accept
+ *   - a better-auth session (`authSource === 'session'`),
+ *   - a `lobu login` CLI token (`authSource === 'cli-token'` — already
+ *     anchored to a real user/session pair), OR
+ *   - a PAT/OAuth bearer that carries the `mcp:admin` scope.
+ *
+ * Read-only routes (list, get) keep using `mcpAuth` alone — a `mcp:read` PAT
+ * is fine for those.
+ *
+ * Returns a Response when the request must be rejected; returns null when the
+ * caller should proceed.
+ */
+function requireSessionOrAdminPat(c: any): Response | null {
+  const authSource = c.get('authSource') as
+    | 'session'
+    | 'pat'
+    | 'oauth'
+    | 'cli-token'
+    | null;
+
+  if (authSource === 'session' || authSource === 'cli-token') {
+    return null;
+  }
+
+  if (authSource === 'pat' || authSource === 'oauth') {
+    const authInfo = c.get('mcpAuthInfo');
+    const scopes: string[] = Array.isArray(authInfo?.scopes) ? authInfo.scopes : [];
+    if (scopes.includes('mcp:admin')) {
+      return null;
+    }
+    return c.json(
+      {
+        error: 'forbidden',
+        error_description:
+          'This route requires a web session or a token with mcp:admin scope.',
+      },
+      403
+    );
+  }
+
+  return c.json({ error: 'Authentication required' }, 401);
+}
+
 // ── List agents ──────────────────────────────────────────────────────────────
 
 routes.get('/', mcpAuth, async (c) => {
@@ -291,6 +343,8 @@ routes.get('/', mcpAuth, async (c) => {
 // ── Create agent ─────────────────────────────────────────────────────────────
 
 routes.post('/', mcpAuth, async (c) => {
+  const denied = requireSessionOrAdminPat(c);
+  if (denied) return denied;
   return withOrg(c, async () => {
     const body = await c.req.json<{
       agentId: string;
@@ -315,33 +369,59 @@ routes.post('/', mcpAuth, async (c) => {
     }
 
     const orgId = c.get('organizationId') as string;
-    const existingOrgId = await getAgentOrganizationId(agentId);
-    if (existingOrgId === orgId) {
-      return c.json({ error: 'Agent already exists' }, 409);
-    }
-    if (existingOrgId) {
-      return c.json({ error: 'Agent ID already exists in another organization' }, 409);
-    }
 
-    // Create metadata
-    await configStore.saveMetadata(agentId, {
-      agentId,
-      name,
-      description,
-      owner: { platform: 'owletto', userId: user.id },
-      createdAt: Date.now(),
-    });
-
-    // Create default settings with Owletto MCP server auto-injected
+    // Atomic create + auto-inject. Two concurrent `lobu apply` runs from the
+    // same operator can both reach this endpoint with the same agentId. The
+    // previous version did INSERT-then-saveSettings as two separate writes:
+    // a "loser" returning 200 in the idempotent branch could see the row
+    // before the winner's saveSettings landed, then immediately PATCH
+    // `mcpServers` with operator config — only for the winner's deferred
+    // saveSettings to clobber it moments later. Folding `mcp_servers` into
+    // the same INSERT statement closes that gap: the row + auto-injected
+    // MCP server land atomically and the loser's idempotent 200 already
+    // reflects fully-initialized state.
+    const sql = getDb();
+    const now = new Date();
     const orgSlug = c.req.param('orgSlug');
     const publicUrl =
       getConfiguredPublicOrigin() || `http://localhost:${process.env.PORT || '8787'}`;
-    await configStore.saveSettings(agentId, {
-      mcpServers: {
-        owletto: { url: `${publicUrl}/mcp/${orgSlug}` },
-      },
-      updatedAt: Date.now(),
-    });
+    const ownerMcpServers = {
+      owletto: { url: `${publicUrl}/mcp/${orgSlug}` },
+    };
+    const inserted = await sql`
+      INSERT INTO agents (
+        id, organization_id, name, description, owner_platform, owner_user_id,
+        mcp_servers, created_at, updated_at
+      )
+      VALUES (
+        ${agentId}, ${orgId}, ${name}, ${description ?? null},
+        'owletto', ${user.id},
+        ${sql.json(ownerMcpServers)}, ${now}, ${now}
+      )
+      ON CONFLICT (id) DO NOTHING
+      RETURNING id
+    `;
+
+    if (inserted.length === 0) {
+      // Another writer (or a previous apply cycle) already owns this id.
+      // If they're in this org → idempotent 200. If another org → 409.
+      const existingOrgId = await getAgentOrganizationId(agentId);
+      if (existingOrgId === orgId) {
+        const existing = await configStore.getMetadata(agentId);
+        if (!existing) {
+          return c.json({ error: 'Agent metadata missing' }, 500);
+        }
+        return c.json(
+          {
+            agentId,
+            name: existing.name,
+            description: existing.description,
+          },
+          200
+        );
+      }
+      return c.json({ error: 'Agent ID already exists in another organization' }, 409);
+    }
 
     return c.json({ agentId, name, description }, 201);
   });
@@ -392,6 +472,8 @@ routes.get('/:agentId', mcpAuth, async (c) => {
 // ── Update agent metadata ────────────────────────────────────────────────────
 
 routes.patch('/:agentId', mcpAuth, async (c) => {
+  const denied = requireSessionOrAdminPat(c);
+  if (denied) return denied;
   return withOrg(c, async () => {
     const { agentId } = c.req.param();
     const body = await c.req.json<{ name?: string; description?: string }>();
@@ -408,6 +490,8 @@ routes.patch('/:agentId', mcpAuth, async (c) => {
 // ── Delete agent ─────────────────────────────────────────────────────────────
 
 routes.delete('/:agentId', mcpAuth, async (c) => {
+  const denied = requireSessionOrAdminPat(c);
+  if (denied) return denied;
   return withOrg(c, async () => {
     const { agentId } = c.req.param();
 
@@ -509,6 +593,8 @@ routes.get('/:agentId/config/skills/catalog', mcpAuth, async (c) => {
 // ── Start provider OAuth login ───────────────────────────────────────────────
 
 routes.get('/:agentId/providers/:providerId/oauth/start', mcpAuth, async (c) => {
+  const denied = requireSessionOrAdminPat(c);
+  if (denied) return denied;
   return withOrg(c, async () => {
     const { agentId, providerId } = c.req.param();
     const user = c.get('user');
@@ -544,6 +630,8 @@ routes.get('/:agentId/providers/:providerId/oauth/start', mcpAuth, async (c) => 
 // ── Complete provider OAuth login ────────────────────────────────────────────
 
 routes.post('/:agentId/providers/:providerId/oauth/code', mcpAuth, async (c) => {
+  const denied = requireSessionOrAdminPat(c);
+  if (denied) return denied;
   return withOrg(c, async () => {
     const { agentId, providerId } = c.req.param();
     const user = c.get('user');
@@ -619,6 +707,8 @@ routes.post('/:agentId/providers/:providerId/oauth/code', mcpAuth, async (c) => 
 // ── Update agent config (settings) ───────────────────────────────────────────
 
 routes.patch('/:agentId/config', mcpAuth, async (c) => {
+  const denied = requireSessionOrAdminPat(c);
+  if (denied) return denied;
   return withOrg(c, async () => {
     const { agentId } = c.req.param();
     const updates = await c.req.json();
@@ -633,47 +723,53 @@ routes.patch('/:agentId/config', mcpAuth, async (c) => {
 });
 
 // ============================================================
-// Connection routes (nested under /:agentId/connections)
+// Platform routes (nested under /:agentId/platforms)
+//
+// Storage internals still live in the `agent_connections` table — the rename
+// is user-facing only. ChatInstanceManager and the connection store keep
+// their existing names because they're used by other (chat-side) callers.
 // ============================================================
 
-// ── List connections ─────────────────────────────────────────────────────────
+// ── List platforms ───────────────────────────────────────────────────────────
 
-routes.get('/:agentId/connections', mcpAuth, async (c) => {
+routes.get('/:agentId/platforms', mcpAuth, async (c) => {
   return withOrg(c, async () => {
     const { agentId } = c.req.param();
     if (!(await configStore.hasAgent(agentId))) {
       return c.json({ error: 'Agent not found' }, 404);
     }
     const chatManager = getChatInstanceManager();
-    let connections = await connectionStore.listConnections({
+    let platforms = await connectionStore.listConnections({
       templateAgentId: agentId,
     });
 
     if (chatManager) {
       try {
-        const runtimeConnections = await chatManager.listConnections({
+        const runtimePlatforms = await chatManager.listConnections({
           templateAgentId: agentId,
         });
         await Promise.all(
-          runtimeConnections.map((connection: Record<string, any>) =>
-            persistConnectionSnapshot(connection)
+          runtimePlatforms.map((platform: Record<string, any>) =>
+            persistConnectionSnapshot(platform)
           )
         );
-        if (runtimeConnections.length > 0) {
-          connections = runtimeConnections;
+        if (runtimePlatforms.length > 0) {
+          platforms = runtimePlatforms;
         }
       } catch {
         // Fall back to PostgreSQL snapshot.
       }
     }
 
-    return c.json({ connections });
+    return c.json({ platforms });
   });
 });
 
-// ── Create connection ────────────────────────────────────────────────────────
+// ── Create platform ──────────────────────────────────────────────────────────
 
-routes.post('/:agentId/connections', mcpAuth, async (c) => {
+routes.post('/:agentId/platforms', mcpAuth, async (c) => {
+  const denied = requireSessionOrAdminPat(c);
+  if (denied) return denied;
   return withOrg(c, async () => {
     const { agentId } = c.req.param();
     if (!(await configStore.hasAgent(agentId))) {
@@ -691,16 +787,16 @@ routes.post('/:agentId/connections', mcpAuth, async (c) => {
     const chatManager = getChatInstanceManager();
     if (chatManager) {
       try {
-        const connection = await chatManager.addConnection(
+        const created = await chatManager.addConnection(
           platform,
           agentId,
           { platform, ...config },
           { allowGroups: true, ...settings }
         );
-        await persistConnectionSnapshot(connection);
-        return c.json({ connection }, 201);
+        await persistConnectionSnapshot(created);
+        return c.json({ platform: created }, 201);
       } catch (error: any) {
-        return c.json({ error: error.message || 'Failed to create connection' }, 400);
+        return c.json({ error: error.message || 'Failed to create platform' }, 400);
       }
     }
 
@@ -718,107 +814,439 @@ routes.post('/:agentId/connections', mcpAuth, async (c) => {
       createdAt: now,
       updatedAt: now,
     });
-    return c.json({ connection: { id, platform, status: 'stopped' } }, 201);
+    return c.json({ platform: { id, platform, status: 'stopped' } }, 201);
   });
 });
 
-// ── Get connection ───────────────────────────────────────────────────────────
+// ── Upsert platform by stable ID ─────────────────────────────────────────────
+//
+// `lobu apply` derives a deterministic ID from `(agentId, type, name)` via
+// buildStablePlatformId() and PUTs to this endpoint so re-runs converge:
+// matching config → noop; changed config → update + restart; missing → create
+// with the supplied ID (not random). The route trusts the stable ID — it's
+// computed by the CLI from the same lobu.toml that produced the body.
 
-routes.get('/:agentId/connections/:connId', mcpAuth, async (c) => {
+// Namespace for pg_advisory_xact_lock(int4, int4). Kept in the signed int32
+// range required by PostgreSQL's two-key advisory lock overload. Distinct
+// from other advisory-lock namespaces in this codebase (e.g. personal-org
+// has its own) so the locks never collide cross-feature.
+const STABLE_PLATFORM_LOCK_NAMESPACE = 0x73746263; // "stbc"
+
+/**
+ * FNV-1a 32-bit hash of the stable ID. Computed in JS (rather than calling
+ * Postgres's `hashtext()`) so the parameter passed to pg_advisory_xact_lock
+ * is a plain int — postgres-js's parameter type inference and PGlite's
+ * extended-query plan cache get tangled when nesting `hashtext(text)::int`
+ * inside the lock's `(int, int)` signature. The deterministic JS hash gives
+ * us the same contract: same stable ID → same lock key.
+ */
+function hashStableId(stableId: string): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < stableId.length; i++) {
+    hash ^= stableId.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash | 0; // signed int32
+}
+
+// In-process Promise chain for concurrent PUTs against the same stable ID.
+// Lobu runs embedded-only (single Node process), so a per-key chain is
+// strictly correct — every PUT enqueues against the previous PUT's
+// completion before entering its critical section. We back this up with a
+// Postgres advisory lock at the top of each entry as a structured signal
+// (visible in `pg_locks`) and as defense-in-depth for hypothetical future
+// multi-host writers.
+const stablePlatformLockChains: Map<string, Promise<unknown>> = new Map();
+
+/**
+ * Run `fn` while serializing concurrent callers that pass the same `stableId`.
+ *
+ * Combines two layers:
+ *
+ *   1. **In-process per-stableId Promise chain** — primary serialization for
+ *      the embedded single-process deployment. Strictly FIFO; no DB
+ *      round-trips on the hot path beyond what `fn` itself does.
+ *   2. **`pg_advisory_xact_lock(NAMESPACE, hashStableId(stableId))`** —
+ *      acquired and released around a short-lived `BEGIN; ...; COMMIT;` at
+ *      the top of each chain entry. Auto-releases on commit (per the
+ *      `_xact_` semantics), which means the lock is gone before `fn` runs;
+ *      we don't depend on it for serialization. It still gives us:
+ *        - a structured `pg_locks` trace for diagnostics.
+ *        - cross-process serialization if a future scale-out runs two
+ *          gateway processes against the same DB.
+ *
+ * Wrapping the whole flow in a single `sql.begin(...)` is not viable: the
+ * tx connection plus parent-pool writes via `connectionStore` /
+ * `chatManager.addConnection` would self-deadlock both on the pglite-mode
+ * serialized-client queue and on row-level locks against an uncommitted
+ * placeholder row from a different connection.
+ */
+async function withStablePlatformLock<T>(stableId: string, fn: () => Promise<T>): Promise<T> {
+  const lockKey = hashStableId(stableId);
+  const previous = stablePlatformLockChains.get(stableId) ?? Promise.resolve();
+  const work = previous.then(async () => {
+    // Touch the DB-side advisory lock so multi-host writers serialize too.
+    // Inlined via unsafe() because the `(int, int)` overload confuses
+    // PGlite's extended-query plan cache when other queries on the same
+    // backend cycle through different parameter type oids; both inputs are
+    // validated int32s, no SQL injection surface. Failure here is non-fatal —
+    // the in-process chain still serializes for the embedded case.
+    try {
+      await getDb().unsafe(
+        `BEGIN; SELECT pg_advisory_xact_lock(${STABLE_PLATFORM_LOCK_NAMESPACE}, ${lockKey}); COMMIT;`
+      );
+    } catch {
+      // best-effort
+    }
+    return fn();
+  });
+  // Replace the chain head with a settled-Promise wrapper so a rejected `fn`
+  // doesn't poison subsequent callers (they only need completion order, not
+  // success). Drop the entry once it's the tail to keep the map bounded.
+  const chainTail: Promise<void> = work.then(
+    () => undefined,
+    () => undefined
+  );
+  stablePlatformLockChains.set(stableId, chainTail);
+  void chainTail.then(() => {
+    if (stablePlatformLockChains.get(stableId) === chainTail) {
+      stablePlatformLockChains.delete(stableId);
+    }
+  });
+  return (await work) as T;
+}
+
+routes.put('/:agentId/platforms/by-stable-id/:stableId', mcpAuth, async (c) => {
+  const denied = requireSessionOrAdminPat(c);
+  if (denied) return denied;
   return withOrg(c, async () => {
-    const { connId } = c.req.param();
-    const chatManager = getChatInstanceManager();
-    let conn = null;
+    const { agentId, stableId } = c.req.param();
+    if (!(await configStore.hasAgent(agentId))) {
+      return c.json({ error: 'Agent not found' }, 404);
+    }
 
-    if (chatManager) {
-      try {
-        conn = await chatManager.getConnection(connId);
-        if (conn) {
-          await persistConnectionSnapshot(conn);
+    const body = await c.req.json<{
+      platform: string;
+      config?: Record<string, unknown>;
+      settings?: { allowFrom?: string[]; allowGroups?: boolean };
+    }>();
+    const { platform, config = {}, settings = {} } = body;
+    if (!platform) return c.json({ error: 'platform is required' }, 400);
+
+    // Serialize concurrent PUTs for the same stable ID. The PR-466 atomic-claim
+    // INSERT (below) is sufficient when ChatInstanceManager is unavailable —
+    // both PUTs see a row exists and converge on the update path. With a real
+    // manager, a "loser" can still re-read the just-created row mid-
+    // `addConnection` and call `updateConnection` against a half-initialized
+    // state — potentially double-spawning the chat instance or fighting the
+    // first writer. The lock keyed on the caller-supplied stable ID
+    // queues subsequent PUTs at the chain entry; they only proceed after the
+    // first one's manager-side work has fully committed.
+    return await withStablePlatformLock(stableId, async () => {
+      let existing = await connectionStore.getConnection(stableId);
+      if (existing && existing.templateAgentId && existing.templateAgentId !== agentId) {
+        return c.json(
+          { error: 'Stable ID already used by a different agent' },
+          409
+        );
+      }
+
+      const chatManager = getChatInstanceManager();
+
+      if (!existing) {
+        // Atomic claim. The advisory lock above already serializes concurrent
+        // PUTs for this stableId in-process, but ON CONFLICT DO NOTHING is
+        // kept as defense-in-depth against any caller that bypasses this
+        // route (e.g. a previous apply cycle that crashed between INSERT and
+        // the manager call).
+        const sql = getDb();
+        const claimNow = new Date();
+        const claimed = await sql`
+          INSERT INTO agent_connections (
+            id, agent_id, platform, config, settings, metadata, status, created_at, updated_at
+          )
+          VALUES (
+            ${stableId}, ${agentId}, ${platform},
+            ${sql.json({})}, ${sql.json({})}, ${sql.json({})},
+            'stopped', ${claimNow}, ${claimNow}
+          )
+          ON CONFLICT (id) DO NOTHING
+          RETURNING id
+        `;
+
+        if (claimed.length > 0) {
+          // We won the create race. Run the full create flow; both the manager
+          // and fallback paths re-write the row via saveConnection (ON CONFLICT
+          // DO UPDATE), so updating our placeholder is the same path they'd
+          // take on a freshly-inserted row.
+          if (chatManager) {
+            try {
+              const created = await chatManager.addConnection(
+                platform,
+                agentId,
+                { platform, ...config },
+                { allowGroups: true, ...settings },
+                {},
+                stableId
+              );
+              await persistConnectionSnapshot(created);
+              return c.json({ platform: created }, 201);
+            } catch (error: any) {
+              // Roll back the placeholder so a retry doesn't see a half-baked
+              // row that fails the `existing.templateAgentId` check inconsistently.
+              try {
+                await connectionStore.deleteConnection(stableId);
+              } catch {
+                // best-effort
+              }
+              return c.json({ error: error.message || 'Failed to create platform' }, 400);
+            }
+          }
+
+          // Fallback path mirrors the POST handler's no-manager branch but uses
+          // the supplied stable ID instead of a synthesized one. Platform is kept
+          // in config (matching the manager path) so subsequent idempotent PUTs
+          // see a stable previousConfig. Settings default `allowGroups: true` to
+          // match the manager-path default — symmetric with the noop comparison
+          // below so a follow-up PUT with no settings field round-trips as noop.
+          const fallbackNow = Date.now();
+          await connectionStore.saveConnection({
+            id: stableId,
+            platform,
+            templateAgentId: agentId,
+            config: { platform, ...config } as Record<string, any>,
+            settings: { allowGroups: true, ...settings } as any,
+            metadata: {},
+            status: 'stopped',
+            createdAt: fallbackNow,
+            updatedAt: fallbackNow,
+          });
+          return c.json(
+            { platform: { id: stableId, platform, status: 'stopped' } },
+            201
+          );
         }
-      } catch {
-        conn = null;
+
+        // Lost the create race — someone else inserted the row between our
+        // initial read and INSERT. With the advisory lock held we shouldn't
+        // reach this in the same-process case, but keep the re-read as
+        // defense-in-depth against multi-host writers that bypass the route.
+        const reread = await connectionStore.getConnection(stableId);
+        if (!reread) {
+          return c.json({ error: 'Platform vanished after conflict' }, 500);
+        }
+        if (reread.templateAgentId && reread.templateAgentId !== agentId) {
+          return c.json(
+            { error: 'Stable ID already used by a different agent' },
+            409
+          );
+        }
+        existing = reread;
       }
-    }
 
-    if (!conn) {
-      conn = await connectionStore.getConnection(connId);
-    }
+      // Update path. `existing` is guaranteed non-null at this point — either we
+      // saw it on the first read, or we re-read after losing the create race.
+      const current = existing;
 
-    if (!conn) return c.json({ error: 'Connection not found' }, 404);
-    return c.json(conn);
-  });
-});
-
-// ── Delete connection ────────────────────────────────────────────────────────
-
-routes.delete('/:agentId/connections/:connId', mcpAuth, async (c) => {
-  return withOrg(c, async () => {
-    const { connId } = c.req.param();
-    const conn = await connectionStore.getConnection(connId);
-    if (!conn) return c.json({ error: 'Connection not found' }, 404);
-
-    const chatManager = getChatInstanceManager();
-    if (chatManager) {
-      try {
-        await chatManager.removeConnection(connId);
-      } catch {
-        // Fall through to direct store delete
+      // Compute the merged config the way ChatInstanceManager.updateConnection
+      // does: skip `***...` placeholders so a sanitized round-trip from the
+      // GET endpoint doesn't trigger a spurious "changed" classification.
+      const previousConfig = (current.config ?? {}) as Record<string, unknown>;
+      const submittedConfig = { platform, ...config } as Record<string, unknown>;
+      const merged: Record<string, unknown> = { ...previousConfig };
+      for (const [key, value] of Object.entries(submittedConfig)) {
+        if (typeof value === 'string' && value.startsWith('***')) continue;
+        merged[key] = value;
       }
-    }
-    await connectionStore.deleteConnection(connId);
-    return c.json({ success: true });
-  });
-});
+      merged.platform = platform;
 
-// ── Start connection ─────────────────────────────────────────────────────────
+      const configChanged = !configsShallowEqual(merged, previousConfig);
+      // Settings (allowFrom, allowGroups, etc.) are persisted alongside the
+      // platform config and are part of "did anything change?" — a
+      // settings-only update must trigger willRestart, not be silently noop'd.
+      const previousSettings = (current.settings ?? {}) as Record<string, unknown>;
+      const mergedSettings = { allowGroups: true, ...settings } as Record<string, unknown>;
+      const settingsChanged = !configsShallowEqual(mergedSettings, previousSettings);
 
-routes.post('/:agentId/connections/:connId/start', mcpAuth, async (c) => {
-  return withOrg(c, async () => {
-    const { connId } = c.req.param();
-    const chatManager = getChatInstanceManager();
-    const conn = await connectionStore.getConnection(connId);
-    if (!conn) return c.json({ error: 'Connection not found' }, 404);
-
-    if (chatManager) {
-      await chatManager.restartConnection(connId);
-      const runtimeConnection = await chatManager.getConnection(connId);
-      if (runtimeConnection) {
-        await persistConnectionSnapshot(runtimeConnection);
-        return c.json({ success: true, connection: runtimeConnection });
+      if (!configChanged && !settingsChanged) {
+        return c.json({ noop: true, platform: current }, 200);
       }
-    }
 
-    await connectionStore.updateConnection(connId, { status: 'active' });
-    return c.json({
-      success: true,
-      connection: await connectionStore.getConnection(connId),
+      if (chatManager) {
+        try {
+          const updated = await chatManager.updateConnection(stableId, {
+            config: { platform, ...config },
+            settings: { allowGroups: true, ...settings },
+          });
+          await persistConnectionSnapshot(updated);
+          return c.json(
+            { updated: true, willRestart: true, platform: updated },
+            200
+          );
+        } catch (error: any) {
+          return c.json({ error: error.message || 'Failed to update platform' }, 400);
+        }
+      }
+
+      // Fallback when ChatInstanceManager is not available (e.g. boot races,
+      // tests). Persist the merged config directly.
+      await connectionStore.saveConnection({
+        id: stableId,
+        platform,
+        templateAgentId: agentId,
+        config: merged as Record<string, any>,
+        settings: { allowGroups: true, ...settings } as any,
+        metadata: current.metadata ?? {},
+        status: current.status ?? 'stopped',
+        createdAt: current.createdAt ?? Date.now(),
+        updatedAt: Date.now(),
+      });
+      const refreshed = await connectionStore.getConnection(stableId);
+      return c.json(
+        { updated: true, willRestart: true, platform: refreshed },
+        200
+      );
     });
   });
 });
 
-// ── Stop connection ──────────────────────────────────────────────────────────
+// Shallow equality check matching ChatInstanceManager.configsEqual semantics.
+function configsShallowEqual(
+  a: Record<string, unknown>,
+  b: Record<string, unknown>
+): boolean {
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const key of aKeys) {
+    if (a[key] !== b[key]) return false;
+  }
+  return true;
+}
 
-routes.post('/:agentId/connections/:connId/stop', mcpAuth, async (c) => {
+// ── Get platform ─────────────────────────────────────────────────────────────
+
+function platformBelongsToAgent(platform: { templateAgentId?: string | null }, agentId: string) {
+  return platform.templateAgentId === agentId;
+}
+
+async function getStoredPlatformForAgent(agentId: string, platformId: string) {
+  const platform = await connectionStore.getConnection(platformId);
+  if (!platform || !platformBelongsToAgent(platform, agentId)) return null;
+  return platform;
+}
+
+routes.get('/:agentId/platforms/:platformId', mcpAuth, async (c) => {
   return withOrg(c, async () => {
-    const { connId } = c.req.param();
-    const chatManager = getChatInstanceManager();
-    const conn = await connectionStore.getConnection(connId);
-    if (!conn) return c.json({ error: 'Connection not found' }, 404);
+    const { agentId, platformId } = c.req.param();
+    if (!(await configStore.hasAgent(agentId))) {
+      return c.json({ error: 'Agent not found' }, 404);
+    }
 
+    const storedPlatform = await getStoredPlatformForAgent(agentId, platformId);
+    if (!storedPlatform) return c.json({ error: 'Platform not found' }, 404);
+
+    const chatManager = getChatInstanceManager();
     if (chatManager) {
-      await chatManager.stopConnection(connId);
-      const runtimeConnection = await chatManager.getConnection(connId);
-      if (runtimeConnection) {
-        await persistConnectionSnapshot(runtimeConnection);
-        return c.json({ success: true, connection: runtimeConnection });
+      try {
+        const runtimePlatform = await chatManager.getConnection(platformId);
+        if (runtimePlatform && platformBelongsToAgent(runtimePlatform, agentId)) {
+          await persistConnectionSnapshot(runtimePlatform);
+          return c.json(runtimePlatform);
+        }
+      } catch {
+        // Fall back to the org-scoped PostgreSQL snapshot.
       }
     }
 
-    await connectionStore.updateConnection(connId, { status: 'stopped' });
+    return c.json(storedPlatform);
+  });
+});
+
+// ── Delete platform ──────────────────────────────────────────────────────────
+
+routes.delete('/:agentId/platforms/:platformId', mcpAuth, async (c) => {
+  const denied = requireSessionOrAdminPat(c);
+  if (denied) return denied;
+  return withOrg(c, async () => {
+    const { agentId, platformId } = c.req.param();
+    if (!(await configStore.hasAgent(agentId))) {
+      return c.json({ error: 'Agent not found' }, 404);
+    }
+    const platform = await getStoredPlatformForAgent(agentId, platformId);
+    if (!platform) return c.json({ error: 'Platform not found' }, 404);
+
+    const chatManager = getChatInstanceManager();
+    if (chatManager) {
+      try {
+        await chatManager.removeConnection(platformId);
+      } catch {
+        // Fall through to direct store delete
+      }
+    }
+    await connectionStore.deleteConnection(platformId);
+    return c.json({ success: true });
+  });
+});
+
+// ── Start platform ───────────────────────────────────────────────────────────
+
+routes.post('/:agentId/platforms/:platformId/start', mcpAuth, async (c) => {
+  const denied = requireSessionOrAdminPat(c);
+  if (denied) return denied;
+  return withOrg(c, async () => {
+    const { agentId, platformId } = c.req.param();
+    if (!(await configStore.hasAgent(agentId))) {
+      return c.json({ error: 'Agent not found' }, 404);
+    }
+    const chatManager = getChatInstanceManager();
+    const platform = await getStoredPlatformForAgent(agentId, platformId);
+    if (!platform) return c.json({ error: 'Platform not found' }, 404);
+
+    if (chatManager) {
+      await chatManager.restartConnection(platformId);
+      const runtimePlatform = await chatManager.getConnection(platformId);
+      if (runtimePlatform && platformBelongsToAgent(runtimePlatform, agentId)) {
+        await persistConnectionSnapshot(runtimePlatform);
+        return c.json({ success: true, platform: runtimePlatform });
+      }
+    }
+
+    await connectionStore.updateConnection(platformId, { status: 'active' });
     return c.json({
       success: true,
-      connection: await connectionStore.getConnection(connId),
+      platform: await connectionStore.getConnection(platformId),
+    });
+  });
+});
+
+// ── Stop platform ────────────────────────────────────────────────────────────
+
+routes.post('/:agentId/platforms/:platformId/stop', mcpAuth, async (c) => {
+  const denied = requireSessionOrAdminPat(c);
+  if (denied) return denied;
+  return withOrg(c, async () => {
+    const { agentId, platformId } = c.req.param();
+    if (!(await configStore.hasAgent(agentId))) {
+      return c.json({ error: 'Agent not found' }, 404);
+    }
+    const chatManager = getChatInstanceManager();
+    const platform = await getStoredPlatformForAgent(agentId, platformId);
+    if (!platform) return c.json({ error: 'Platform not found' }, 404);
+
+    if (chatManager) {
+      await chatManager.stopConnection(platformId);
+      const runtimePlatform = await chatManager.getConnection(platformId);
+      if (runtimePlatform && platformBelongsToAgent(runtimePlatform, agentId)) {
+        await persistConnectionSnapshot(runtimePlatform);
+        return c.json({ success: true, platform: runtimePlatform });
+      }
+    }
+
+    await connectionStore.updateConnection(platformId, { status: 'stopped' });
+    return c.json({
+      success: true,
+      platform: await connectionStore.getConnection(platformId),
     });
   });
 });

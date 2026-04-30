@@ -20,17 +20,16 @@ const REPO_ROOT = process.cwd();
 
 const PACKAGES = [
   { dir: "packages/core", transform: transformCorePublish },
+  { dir: "packages/owletto-sdk", transform: rewriteWorkspaceRefs },
   { dir: "packages/worker", transform: rewriteWorkspaceRefs },
   { dir: "packages/cli", transform: rewriteWorkspaceRefs },
-  { dir: "packages/owletto-sdk", transform: rewriteWorkspaceRefs },
   { dir: "packages/owletto-openclaw", transform: rewriteWorkspaceRefs },
-  { dir: "packages/owletto-cli", transform: rewriteWorkspaceRefs },
 ];
 
-// Published package names that don't use the @lobu/ scope. Kept as a small
-// allow-list so rewriteWorkspaceRefs can still reject unexpected workspace
-// references slipping into published package.jsons.
-const UNSCOPED_ALLOWED_PUBLISHED_NAMES = new Set(["owletto"]);
+// Published package names that don't use the @lobu/ scope. The unscoped
+// `owletto` package was retired when the CLI merged into @lobu/cli; the
+// allow-list stays in case another unscoped package ever gets added.
+const UNSCOPED_ALLOWED_PUBLISHED_NAMES = new Set();
 
 /**
  * `workspace:*` / `workspace:^` / `workspace:~` references are a Bun/Yarn

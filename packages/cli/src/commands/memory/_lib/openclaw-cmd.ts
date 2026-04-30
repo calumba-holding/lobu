@@ -1,0 +1,292 @@
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, resolve } from "node:path";
+import { ApiError, ValidationError } from "./errors.js";
+import {
+  getUsableToken,
+  mcpUrlForOrg,
+  normalizeMcpUrl,
+  resolveOrg,
+  resolveServerUrl,
+  setActiveMcpUrl,
+  setActiveOrg,
+  type MemorySession,
+} from "./openclaw-auth.js";
+import { isJson, printJson, printText } from "./output.js";
+
+const MCP_PROTOCOL_VERSION = "2025-03-26";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function extractErrorMessage(
+  parsed: Record<string, unknown>,
+  status: number,
+  statusText: string
+): string {
+  if (isRecord(parsed.error) && typeof parsed.error.message === "string") {
+    return parsed.error.message;
+  }
+  if (typeof parsed.error_description === "string") {
+    return parsed.error_description;
+  }
+  if (typeof parsed.error === "string") return parsed.error;
+  return `HTTP ${status} ${statusText}`;
+}
+
+function parseJsonWithError<T>(text: string, fallbackMessage: string): T {
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new ApiError(fallbackMessage);
+  }
+}
+
+async function postJson<T>(
+  url: string,
+  body: Record<string, unknown>,
+  headers: Record<string, string> = {}
+): Promise<T> {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...headers,
+    },
+    body: JSON.stringify(body),
+  });
+  const raw = await res.text();
+  const parsed = raw
+    ? parseJsonWithError<Record<string, unknown>>(
+        raw,
+        `Invalid JSON from ${url}`
+      )
+    : {};
+
+  if (!res.ok) {
+    throw new ApiError(
+      `Request failed: ${extractErrorMessage(parsed, res.status, res.statusText)}`,
+      res.status
+    );
+  }
+
+  return parsed as T;
+}
+
+async function initializeMcpSession(
+  url: string,
+  accessToken: string
+): Promise<string> {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: "__init__",
+      method: "initialize",
+      params: {
+        protocolVersion: MCP_PROTOCOL_VERSION,
+        capabilities: {},
+        clientInfo: { name: "lobu", version: "1.0.0" },
+      },
+    }),
+  });
+
+  const raw = await response.text();
+  const parsed = raw
+    ? parseJsonWithError<Record<string, unknown>>(
+        raw,
+        `Invalid JSON from ${url}`
+      )
+    : {};
+
+  if (!response.ok) {
+    throw new ApiError(
+      `Request failed: ${extractErrorMessage(parsed, response.status, response.statusText)}`,
+      response.status
+    );
+  }
+
+  const sessionId = response.headers.get("mcp-session-id");
+  if (!sessionId) {
+    throw new ApiError(
+      "MCP initialize did not return an mcp-session-id header"
+    );
+  }
+
+  await postJson(
+    url,
+    {
+      jsonrpc: "2.0",
+      method: "notifications/initialized",
+    },
+    {
+      Authorization: `Bearer ${accessToken}`,
+      "mcp-session-id": sessionId,
+    }
+  );
+
+  return sessionId;
+}
+
+async function resolveSessionAndUrl(
+  urlFlag?: string,
+  orgFlag?: string,
+  storePath?: string
+): Promise<{ token: string; session: MemorySession; mcpUrl: string }> {
+  const org = resolveOrg(orgFlag, undefined, storePath);
+  const serverUrl = resolveServerUrl(urlFlag, storePath);
+  if (!serverUrl) {
+    throw new ValidationError("Memory MCP URL could not be resolved.");
+  }
+
+  const mcpUrl = org ? mcpUrlForOrg(serverUrl, org) : serverUrl;
+  const result = await getUsableToken(mcpUrl, storePath);
+  if (!result) {
+    throw new ValidationError("Not logged in. Run: lobu login");
+  }
+
+  return { token: result.token, session: result.session, mcpUrl };
+}
+
+function readJsonObject(filePath: string): Record<string, unknown> {
+  try {
+    const raw = readFileSync(filePath, "utf-8");
+    const parsed = JSON.parse(raw) as unknown;
+    if (isRecord(parsed)) return parsed;
+    return {};
+  } catch {
+    return {};
+  }
+}
+
+function writeJsonObject(filePath: string, payload: Record<string, unknown>) {
+  mkdirSync(dirname(filePath), { recursive: true });
+  writeFileSync(filePath, `${JSON.stringify(payload, null, 2)}\n`);
+}
+
+export interface HealthOptions {
+  url?: string;
+  org?: string;
+  storePath?: string;
+}
+
+export async function checkMemoryHealth(
+  opts: HealthOptions = {}
+): Promise<void> {
+  const {
+    token: accessToken,
+    session,
+    mcpUrl: targetMcpUrl,
+  } = await resolveSessionAndUrl(opts.url, opts.org, opts.storePath);
+  const org = resolveOrg(opts.org, session, opts.storePath);
+  const sessionId = await initializeMcpSession(targetMcpUrl, accessToken);
+
+  const result = await postJson<{ result?: { tools?: unknown[] } }>(
+    targetMcpUrl,
+    {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/list",
+      params: {},
+    },
+    {
+      Authorization: `Bearer ${accessToken}`,
+      "mcp-session-id": sessionId,
+    }
+  );
+
+  const toolsCount = Array.isArray(result.result?.tools)
+    ? result.result?.tools.length
+    : 0;
+
+  if (isJson()) {
+    printJson({
+      ok: true,
+      mcpUrl: targetMcpUrl,
+      org: org || null,
+      toolsCount,
+    });
+    return;
+  }
+
+  printText("ok: true");
+  printText(`mcpUrl: ${targetMcpUrl}`);
+  printText(`org: ${org || "(none)"}`);
+  printText(`tools: ${toolsCount}`);
+}
+
+export interface ConfigureOptions {
+  url?: string;
+  org?: string;
+  configPath?: string;
+  tokenCommand?: string;
+}
+
+export function configureMemoryPlugin(opts: ConfigureOptions = {}): void {
+  const org = resolveOrg(opts.org);
+  const baseMcpUrl = resolveServerUrl(opts.url);
+  if (!baseMcpUrl) {
+    throw new ValidationError("Memory MCP URL could not be resolved.");
+  }
+  const resolvedMcpUrl = org
+    ? mcpUrlForOrg(baseMcpUrl, org)
+    : normalizeMcpUrl(baseMcpUrl);
+  setActiveMcpUrl(resolvedMcpUrl);
+  if (org) setActiveOrg(org);
+
+  const configPath = resolve(
+    opts.configPath || resolve(homedir(), ".openclaw", "openclaw.json")
+  );
+  const config = readJsonObject(configPath);
+
+  if (!isRecord(config.plugins)) {
+    config.plugins = {};
+  }
+  const plugins = config.plugins as Record<string, unknown>;
+  if (!isRecord(plugins.entries)) {
+    plugins.entries = {};
+  }
+  const entries = plugins.entries as Record<string, unknown>;
+  const pluginId = "openclaw-owletto";
+  const existingEntry = isRecord(entries[pluginId])
+    ? (entries[pluginId] as Record<string, unknown>)
+    : {};
+  const existingConfig = isRecord(existingEntry.config)
+    ? (existingEntry.config as Record<string, unknown>)
+    : {};
+
+  const tokenCommand = opts.tokenCommand || "lobu token --raw";
+
+  entries[pluginId] = {
+    ...existingEntry,
+    enabled: true,
+    config: {
+      ...existingConfig,
+      mcpUrl: resolvedMcpUrl,
+      tokenCommand,
+    },
+  };
+
+  writeJsonObject(configPath, config);
+
+  if (isJson()) {
+    printJson({
+      updated: true,
+      configPath,
+      pluginId,
+      mcpUrl: resolvedMcpUrl,
+      tokenCommand,
+    });
+    return;
+  }
+
+  printText(`Updated ${configPath}`);
+  printText(`Plugin: ${pluginId}`);
+  printText(`mcpUrl: ${resolvedMcpUrl}`);
+  printText(`tokenCommand: ${tokenCommand}`);
+}

@@ -23,19 +23,20 @@ const providerSchema = z
     message: "provider must set at most one of `key` or `secret_ref`",
   });
 
-// ── Connection ──────────────────────────────────────────────────────────────
+// ── Platform ────────────────────────────────────────────────────────────────
 
-const connectionSchema = z.object({
+const platformSchema = z.object({
   type: z.string(),
   /**
-   * Optional disambiguator when an agent has multiple connections of the same
-   * type (e.g. two Slack workspaces). Slugged and appended to the stable
-   * connection ID: `{agent}-{type}-{name}`. Omit for single-connection setups.
+   * Optional disambiguator when an agent has multiple platform instances of
+   * the same type (e.g. two Slack workspaces). Slugged and appended to the
+   * stable platform ID: `{agent}-{type}-{name}`. Omit when there is only one
+   * instance per type.
    */
   name: z
     .string()
     .regex(/^[a-z0-9][a-z0-9-]*$/, {
-      message: "connection name must be lowercase alphanumeric with hyphens",
+      message: "platform name must be lowercase alphanumeric with hyphens",
     })
     .optional(),
   /** Platform-specific config (e.g. `{ botToken: "$BOT_TOKEN" }`). */
@@ -180,7 +181,7 @@ const agentEntrySchema = z.object({
   /** Path to agent content directory (IDENTITY.md, SOUL.md, USER.md, skills/). */
   dir: z.string(),
   providers: z.array(providerSchema).default([]),
-  connections: z.array(connectionSchema).default([]),
+  platforms: z.array(platformSchema).default([]),
   skills: skillsSchema.default({}),
   network: networkSchema.optional(),
   egress: egressSchema.optional(),
@@ -209,29 +210,11 @@ const memorySchema = z.object({
   owletto: owlettoMemorySchema.optional(),
 });
 
-// ── Owletto CLI ────────────────────────────────────────────────────────────
-
-const owlettoProfileSchema = z
-  .object({
-    url: z.string().optional(),
-    api_url: z.string().optional(),
-    mcp_url: z.string().optional(),
-    database_url: z.string().optional(),
-    embeddings_url: z.string().optional(),
-    env_file: z.string().optional(),
-  })
-  .passthrough();
-
-const owlettoSchema = z.object({
-  profiles: z.record(z.string(), owlettoProfileSchema).optional(),
-});
-
 // ── Top Level ───────────────────────────────────────────────────────────────
 
 export const lobuConfigSchema = z.object({
   agents: z.record(z.string().regex(/^[a-z0-9][a-z0-9-]*$/), agentEntrySchema),
   memory: memorySchema.optional(),
-  owletto: owlettoSchema.optional(),
 });
 
 // ── Inferred Types ──────────────────────────────────────────────────────────
@@ -239,7 +222,7 @@ export const lobuConfigSchema = z.object({
 export type LobuTomlConfig = z.infer<typeof lobuConfigSchema>;
 export type AgentEntry = z.infer<typeof agentEntrySchema>;
 export type ProviderEntry = z.infer<typeof providerSchema>;
-export type ConnectionEntry = z.infer<typeof connectionSchema>;
+export type PlatformEntry = z.infer<typeof platformSchema>;
 export type McpServerEntry = z.infer<typeof mcpServerSchema>;
 export type SkillsEntry = z.infer<typeof skillsSchema>;
 export type NetworkEntry = z.infer<typeof networkSchema>;
@@ -248,5 +231,3 @@ export type ToolsEntry = z.infer<typeof toolsSchema>;
 export type WorkerEntry = z.infer<typeof workerSchema>;
 export type OwlettoMemoryEntry = z.infer<typeof owlettoMemorySchema>;
 export type MemoryEntry = z.infer<typeof memorySchema>;
-export type OwlettoProfileEntry = z.infer<typeof owlettoProfileSchema>;
-export type OwlettoEntry = z.infer<typeof owlettoSchema>;

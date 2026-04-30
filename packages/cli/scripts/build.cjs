@@ -13,7 +13,7 @@ function copyDirIfExists(src, dest) {
 // Copy templates
 copyDirIfExists("src/templates", "dist/templates");
 
-// Copy bundled starter skills
+// Copy the single bundled Lobu starter skill (includes memory guidance).
 copyDirIfExists("../../skills/lobu", "dist/bundled-skills/lobu");
 
 // Copy mcp-servers.json
