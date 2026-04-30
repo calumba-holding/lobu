@@ -12,11 +12,12 @@ interface Props {
 
 const {
   title = "Lobu - Deploy autonomous AI agents",
-  description = "Open-source platform for deploying persistent, sandboxed AI agents on Slack, Telegram, WhatsApp, and REST API.",
+  description = "Open-source platform for persistent, sandboxed AI agents with shared memory, installable skills, chat integrations, and MCP access.",
   ogType = "website",
   article,
 } = Astro.props;
 
+import { existsSync } from "node:fs";
 import PosthogAnalytics from "../components/PosthogAnalytics.astro";
 import WebMCP from "../components/WebMCP.astro";
 
@@ -27,6 +28,8 @@ const markdownPath =
     ? "/index.md"
     : `${Astro.url.pathname.replace(/\/$/, "")}.md`;
 const markdownURL = new URL(markdownPath, Astro.site);
+const markdownFileURL = new URL(`../../public${markdownPath}`, import.meta.url);
+const hasMarkdownTwin = existsSync(markdownFileURL);
 ---
 
 <!doctype html>
@@ -39,7 +42,7 @@ const markdownURL = new URL(markdownPath, Astro.site);
     <link rel="canonical" href={canonicalURL} />
     <link rel="icon" href="/favicon.ico" />
     <link rel="icon" type="image/png" href="/lobster-icon.png" />
-    <meta name="theme-color" content="#09090b" />
+    <meta name="theme-color" content="#ffffff" />
 
     <!-- Open Graph -->
     <meta property="og:type" content={ogType} />
@@ -66,10 +69,11 @@ const markdownURL = new URL(markdownPath, Astro.site);
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={ogImage} />
 
-    <!-- Geist font -->
-    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+    <!-- Inter + Inter Display (matches attio.com typography) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://cdn.jsdelivr.net/npm/geist@1/dist/fonts/geist-sans/style.css"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Inter+Tight:wght@500;600;700&display=swap"
       rel="stylesheet"
     />
 
@@ -80,7 +84,7 @@ const markdownURL = new URL(markdownPath, Astro.site);
       "name": "Lobu",
       "url": "https://lobu.ai",
       "logo": "https://lobu.ai/lobster-icon.png",
-      "description": "Open-source platform for deploying persistent, sandboxed AI agents on Slack, Telegram, WhatsApp, and REST API.",
+      "description": "Open-source platform for persistent, sandboxed AI agents with shared memory, installable skills, chat integrations, and MCP access.",
       "sameAs": [
         "https://github.com/lobu-ai/lobu",
         "https://x.com/bu7emba"
@@ -90,7 +94,7 @@ const markdownURL = new URL(markdownPath, Astro.site);
     <WebMCP />
 
     <!-- Agent discovery hints -->
-    <link rel="alternate" type="text/markdown" href={markdownURL} />
+    {hasMarkdownTwin && <link rel="alternate" type="text/markdown" href={markdownURL} />}
     <link rel="describedby" type="text/plain" href="/llms.txt" />
     <link rel="https://modelcontextprotocol.io/rel/server-card" type="application/json" href="/.well-known/mcp/server-card.json" />
     <link rel="api-catalog" href="/.well-known/api-catalog" />

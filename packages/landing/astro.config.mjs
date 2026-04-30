@@ -39,6 +39,13 @@ function settingsMockPlugin() {
 
 export default defineConfig({
   site: "https://lobu.ai",
+  redirects: {
+    "/pricing": "/serverless-openclaw",
+    "/for/careops": "/for/support",
+    "/connect-from/chatgpt/for/careops": "/connect-from/chatgpt/for/support",
+    "/connect-from/claude/for/careops": "/connect-from/claude/for/support",
+    "/connect-from/openclaw/for/careops": "/connect-from/openclaw/for/support",
+  },
   integrations: [
     starlight({
       title: "Lobu Docs",
@@ -46,6 +53,9 @@ export default defineConfig({
         "./src/styles/starlight-shared.css",
         "./src/styles/starlight-theme.css",
       ],
+      expressiveCode: {
+        themes: ["github-light"],
+      },
       components: {
         Head: "./src/components/starlight/Head.astro",
         SiteTitle: "./src/components/starlight/SiteTitle.astro",
