@@ -97,19 +97,22 @@ async function main() {
   }
   process.env.DATABASE_URL = databaseUrl;
 
-  // Verify LISTEN/NOTIFY actually delivers before any cache or queue wires up
-  // — otherwise misconfigured transaction-mode poolers (Supabase pooler,
-  // RDS Proxy, etc.) would silently degrade caches to TTL-only and queue
-  // wakeups to the slow poll. Skip in tests where the subprocess Postgres
-  // isn't always reachable in the way prod would be.
+  // Verify LISTEN/NOTIFY actually delivers. This is a *detector*, not a gate:
+  // the runs-queue has a 200ms SKIP-LOCKED poll fallback that keeps the queue
+  // correct even when LISTEN is silently dropped (transaction-mode pgbouncer,
+  // RDS Proxy, etc.). Failing the probe just means wakeup latency degrades to
+  // the poll interval — not an outage. Log loudly so ops can fix the pooler
+  // config, but do not refuse to boot.
   if (process.env.SKIP_LISTEN_NOTIFY_PROBE !== '1') {
     const { probeListenNotify } = await import('./db/client');
     try {
       await probeListenNotify();
       logger.info('[DB] LISTEN/NOTIFY probe ok');
     } catch (err) {
-      logger.error({ err }, '[DB] LISTEN/NOTIFY probe failed');
-      throw err;
+      logger.warn(
+        { err },
+        '[DB] LISTEN/NOTIFY probe failed — runs-queue will fall back to 200ms poll. Fix the pooler config to restore real-time wakeups.'
+      );
     }
   }
 
@@ -126,8 +129,13 @@ async function main() {
   // Mount the main app after any embedded sub-app routes are registered.
   app.route('/', mainApp);
 
-  const { startMaintenanceScheduler } = await import('./scheduled/jobs');
-  const stopMaintenanceScheduler = startMaintenanceScheduler(env);
+  // Boot the unified task scheduler. Every periodic platform-internal job —
+  // token refresh, MCP DB cleanup, watcher automation, etc. — runs as a row
+  // in `public.runs` (run_type='task') with cron-driven self-rescheduling.
+  // Cross-pod coordination is the runs-queue claim path.
+  const { getLobuCoreServices } = await import('./lobu/gateway');
+  const { bootTaskScheduler } = await import('./scheduled/jobs');
+  const taskScheduler = await bootTaskScheduler(getLobuCoreServices(), env);
 
   const port = parseInt(process.env.PORT || '8787', 10);
   const host = process.env.HOST?.trim() || '0.0.0.0';
@@ -177,7 +185,7 @@ async function main() {
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Received shutdown signal, stopping gracefully...');
     await vite?.close();
-    stopMaintenanceScheduler();
+    taskScheduler.stop();
     const { stopLobuGateway } = await import('./lobu/gateway');
     await stopLobuGateway();
     const { closeDbSingleton } = await import('./db/client');

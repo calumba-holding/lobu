@@ -4,24 +4,26 @@ import type { AuthProfilesManager } from "../auth/settings/auth-profiles-manager
 
 const logger = createLogger("token-refresh-job");
 
-const REFRESH_INTERVAL_MS = 2 * 60 * 1000; // 2 minutes
 const EXPIRY_BUFFER_MS = 5 * 60 * 1000; // Refresh tokens expiring within 5 minutes
 
-interface RefreshableProvider {
+export interface RefreshableProvider {
   providerId: string;
   oauthClient: OAuthClient;
 }
 
 /**
- * Background job that proactively refreshes OAuth tokens before they expire.
+ * Proactive OAuth token refresher.
  *
- * On each tick:
+ * Wired as a periodic task via TaskScheduler (see `scheduled/jobs.ts`).
+ * On each invocation:
  * 1. Scans `UserAuthProfileStore` for `(userId, agentId)` pairs holding OAuth profiles.
  * 2. Refreshes any token expiring within `EXPIRY_BUFFER_MS` via its provider's OAuth client.
  * 3. Writes the rotated credentials back through `AuthProfilesManager.upsertProfile`.
+ *
+ * Per-pod `refreshLocks` dedup concurrent refreshes for the same profile;
+ * cross-pod dedup happens at the scheduler level (one row per cron tick).
  */
 export class TokenRefreshJob {
-  private timer: ReturnType<typeof setInterval> | null = null;
   private refreshLocks = new Map<string, Promise<void>>();
 
   constructor(
@@ -29,29 +31,25 @@ export class TokenRefreshJob {
     private refreshableProviders: RefreshableProvider[]
   ) {}
 
-  start(): void {
-    if (this.timer) return;
-    this.timer = setInterval(() => {
-      this.tick().catch((err) =>
-        logger.error("Token refresh tick failed:", err)
-      );
-    }, REFRESH_INTERVAL_MS);
-    logger.debug("Token refresh job started");
-  }
-
-  stop(): void {
-    if (this.timer) {
-      clearInterval(this.timer);
-      this.timer = null;
-    }
-    logger.info("Token refresh job stopped");
-  }
-
-  private async tick(): Promise<void> {
+  /** One-shot scan + refresh of every OAuth profile. Invoked by the
+   *  TaskScheduler as the every-30min safety net for users who haven't
+   *  exercised any token-using path recently — the lazy at-use-time
+   *  refresh handles everyone else. */
+  async runOnce(): Promise<void> {
     const userAuthProfiles = this.authProfilesManager.getUserAuthProfileStore();
     for await (const { userId, agentId } of userAuthProfiles.scanAllOAuth()) {
       await this.maybeRefresh(userId, agentId);
     }
+  }
+
+  /**
+   * Refresh tokens for a single (userId, agentId). Public so the
+   * `refresh-token-for-user-agent` task and AuthProfilesManager's at-use-time
+   * lazy path can both call it. Per-pod `refreshLocks` dedup concurrent calls
+   * for the same key in this process.
+   */
+  async refreshForUserAgent(userId: string, agentId: string): Promise<void> {
+    return this.maybeRefresh(userId, agentId);
   }
 
   private async maybeRefresh(userId: string, agentId: string): Promise<void> {
