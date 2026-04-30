@@ -445,6 +445,12 @@ export const ManageWatchersSchema = Type.Object({
         '[complete_window] Optional structured execution metadata for provenance (provider, session id, parameters, etc.).',
     })
   ),
+  template_version_id: Type.Optional(
+    Type.Number({
+      description:
+        "[complete_window] Pin to a specific watcher_versions.id. Workers receive this from the run dispatch payload (snapshotted from current_version_id at run-creation) and pass it back here so validation uses the same version that produced the extraction. Defaults to the run row's snapshot if available, else the watcher's current_version_id.",
+    })
+  ),
 
   // Fields for action="set_reaction_script"
   reaction_script: Type.Optional(
@@ -1046,10 +1052,14 @@ async function handleCreateFromVersion(
     throw new Error('entity_ids is required for create_from_version');
   }
 
-  // Fetch the source version
+  // Fetch the source version + the source watcher's reaction script.
+  // Reaction script lives on the watchers row, not on watcher_versions, so
+  // it has to be copied explicitly when assigning the template to a new
+  // entity. Without this copy the new assignment would have no reactions.
   const versionRows = await sql`
     SELECT wv.*, w.organization_id, w.schedule, w.sources, w.agent_id, w.scheduler_client_id,
-           w.model_config, w.tags, w.watcher_group_id
+           w.model_config, w.tags, w.watcher_group_id,
+           w.reaction_script, w.reaction_script_compiled
     FROM watcher_versions wv
     JOIN watchers w ON w.id = wv.watcher_id
     WHERE wv.id = ${args.version_id}
@@ -1080,48 +1090,36 @@ async function handleCreateFromVersion(
     const watcherSlug = `${version.name}-${entity.slug}`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
 
     const watcherId = await getNextNumericId(sql, 'watchers');
-    const newVersionId = await getNextWatcherVersionId(sql);
     const sources = version.version_sources ?? version.sources ?? [];
+    // The new assignment shares the source's existing watcher_versions row
+    // rather than getting its own duplicate copy. version_id (the arg) is
+    // the row in watcher_versions we're cloning from; that becomes the
+    // assignment's current_version_id directly. The version row itself is
+    // owned by the group root (watcher_group_id), so all assignments in
+    // the group point at the same chain.
+    const sharedVersionId = Number(args.version_id);
+    const groupId = (version.watcher_group_id ?? version.watcher_id) as number;
 
-    await sql.begin(async (tx) => {
-      await tx`
-        INSERT INTO watchers (
-          id, name, slug, organization_id, entity_ids,
-          schedule, next_run_at, agent_id, scheduler_client_id, model_config, sources, version,
-          current_version_id, tags, status, created_by, created_at, updated_at,
-          watcher_group_id, source_watcher_id
-        ) VALUES (
-          ${watcherId}, ${watcherName}, ${watcherSlug}, ${organizationId},
-          ${`{${entityId}}`}::bigint[],
-          ${version.schedule ?? null}, ${version.schedule ? nextRunAt(version.schedule as string) : null},
-          ${version.agent_id ?? null}, ${version.scheduler_client_id ?? null},
-          ${toJsonParam(tx, version.model_config)}, ${toJsonParam(tx, sources)},
-          1, NULL, ${toTextArrayParam((version.tags as string[]) || [])}::text[],
-          'active', ${createdBy}, NOW(), NOW(),
-          ${version.watcher_group_id ?? version.watcher_id}, ${version.watcher_id}
-        )
-      `;
-
-      await tx`
-        INSERT INTO watcher_versions (
-          id, watcher_id, version, name, description,
-          prompt, extraction_schema, version_sources,
-          json_template, keying_config, classifiers,
-          condensation_prompt, condensation_window_count,
-          reactions_guidance, change_notes, created_by, created_at
-        ) VALUES (
-          ${newVersionId}, ${watcherId}, 1, ${watcherName}, ${version.description ?? null},
-          ${version.prompt}, ${toJsonParam(tx, version.extraction_schema)}, ${toJsonParam(tx, sources)},
-          ${toJsonParam(tx, version.json_template)}, ${toJsonParam(tx, version.keying_config)},
-          ${toJsonParam(tx, version.classifiers)},
-          ${version.condensation_prompt ?? null}, ${version.condensation_window_count ?? null},
-          ${version.reactions_guidance ?? null}, ${'Created from version ' + args.version_id},
-          ${createdBy}, NOW()
-        )
-      `;
-
-      await tx`UPDATE watchers SET current_version_id = ${newVersionId} WHERE id = ${watcherId}`;
-    });
+    await sql`
+      INSERT INTO watchers (
+        id, name, slug, organization_id, entity_ids,
+        schedule, next_run_at, agent_id, scheduler_client_id, model_config, sources, version,
+        current_version_id, tags, status, created_by, created_at, updated_at,
+        watcher_group_id, source_watcher_id,
+        reaction_script, reaction_script_compiled
+      ) VALUES (
+        ${watcherId}, ${watcherName}, ${watcherSlug}, ${organizationId},
+        ${`{${entityId}}`}::bigint[],
+        ${version.schedule ?? null}, ${version.schedule ? nextRunAt(version.schedule as string) : null},
+        ${version.agent_id ?? null}, ${version.scheduler_client_id ?? null},
+        ${toJsonParam(sql, version.model_config)}, ${toJsonParam(sql, sources)},
+        ${(version.version as number) ?? 1}, ${sharedVersionId}, ${toTextArrayParam((version.tags as string[]) || [])}::text[],
+        'active', ${createdBy}, NOW(), NOW(),
+        ${groupId}, ${version.watcher_id},
+        ${(version.reaction_script as string | null) ?? null},
+        ${(version.reaction_script_compiled as string | null) ?? null}
+      )
+    `;
 
     created.push({ watcher_id: String(watcherId), entity_id: entityId, name: watcherName });
   }
@@ -1352,19 +1350,49 @@ async function handleCompleteWindow(
   // ============================================
   // STEP 2: Combined query - watcher + classifiers + template schema
   // ============================================
+  // Resolve the version this run was started against. The agent extracted
+  // data using that version's prompt/schema; we MUST validate against the
+  // same version even if the group has been edited mid-run.
+  //
+  // Resolution order:
+  //   1. explicit args.template_version_id (the agent passes this back)
+  //   2. runs.approved_input.version_id (snapshotted at run-creation)
+  //   3. watchers.current_version_id (fallback for callers outside a run)
+  //
+  // The run lookup is scoped by watcher_id so a wrong/stale watcher_run_id
+  // can't read another watcher's snapshot.
+  let snapshotVersionId: number | null =
+    typeof args.template_version_id === 'number' ? args.template_version_id : null;
+  if (snapshotVersionId == null && watcherRunId != null) {
+    const runRows = await sql`
+      SELECT (approved_input->>'version_id')::bigint AS version_id
+      FROM runs
+      WHERE id = ${watcherRunId} AND watcher_id = ${watcherId}
+      LIMIT 1
+    `;
+    if (runRows.length > 0 && runRows[0].version_id != null) {
+      snapshotVersionId = Number(runRows[0].version_id);
+    }
+  }
+
+  // The version row must belong to this watcher's group — prevents pinning
+  // to another group's version via a forged template_version_id arg.
   const watcherRows = await sql`
     SELECT
       i.id,
       i.schedule,
       i.entity_ids,
       i.organization_id,
+      wv.id as version_id,
       wv.prompt as prompt,
       wv.extraction_schema as extraction_schema,
       wv.version_sources as version_sources,
       wv.classifiers as classifiers,
       wv.keying_config
     FROM watchers i
-    LEFT JOIN watcher_versions wv ON i.current_version_id = wv.id
+    LEFT JOIN watcher_versions wv
+      ON wv.id = COALESCE(${snapshotVersionId}::bigint, i.current_version_id)
+     AND wv.watcher_id = i.watcher_group_id
     WHERE i.id = ${watcherId}
     LIMIT 1
   `;
@@ -1397,6 +1425,8 @@ async function handleCompleteWindow(
     extraction_config: r.extraction_config as any,
   }));
 
+  const resolvedVersionId =
+    watcherRows[0].version_id != null ? Number(watcherRows[0].version_id) : null;
   const templateData = {
     prompt: watcherRows[0].prompt ?? undefined,
     extraction_schema: parseJson(watcherRows[0].extraction_schema) ?? undefined,
@@ -1459,11 +1489,11 @@ async function handleCompleteWindow(
     const sourceIds = tokenSourceWindowIds.map(Number);
     await sql`
       INSERT INTO watcher_windows (
-        id, watcher_id, window_start, window_end, granularity,
+        id, watcher_id, version_id, window_start, window_end, granularity,
         extracted_data, content_analyzed, model_used, client_id, run_metadata,
         is_rollup, depth, source_window_ids, run_id, created_at
       ) VALUES (
-        ${newWindowId}, ${watcherId}, ${window_start}, ${window_end}, ${granularity || timeGranularity},
+        ${newWindowId}, ${watcherId}, ${resolvedVersionId}, ${window_start}, ${window_end}, ${granularity || timeGranularity},
         ${sql.json(extractedData)}, 0, ${provenanceModel}, ${provenanceClientId}, ${sql.json(provenanceMetadata)},
         true, ${depth}, ${sourceIds}, ${watcherRunId}, NOW()
       )
@@ -1643,11 +1673,11 @@ async function handleCompleteWindow(
           await tx`
             INSERT INTO watcher_windows (
               id,
-              watcher_id, window_start, window_end, granularity,
+              watcher_id, version_id, window_start, window_end, granularity,
               extracted_data, content_analyzed, model_used, client_id, run_metadata, run_id, created_at
             ) VALUES (
               ${newWindowId},
-              ${watcherId}, ${window_start}, ${window_end}, ${timeGranularity},
+              ${watcherId}, ${resolvedVersionId}, ${window_start}, ${window_end}, ${timeGranularity},
               ${sql.json(cleanedExtractedData)}, ${uniqueContentIds.length}, ${provenanceModel}, ${provenanceClientId}, ${sql.json(provenanceMetadata)}, ${watcherRunId}, NOW()
             )
           `;
@@ -1709,6 +1739,9 @@ async function handleCompleteWindow(
 
     let runMarkedCompleted = false;
     if (watcherRunId && Number.isFinite(watcherRunId)) {
+      // Scope by watcher_id so a wrong/stale watcher_run_id (passed in
+      // run_metadata) cannot mark another watcher's run completed against
+      // this watcher's window.
       const completedRows = await tx`
         UPDATE runs
         SET status = 'completed',
@@ -1716,6 +1749,7 @@ async function handleCompleteWindow(
             completed_at = current_timestamp,
             error_message = NULL
         WHERE id = ${watcherRunId}
+          AND watcher_id = ${watcherId}
           AND run_type = 'watcher'
           AND status IN ('running', 'claimed')
         RETURNING id
@@ -1939,13 +1973,21 @@ async function handleSetReactionScript(
 
   await requireExists(sql, 'watchers', args.watcher_id, 'Watcher');
 
+  // Reaction script is a group-shared field — every assignment in the
+  // group runs the same reactions on its windows. Resolve the group once
+  // and cascade across all assignments so we don't silently fork.
+  const groupRows = await sql`
+    SELECT watcher_group_id FROM watchers WHERE id = ${args.watcher_id} LIMIT 1
+  `;
+  const groupId = Number(groupRows[0].watcher_group_id);
+
   const script = args.reaction_script;
 
   if (!script || script.trim() === '') {
     await sql`
       UPDATE watchers
       SET reaction_script = NULL, reaction_script_compiled = NULL
-      WHERE id = ${args.watcher_id}
+      WHERE watcher_group_id = ${groupId}
     `;
     return {
       action: 'set_reaction_script',
@@ -1960,7 +2002,7 @@ async function handleSetReactionScript(
   await sql`
     UPDATE watchers
     SET reaction_script = ${script}, reaction_script_compiled = ${compiledCode}
-    WHERE id = ${args.watcher_id}
+    WHERE watcher_group_id = ${groupId}
   `;
 
   logger.info(`[manage_watchers] Set reaction script for watcher ${args.watcher_id}`);
@@ -2230,30 +2272,40 @@ async function handleCreateVersion(
     throw new Error('watcher_id is required for create_version action');
   }
 
-  // Get current watcher + latest version
+  // Get current watcher + resolve the group root. Versioned config
+  // (prompt/schema/template/classifiers) is shared across the entire group
+  // and version rows live on the group root, so we read from and write to
+  // `watcher_id = watcher_group_id`. The arg's watcher_id is only used to
+  // identify the group and to apply the per-assignment writes (sources,
+  // schedule, scheduler_client_id) to that specific row.
   const watcherRows = await sql`
-    SELECT i.id, i.version, i.current_version_id
+    SELECT i.id, i.version, i.current_version_id, i.watcher_group_id, i.sources
     FROM watchers i WHERE i.id = ${args.watcher_id}
   `;
   if (watcherRows.length === 0) {
     throw new Error(`Watcher ${args.watcher_id} not found`);
   }
 
+  const groupId = Number(watcherRows[0].watcher_group_id);
   const previousVersion = Number(watcherRows[0].version);
   const nextVersion = previousVersion + 1;
 
-  // Load current version to inherit fields not specified
+  // Load current version (from the group root's chain) to inherit fields
+  // the caller didn't specify.
   const prevRows = await sql`
     SELECT
       name, description, prompt, extraction_schema, version_sources,
       json_template, keying_config, classifiers,
       reactions_guidance, condensation_prompt, condensation_window_count
     FROM watcher_versions
-    WHERE watcher_id = ${args.watcher_id}
+    WHERE watcher_id = ${groupId}
     ORDER BY version DESC LIMIT 1
   `;
   if (prevRows.length === 0) {
-    throw new Error(`No previous version found for watcher ${args.watcher_id}`);
+    throw new Error(
+      `No previous version found for watcher group ${groupId}. ` +
+        'This group is missing version rows on its root — likely a stale clone from before the version-sharing refactor. Run cleanup or create a fresh watcher.'
+    );
   }
   const prev = prevRows[0] as Record<string, unknown>;
 
@@ -2261,9 +2313,16 @@ async function handleCreateVersion(
   const extractionSchema =
     parseJsonInput<Record<string, unknown>>(args.extraction_schema, 'extraction_schema') ??
     normalizeStoredJsonField(prev.extraction_schema, {} as Record<string, unknown>);
+  // Sources are per-assignment now. When the caller omits args.sources we
+  // keep the seed watcher's existing sources; we deliberately do not fall
+  // back to prev.version_sources from the prior version row, because
+  // version_sources is no longer written and is a vestigial column.
   const sources =
     args.sources ??
-    normalizeStoredJsonField(prev.version_sources, [] as Array<{ name: string; query: string }>);
+    normalizeStoredJsonField(
+      watcherRows[0].sources,
+      [] as Array<{ name: string; query: string }>
+    );
   const jsonTemplate =
     parseJsonInput<unknown>(args.json_template, 'json_template') ??
     normalizeStoredJsonField(prev.json_template, undefined as unknown);
@@ -2304,7 +2363,32 @@ async function handleCreateVersion(
 
   const createdBy = ctx.userId ?? 'system';
   const versionId = await getNextWatcherVersionId(sql);
+  let lockedNextVersion = nextVersion;
   await sql.begin(async (tx) => {
+    // Serialize concurrent create_version calls on the same group. The
+    // unique (watcher_id, version) index would otherwise reject one of two
+    // simultaneous N+1 inserts and surface as a 500. The advisory lock is
+    // tx-scoped (auto-released on commit/rollback) and keyed by group id,
+    // so unrelated groups are unaffected.
+    await tx`SELECT pg_advisory_xact_lock(hashtext('watcher_create_version'), ${groupId})`;
+
+    // Re-resolve the latest version under the lock so we don't race with a
+    // call that already committed N+1 while we were computing nextVersion.
+    const latestRows = await tx`
+      SELECT MAX(version) AS v FROM watcher_versions WHERE watcher_id = ${groupId}
+    `;
+    lockedNextVersion =
+      latestRows.length > 0 && latestRows[0].v != null ? Number(latestRows[0].v) + 1 : nextVersion;
+
+    // The new version row is owned by the group root, not the assignment
+    // the caller named. Every watcher in the group will later point at
+    // this row via current_version_id.
+    // version_sources is intentionally NULL on the new version row: sources
+    // are per-assignment now, so storing one assignment's sources in the
+    // shared version row would let one assignment's source list override
+    // every other assignment's sources via get_content's preference order.
+    // get_content falls through to watchers.sources when version_sources is
+    // empty, which is the right per-assignment behavior.
     await tx`
       INSERT INTO watcher_versions (
         id, watcher_id, version, name, description,
@@ -2313,10 +2397,10 @@ async function handleCreateVersion(
         condensation_prompt, condensation_window_count,
         reactions_guidance, change_notes, created_by, created_at
       ) VALUES (
-        ${versionId}, ${args.watcher_id}, ${nextVersion},
+        ${versionId}, ${groupId}, ${lockedNextVersion},
         ${args.name ?? (prev.name as string) ?? 'Watcher'},
         ${args.description !== undefined ? (args.description ?? null) : ((prev.description as string) ?? null)},
-        ${prompt}, ${toJsonParam(tx, extractionSchema)}, ${toJsonParam(tx, sources)},
+        ${prompt}, ${toJsonParam(tx, extractionSchema)}, NULL,
         ${toJsonParam(tx, jsonTemplate)}, ${toJsonParam(tx, keyingConfig)}, ${toJsonParam(tx, classifiers)},
         ${args.condensation_prompt ?? (prev.condensation_prompt as string) ?? null},
         ${args.condensation_window_count ?? (prev.condensation_window_count as number) ?? null},
@@ -2325,25 +2409,35 @@ async function handleCreateVersion(
       )
     `;
 
-    // Update watcher to new version if set_as_current (default: true)
-    // Also applies any watcher-level field changes atomically.
+    // Update watcher to new version if set_as_current (default: true).
+    // Group-shared fields (current_version_id, version, name) cascade to
+    // every watcher in the group; per-assignment fields (sources,
+    // schedule, scheduler_client_id) update only the targeted row.
     const setAsCurrent = args.set_as_current !== false;
     if (setAsCurrent) {
       const shouldUpdateSchedule = args.schedule !== undefined;
       const scheduleValue = shouldUpdateSchedule ? args.schedule || null : null;
       const nextRunAtVal = scheduleValue ? nextRunAt(scheduleValue) : null;
 
+      // Group-shared cascade
       await tx`
         UPDATE watchers
         SET
           current_version_id = ${versionId},
-          version = ${nextVersion},
+          version = ${lockedNextVersion},
           name = ${args.name ?? (prev.name as string)},
+          updated_at = NOW()
+        WHERE watcher_group_id = ${groupId}
+      `;
+
+      // Per-assignment writes (only the row the caller named)
+      await tx`
+        UPDATE watchers
+        SET
           sources = ${tx.json(sources)},
           scheduler_client_id = CASE WHEN ${args.scheduler_client_id !== undefined} THEN ${args.scheduler_client_id ?? null} ELSE scheduler_client_id END,
           schedule = CASE WHEN ${shouldUpdateSchedule} THEN ${scheduleValue} ELSE schedule END,
-          next_run_at = CASE WHEN ${shouldUpdateSchedule} THEN ${nextRunAtVal}::timestamptz ELSE next_run_at END,
-          updated_at = NOW()
+          next_run_at = CASE WHEN ${shouldUpdateSchedule} THEN ${nextRunAtVal}::timestamptz ELSE next_run_at END
         WHERE id = ${args.watcher_id}
       `;
     }
@@ -2353,7 +2447,7 @@ async function handleCreateVersion(
     action: 'create_version',
     watcher_id: args.watcher_id,
     version_id: String(versionId),
-    version: nextVersion,
+    version: lockedNextVersion,
     previous_version: previousVersion,
   };
 }
