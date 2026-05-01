@@ -1,0 +1,107 @@
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  spyOn,
+  test,
+} from "bun:test";
+import * as fs from "node:fs/promises";
+import {
+  DEFAULT_CONTEXT_NAME,
+  findContextByMemoryUrl,
+  findContextByUrl,
+  getActiveOrg,
+  loadContextConfig,
+  setActiveOrg,
+} from "../context";
+
+describe("context management", () => {
+  let readFileSpy: ReturnType<typeof spyOn<typeof fs, "readFile">>;
+  let writeFileSpy: ReturnType<typeof spyOn<typeof fs, "writeFile">>;
+
+  beforeEach(() => {
+    delete process.env.LOBU_CONTEXT;
+    delete process.env.LOBU_ORG;
+    delete process.env.LOBU_API_URL;
+    delete process.env.LOBU_MEMORY_URL;
+
+    readFileSpy = spyOn(fs, "readFile");
+    writeFileSpy = spyOn(fs, "writeFile").mockResolvedValue(undefined);
+    spyOn(fs, "mkdir").mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    mock.restore();
+  });
+
+  test("loadContextConfig handles missing file", async () => {
+    readFileSpy.mockRejectedValue(new Error("File not found"));
+
+    const config = await loadContextConfig();
+
+    expect(config.currentContext).toBe(DEFAULT_CONTEXT_NAME);
+    expect(config.contexts[DEFAULT_CONTEXT_NAME]).toBeDefined();
+  });
+
+  test("stores and reads the active org per context", async () => {
+    const configData = {
+      currentContext: "prod",
+      contexts: {
+        lobu: {
+          apiUrl: "https://app.lobu.ai/api/v1",
+          activeOrg: "default-org",
+        },
+        prod: { apiUrl: "https://prod.lobu.ai/api/v1", activeOrg: "prod-org" },
+      },
+    };
+    readFileSpy.mockResolvedValue(JSON.stringify(configData));
+
+    expect(await getActiveOrg("lobu")).toBe("default-org");
+    expect(await getActiveOrg("prod")).toBe("prod-org");
+    expect(await getActiveOrg()).toBe("prod-org");
+
+    await setActiveOrg("new-org", "lobu");
+    const [, written] = writeFileSpy.mock.calls[0]!;
+    const saved = JSON.parse(written as string) as typeof configData;
+    expect(saved.contexts.lobu.activeOrg).toBe("new-org");
+    expect(saved.contexts.prod.activeOrg).toBe("prod-org");
+  });
+
+  test("finds contexts by normalized API URL", async () => {
+    const configData = {
+      currentContext: "lobu",
+      contexts: {
+        lobu: { apiUrl: "https://app.lobu.ai/api/v1" },
+        custom: { apiUrl: "https://custom.lobu.ai/api/v1" },
+      },
+    };
+    readFileSpy.mockResolvedValue(JSON.stringify(configData));
+
+    const matched = await findContextByUrl("https://custom.lobu.ai/api/v1/");
+    expect(matched?.name).toBe("custom");
+    expect(matched?.apiUrl).toBe("https://custom.lobu.ai/api/v1");
+
+    const none = await findContextByUrl("https://unknown.ai");
+    expect(none).toBeUndefined();
+  });
+
+  test("finds contexts by normalized memory URL", async () => {
+    const configData = {
+      currentContext: "lobu",
+      contexts: {
+        lobu: { apiUrl: "https://app.lobu.ai/api/v1" },
+        local: {
+          apiUrl: "http://localhost:8787/api/v1",
+          memoryUrl: "http://localhost:8787/mcp/acme",
+        },
+      },
+    };
+    readFileSpy.mockResolvedValue(JSON.stringify(configData));
+
+    const matched = await findContextByMemoryUrl("http://localhost:8787/mcp");
+
+    expect(matched?.name).toBe("local");
+  });
+});

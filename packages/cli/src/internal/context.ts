@@ -8,8 +8,12 @@ const DEFAULT_API_URL = "https://app.lobu.ai/api/v1";
 
 const CONTEXTS_FILE = join(LOBU_CONFIG_DIR, "config.json");
 
+export const DEFAULT_MEMORY_URL = "https://lobu.ai/mcp";
+
 interface LobuContextEntry {
   apiUrl: string;
+  activeOrg?: string;
+  memoryUrl?: string;
 }
 
 interface LobuContextConfig {
@@ -17,7 +21,7 @@ interface LobuContextConfig {
   contexts: Record<string, LobuContextEntry>;
 }
 
-interface ResolvedContext {
+export interface ResolvedContext {
   name: string;
   apiUrl: string;
   source: "default" | "config" | "env";
@@ -53,6 +57,75 @@ export async function getCurrentContextName(): Promise<string> {
 
   const config = await loadContextConfig();
   return config.currentContext;
+}
+
+export async function getActiveOrg(
+  contextName?: string
+): Promise<string | undefined> {
+  const envOrg = process.env.LOBU_ORG?.trim();
+  if (envOrg) return envOrg;
+
+  const config = await loadContextConfig();
+  const name = contextName || config.currentContext;
+  return config.contexts[name]?.activeOrg;
+}
+
+export async function getMemoryUrl(contextName?: string): Promise<string> {
+  const envUrl = process.env.LOBU_MEMORY_URL?.trim();
+  if (envUrl) return normalizeApiUrl(envUrl);
+
+  const config = await loadContextConfig();
+  const name = contextName || config.currentContext;
+  return normalizeApiUrl(
+    config.contexts[name]?.memoryUrl || DEFAULT_MEMORY_URL
+  );
+}
+
+export async function setActiveOrg(
+  orgSlug: string,
+  contextName?: string
+): Promise<LobuContextConfig> {
+  const trimmed = orgSlug.trim();
+  if (!trimmed) {
+    throw new Error("Organization slug cannot be empty.");
+  }
+  if (!/^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$/.test(trimmed)) {
+    throw new Error(
+      `Invalid organization slug "${orgSlug}". Slugs may only contain alphanumeric characters, hyphens, and underscores.`
+    );
+  }
+
+  const config = await loadContextConfig();
+  const name = contextName || config.currentContext;
+  const context = config.contexts[name];
+  if (!context) {
+    throw new Error(`Unknown context "${name}".`);
+  }
+
+  context.activeOrg = trimmed;
+  await saveContextConfig(config);
+  return config;
+}
+
+export async function setMemoryUrl(
+  memoryUrl: string,
+  contextName?: string
+): Promise<LobuContextConfig> {
+  const trimmed = memoryUrl.trim();
+  if (!trimmed) {
+    throw new Error("Memory URL cannot be empty.");
+  }
+
+  const config = await loadContextConfig();
+  const name = contextName || config.currentContext;
+  const context = config.contexts[name];
+  if (!context) {
+    throw new Error(`Unknown context "${name}".`);
+  }
+
+  context.memoryUrl = normalizeAndValidateApiUrl(trimmed);
+  await saveContextConfig(config);
+  return config;
 }
 
 export async function resolveContext(
@@ -132,7 +205,17 @@ function normalizeContextConfig(raw: StoredContextConfig): LobuContextConfig {
     if (!value || typeof value.apiUrl !== "string") {
       continue;
     }
-    contexts[name] = { apiUrl: normalizeApiUrl(value.apiUrl) };
+    contexts[name] = {
+      apiUrl: normalizeApiUrl(value.apiUrl),
+      activeOrg:
+        typeof value.activeOrg === "string"
+          ? value.activeOrg.trim()
+          : undefined,
+      memoryUrl:
+        typeof value.memoryUrl === "string"
+          ? value.memoryUrl.trim()
+          : undefined,
+    };
   }
 
   const currentContext =
@@ -140,7 +223,10 @@ function normalizeContextConfig(raw: StoredContextConfig): LobuContextConfig {
       ? raw.currentContext
       : DEFAULT_CONTEXT_NAME;
 
-  return { currentContext, contexts };
+  return {
+    currentContext,
+    contexts,
+  };
 }
 
 function normalizeAndValidateApiUrl(apiUrl: string): string {
@@ -167,4 +253,65 @@ function normalizeApiUrl(url: string): string {
     end--;
   }
   return end === url.length ? url : url.slice(0, end);
+}
+
+export async function findContextByUrl(
+  apiUrl: string
+): Promise<ResolvedContext | undefined> {
+  const config = await loadContextConfig();
+  const normalizedSearch = normalizeApiUrl(apiUrl);
+
+  for (const [name, context] of Object.entries(config.contexts)) {
+    if (normalizeApiUrl(context.apiUrl) === normalizedSearch) {
+      return contextToResolvedContext(name, context);
+    }
+  }
+
+  return undefined;
+}
+
+export async function findContextByMemoryUrl(
+  memoryUrl: string
+): Promise<ResolvedContext | undefined> {
+  const config = await loadContextConfig();
+  const normalizedSearch = normalizeMemoryBaseUrl(memoryUrl);
+
+  for (const [name, context] of Object.entries(config.contexts)) {
+    const candidate = normalizeMemoryBaseUrl(
+      context.memoryUrl || DEFAULT_MEMORY_URL
+    );
+    if (candidate === normalizedSearch) {
+      return contextToResolvedContext(name, context);
+    }
+  }
+
+  return undefined;
+}
+
+function contextToResolvedContext(
+  name: string,
+  context: LobuContextEntry
+): ResolvedContext {
+  return {
+    name,
+    apiUrl: normalizeApiUrl(context.apiUrl),
+    source: name === DEFAULT_CONTEXT_NAME ? "default" : "config",
+  };
+}
+
+function normalizeMemoryBaseUrl(input: string): string {
+  try {
+    const url = new URL(input);
+    url.hash = "";
+    url.search = "";
+    if (!url.pathname || url.pathname === "/") {
+      url.pathname = "/mcp";
+    } else if (!url.pathname.startsWith("/mcp")) {
+      url.pathname = `${url.pathname.replace(/\/+$/, "")}/mcp`;
+    }
+    url.pathname = "/mcp";
+    return url.toString().replace(/\/+$/, "");
+  } catch {
+    return normalizeApiUrl(input);
+  }
 }
