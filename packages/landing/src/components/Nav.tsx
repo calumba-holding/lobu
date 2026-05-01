@@ -158,11 +158,12 @@ function MegaMenuPanel({
       onMouseLeave={onMouseLeave}
     >
       <div
-        class="rounded-2xl bg-white p-4 grid gap-x-6 gap-y-2"
+        class="rounded-2xl p-4 grid gap-x-6 gap-y-2"
         style={{
           gridTemplateColumns: `repeat(${menu.columns.length}, minmax(0, 1fr))`,
+          background: "var(--color-page-surface)",
           border: "1px solid var(--color-page-border)",
-          boxShadow: "0 12px 32px rgba(0,0,0,0.08), 0 2px 6px rgba(0,0,0,0.04)",
+          boxShadow: "var(--color-page-shadow-md)",
         }}
       >
         {menu.columns.map((col) => (
@@ -388,7 +389,10 @@ export function Nav({
             <a
               href={startUrl}
               class="inline-flex items-center text-[14px] font-medium px-4 h-9 rounded-full transition-opacity hover:opacity-90"
-              style={{ background: "#0b0b0d", color: "#ffffff" }}
+              style={{
+                background: "var(--color-page-bg-inverted)",
+                color: "var(--color-page-text-inverted)",
+              }}
             >
               Start for free
             </a>
